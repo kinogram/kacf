@@ -12,11 +12,16 @@ use std::path::PathBuf;
 use std::env;
 
 fn main() -> eframe::Result<()> {
-    // Determine mode based on command line arguments. If "--web" is present,
+    // Determine mode based on command line arguments and environment. If "--web" is
+    // present or we detect no graphical display (no DISPLAY/WAYLAND env vars),
     // run the HTTP server instead of the native GUI. This allows usage in
     // headless environments (e.g. Termux) where a GUI is unavailable.
     let args: Vec<String> = env::args().collect();
-    if args.iter().any(|a| a == "--web") {
+    let use_web_cli = args.iter().any(|a| a == "--web");
+    let headless_env = std::env::var_os("DISPLAY").is_none()
+        && std::env::var_os("WAYLAND_DISPLAY").is_none()
+        && std::env::var_os("WAYLAND_SOCKET").is_none();
+    if use_web_cli || headless_env {
         // Set up channels for communicating with the agent loop
         let (tx_req, rx_req) = unbounded::<AgentRequest>();
         let (tx_evt, rx_evt) = unbounded::<AgentEvent>();
@@ -72,6 +77,11 @@ struct App {
     /// When true, a patch has been proposed and is awaiting user decision.
     awaiting_patch: bool,
 
+    /// Whether custom fonts have been configured on the egui context. We set
+    /// this flag after calling `configure_fonts()` in `update()` to avoid
+    /// reconfiguring fonts on every frame.
+    fonts_configured: bool,
+
     // Communication channels to/from the agent thread
     tx_req: Sender<AgentRequest>,
     rx_evt: Receiver<AgentEvent>,
@@ -107,6 +117,7 @@ impl App {
             log: String::new(),
             last_diff: None,
             awaiting_patch: false,
+            fonts_configured: false,
 
             tx_req,
             rx_evt,
@@ -125,6 +136,35 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Configure custom fonts that support Chinese characters on first update.
+        // egui's default font set may not include glyphs for CJK languages, which
+        // results in missing glyphs rendered as empty squares. We embed a
+        // Noto Sans CJK font and insert it as the highest priority font for
+        // proportional and monospace families. The font file is located in
+        // `fonts/NotoSansCJK-Regular.ttc` and embedded using include_bytes!.
+        if !self.fonts_configured {
+            let mut fonts = egui::FontDefinitions::default();
+            // Insert our CJK font data. The key "noto_cjk" is arbitrary but
+            // must be referenced in the families below.
+            fonts.font_data.insert(
+                "noto_cjk".to_owned(),
+                egui::FontData::from_static(include_bytes!("../fonts/NotoSansCJK-Regular.ttc")),
+            );
+            // Prepend the CJK font to the proportional and monospace font families
+            // so that its glyphs are used for characters missing in the default fonts.
+            fonts
+                .families
+                .entry(egui::FontFamily::Proportional)
+                .or_default()
+                .insert(0, "noto_cjk".to_owned());
+            fonts
+                .families
+                .entry(egui::FontFamily::Monospace)
+                .or_default()
+                .insert(0, "noto_cjk".to_owned());
+            ctx.set_fonts(fonts);
+            self.fonts_configured = true;
+        }
         // Poll events from the agent and update UI state accordingly.
         while let Ok(evt) = self.rx_evt.try_recv() {
             match evt {

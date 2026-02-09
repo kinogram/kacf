@@ -13,6 +13,13 @@ use crossbeam_channel::{Receiver, Sender};
 
 use crate::protocol::{AgentEvent, AgentRequest, ClarifyAnswer, ClarifyQuestion};
 
+/// Index HTML page embedded at compile time. This static page provides a
+/// simple browser-based interface for starting a session, viewing logs and
+/// diffs, answering clarification questions, and controlling patch decisions
+/// and rollback. The HTML file lives under `static/index.html` and is
+/// included at compile time via `include_str!`.
+const INDEX_HTML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/index.html"));
+
 /// Shared state between HTTP handlers. Holds channels to the agent and
 /// a buffer of events to deliver to clients. Events are assigned
 /// monotonically increasing IDs so clients can poll only new events.
@@ -147,6 +154,15 @@ async fn get_events(data: web::Data<AppState>, query: web::Query<std::collection
     HttpResponse::Ok().json(list)
 }
 
+/// Serve the static index page for the root path. This handler returns
+/// a simple HTML page that implements a small front-end using plain
+/// JavaScript to interact with the REST API exposed by this server.
+async fn index_page() -> impl Responder {
+    HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(INDEX_HTML)
+}
+
 /// Background worker to pull events from agent and store them with IDs.
 fn spawn_event_collector(state: AppState) {
     std::thread::spawn(move || {
@@ -174,6 +190,7 @@ pub async fn run_web_server(tx_req: Sender<AgentRequest>, rx_evt: Receiver<Agent
     HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(state.clone()))
+            .route("/", web::get().to(index_page))
             .route("/start", web::post().to(start_session))
             .route("/clarify", web::post().to(answer_clarify))
             .route("/decision", web::post().to(patch_decision))

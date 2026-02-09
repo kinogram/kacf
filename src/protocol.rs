@@ -106,6 +106,10 @@ pub struct FileWrite {
 /// resulting project. It sends events back to the UI to update state.
 pub async fn agent_loop(rx_req: Receiver<AgentRequest>, tx_evt: Sender<AgentEvent>) {
     // Session state
+    // stop_flag is passed by mutable reference into run_session so that a Stop
+    // request from the UI can interrupt the session. It is also read at the
+    // end of this function to avoid compiler warnings about unused
+    // assignments.
     let mut stop_flag = false;
     let mut cfg: Option<SessionCfg> = None;
     let mut clarify_answers: Vec<ClarifyAnswer> = vec![];
@@ -170,6 +174,10 @@ pub async fn agent_loop(rx_req: Receiver<AgentRequest>, tx_evt: Sender<AgentEven
             Err(_) => break,
         }
     }
+
+    // Read stop_flag to avoid unused assignment warnings. This has no
+    // functional effect but ensures the compiler treats the variable as used.
+    let _ = stop_flag;
 }
 
 #[derive(Clone)]
