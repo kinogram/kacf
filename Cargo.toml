@@ -22,4 +22,4 @@ actix-web = { version = "4", features = ["macros"] }
 clap = { version = "4.3", features = ["derive"] }
 enigo = "0.1.1"
 image = { version = "0.24", features = ["png"] }
-screenshot = "0.7"
+screenshot = "0.0.7"
