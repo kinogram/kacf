@@ -1,0 +1,15 @@
+target/
+Cargo.lock
+.rustup/
+.cargo/
+.vscode/
+.idea/
+*.rs.bk
+*.dSYM/
+*.swp
+*.profraw
+*.profdata
+.DS_Store
+Thumbs.db
+*~
+
