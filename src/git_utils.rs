@@ -124,3 +124,42 @@ pub fn diff_last_commit(workspace: &Path) -> Result<String> {
     let diff = String::from_utf8_lossy(&output.stdout).into_owned();
     Ok(diff)
 }
+
+/// Add a remote to the git repository. If the remote already exists,
+/// this will update its URL. `name` is typically "origin" and `url`
+/// should be a full Git URL (e.g. https://token@github.com/user/repo.git). If
+/// git is not available or the command fails, an error is returned.
+pub fn add_remote(workspace: &Path, name: &str, url: &str) -> Result<()> {
+    // First try to set the remote; if it fails because the remote doesn't
+    // exist, fall back to adding it.
+    let status = Command::new("git")
+        .args(&["remote", "set-url", name, url])
+        .current_dir(workspace)
+        .status()
+        .with_context(|| "failed to run git remote set-url")?;
+    if !status.success() {
+        let status = Command::new("git")
+            .args(&["remote", "add", name, url])
+            .current_dir(workspace)
+            .status()
+            .with_context(|| "failed to run git remote add")?;
+        let _ = status;
+    }
+    Ok(())
+}
+
+/// Push commits to a remote branch. `remote` is the remote name (e.g. "origin"),
+/// and `branch` is the branch to push. This function runs `git push` with
+/// `--set-upstream` so that future pushes only need `git push`. Errors during
+/// execution are propagated.
+pub fn push(workspace: &Path, remote: &str, branch: &str) -> Result<()> {
+    let status = Command::new("git")
+        .args(&["push", "--set-upstream", remote, branch])
+        .current_dir(workspace)
+        .status()
+        .with_context(|| "failed to run git push")?;
+    if !status.success() {
+        return Err(anyhow!("git push failed"));
+    }
+    Ok(())
+}

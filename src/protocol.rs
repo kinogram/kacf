@@ -1,9 +1,11 @@
 use anyhow::{anyhow, Context, Result};
+use anyhow::Error;
 use crossbeam_channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 use crate::{deepseek_api, runner, workspace, git_utils};
+use std::fs;
 
 /// Messages sent from the UI thread to the agent thread.
 #[derive(Debug)]
@@ -28,6 +30,10 @@ pub enum AgentRequest {
     /// sends a Diff event, the UI must send this to indicate whether to
     /// accept (`accept=true`) or reject (`accept=false`) the patch.
     ApplyPatch { accept: bool },
+    /// Push the current git branch to a remote. Contains the remote name,
+    /// remote URL, and the branch name. The agent will add or update the
+    /// remote and then push the branch. Errors will be logged via events.
+    PushRemote { remote: String, url: String, branch: String },
 }
 
 /// Messages sent from the agent thread back to the UI.
@@ -171,6 +177,28 @@ pub async fn agent_loop(rx_req: Receiver<AgentRequest>, tx_evt: Sender<AgentEven
             Ok(AgentRequest::ApplyPatch { .. }) => {
                 // Patch decisions are handled within run_session. No action needed here.
             }
+            Ok(AgentRequest::PushRemote { remote, url, branch }) => {
+                // When receiving a push request, attempt to add/update the remote and push the branch.
+                if let Some(ref cfg) = cfg {
+                    let res: Result<(), Error> = (|| {
+                        git_utils::add_remote(&cfg.workspace, &remote, &url)?;
+                        git_utils::push(&cfg.workspace, &remote, &branch)?;
+                        Ok(())
+                    })();
+                    match res {
+                        Ok(_) => {
+                            let _ = tx_evt.send(AgentEvent::Log(format!(
+                                "[Agent] 已推送到远程 {} 的 {} 分支", remote, branch
+                            )));
+                        }
+                        Err(e) => {
+                            let _ = tx_evt.send(AgentEvent::Log(format!(
+                                "[Agent] 推送远程失败: {:#}", e
+                            )));
+                        }
+                    }
+                }
+            }
             Err(_) => break,
         }
     }
@@ -191,6 +219,21 @@ struct SessionCfg {
     success_regex: String,
 }
 
+/// Persisted session state for resuming an interrupted coding session. This
+/// state is saved to a JSON file in the workspace directory after each
+/// iteration. When starting a new session, if a matching state file is
+/// present and its `goal` matches the current goal, the message history
+/// stored here will be loaded so that the agent can resume conversations
+/// with the model from the previous state. Only the message history and
+/// goal are persisted; other runtime state (e.g. clarify answers) is
+/// reconstructed at runtime.
+#[derive(Serialize, Deserialize)]
+struct SessionState {
+    goal: String,
+    messages: Vec<deepseek_api::ChatMessage>,
+}
+
+
 /// The core loop for a single coding session. It communicates with the DeepSeek API
 /// to generate patches, applies them to the workspace, commits the changes,
 /// and evaluates the code. Iteration continues until success or a stop flag.
@@ -209,15 +252,26 @@ async fn run_session(
         cfg.workspace.display()
     )));
 
-    // Maintain a short conversation memory: system prompt plus previous
-    // interactions. Each iteration we append model and user messages.
-    let mut messages: Vec<deepseek_api::ChatMessage> = vec![];
-    messages.push(deepseek_api::ChatMessage::system(system_prompt()));
-    // Ask for clarification on the goal before generating any code.
-    messages.push(deepseek_api::ChatMessage::user(format!(
-        "大需求如下：\n{}\n\n请先输出 JSON：{{\"kind\":\"clarify\", ...}}，提出你认为会影响实现的疑义/选项（尽量少但关键）。如果你认为无需澄清，也输出 kind=patch，直接给出最小可运行实现。",
-        cfg.goal
-    )));
+    // 尝试从工作目录加载先前保存的会话状态。如果存在且与当前目标一致，则继续该对话；否则开始新对话。
+    let mut messages: Vec<deepseek_api::ChatMessage>;
+    if let Some(state) = load_session_state(&cfg.workspace) {
+        if state.goal == cfg.goal {
+            messages = state.messages.clone();
+            let _ = tx_evt.send(AgentEvent::Log("[Agent] 已加载之前的会话状态，继续从断点开始...".into()));
+        } else {
+            messages = Vec::new();
+        }
+    } else {
+        messages = Vec::new();
+    }
+    // 如果没有历史消息，则初始化系统 prompt 和首条用户消息。
+    if messages.is_empty() {
+        messages.push(deepseek_api::ChatMessage::system(system_prompt()));
+        messages.push(deepseek_api::ChatMessage::user(format!(
+            "用户的需求如下：\n{}\n\n你需要作为自编程代理，根据该需求制定项目计划和目标，选择合适的技术栈并创建项目目录结构，编写代码，编译运行程序，分析并修复错误，如此往复循环，直至项目满足需求。为此，你应在项目目录中维护一个自动评测脚本（如 scripts/run_tests.sh），该脚本必须能够编译并运行程序、自动操作程序以执行必要的功能，并检测是否存在错误或未满足的目标。每次生成补丁后，你都需要更新这个评测脚本以反映新的需求。\n首先，请输出 JSON（kind=clarify 或 kind=patch）：如需澄清问题，请用 kind=clarify，并提出关键问题；如无需澄清，请用 kind=patch，并给出包含完整文件内容的补丁，补丁可以先生成项目计划、评测脚本或基本代码使项目能够编译运行。",
+            cfg.goal
+        )));
+    }
 
     'outer: for iter in 1..=30 {
         if *stop_flag {
@@ -296,6 +350,8 @@ async fn run_session(
                     "这是用户对澄清问题的回答(JSON)：\n{}\n\n现在请输出 kind=patch 的 JSON，给出最小可运行实现。要求：\n- 只输出 JSON（不要 markdown）\n- files 是完整文件内容（覆盖写）\n- 如果需要新文件，请直接提供。\n- 尽量小步提交，方便迭代。",
                     answers_json
                 )));
+                // Save session state after appending new messages so that we can resume later.
+                save_session_state(&cfg.workspace, &SessionState { goal: cfg.goal.clone(), messages: messages.clone() });
             }
             ModelJson::Patch { summary, files } => {
                 // 记录 patch 输出方便之后放入对话历史
@@ -326,74 +382,105 @@ async fn run_session(
                         let _ = tx_evt.send(AgentEvent::Log(format!("[Agent] diff failed: {e}")));
                     }
                 }
-                // 等待用户对该补丁的决策：接受或拒绝。
-                loop {
-                    if *stop_flag {
-                        return Ok(());
-                    }
-                    match rx_req.recv() {
-                        Ok(AgentRequest::ApplyPatch { accept }) => {
-                            if accept {
-                                // 用户接受补丁，继续评测
-                                let result = runner::run_eval(&cfg.workspace, &cfg.eval_cmd)?;
-                                let _ = tx_evt.send(AgentEvent::Log(format!(
-                                    "[Eval] exit={} \nstdout:\n{}\nstderr:\n{}",
-                                    result.exit_code,
-                                    truncate(&result.stdout, 2000),
-                                    truncate(&result.stderr, 2000)
-                                )));
-                                let ok = result.exit_code == 0
-                                    && (cfg.success_regex.trim().is_empty()
-                                        || runner::regex_match(&cfg.success_regex, &(result.stdout.clone() + "\n" + &result.stderr)));
-                                if ok {
-                                    let _ = tx_evt.send(AgentEvent::Done {
-                                        success: true,
-                                        message: "目标达成：评测命令成功".into(),
-                                    });
-                                    return Ok(());
-                                }
-                                // 模型需要修复：将日志反馈给模型
-                                messages.push(deepseek_api::ChatMessage::assistant(patch_content));
-                                messages.push(deepseek_api::ChatMessage::user(format!(
-                                    "本地评测失败。以下是执行日志，请你基于日志修复。\n\n命令：{}\nexit={}\n\nstdout:\n{}\n\nstderr:\n{}\n\n请继续输出 kind=patch JSON（只输出 JSON），用最小改动修复问题。",
-                                    cfg.eval_cmd,
-                                    result.exit_code,
-                                    truncate(&result.stdout, 8000),
-                                    truncate(&result.stderr, 8000)
-                                )));
-                                // 跳出等待循环进入下一轮迭代
-                                break;
-                            } else {
-                                // 用户拒绝补丁：回滚最后提交并告知模型
-                                let _ = git_utils::revert_last_commit(&cfg.workspace);
-                                let _ = tx_evt.send(AgentEvent::Log("[Agent] 用户拒绝补丁，已回滚".into()));
-                                // 将该补丁记入对话历史并指示模型重新生成
-                                messages.push(deepseek_api::ChatMessage::assistant(patch_content));
-                                messages.push(deepseek_api::ChatMessage::user("用户拒绝了此补丁，请根据需求重新生成新的 patch JSON。".to_string()));
-                                // 直接进入下一轮
-                                continue 'outer;
-                            }
-                        }
-                        Ok(AgentRequest::RevertLast) => {
-                            // 用户要求回滚：回滚并继续等待决定
-                            let _ = git_utils::revert_last_commit(&cfg.workspace);
-                            let _ = tx_evt.send(AgentEvent::Log("[Agent] 已回滚上一次提交".into()));
-                        }
-                        Ok(AgentRequest::Stop) => {
-                            *stop_flag = true;
+                // 自动评测补丁，无需用户确认。
+                let result = runner::run_eval(&cfg.workspace, &cfg.eval_cmd)?;
+                let _ = tx_evt.send(AgentEvent::Log(format!(
+                    "[Eval] exit={} \nstdout:\n{}\nstderr:\n{}",
+                    result.exit_code,
+                    truncate(&result.stdout, 2000),
+                    truncate(&result.stderr, 2000)
+                )));
+                let ok = result.exit_code == 0
+                    && (cfg.success_regex.trim().is_empty()
+                        || runner::regex_match(&cfg.success_regex, &(result.stdout.clone() + "\n" + &result.stderr)));
+                if ok {
+                    // 评测成功：询问用户是否满意，允许其提出改进意见。
+                    let feedback_question = ClarifyQuestion {
+                        id: "feedback".to_string(),
+                        question: "目标功能已实现，是否满意？如有改进意见请说明：".to_string(),
+                        qtype: "text".to_string(),
+                        options: vec![],
+                    };
+                    let _ = tx_evt.send(AgentEvent::NeedClarify {
+                        questions: vec![feedback_question],
+                    });
+                    // 等待用户反馈
+                    loop {
+                        if *stop_flag {
                             return Ok(());
                         }
-                        Ok(AgentRequest::Clarify { .. }) => {
-                            // 忽略 Clarify 消息：暂不适用
-                        }
-                        Err(_) | Ok(AgentRequest::Start { .. }) => {
-                            // 无视其他消息
+                        match rx_req.recv() {
+                            Ok(AgentRequest::Clarify { answers }) => {
+                                // 提取反馈文本（text 字段优先，其次 single，或空）
+                                let mut feedback = String::new();
+                                for ans in &answers {
+                                    if ans.id == "feedback" {
+                                        if !ans.text.is_empty() {
+                                            feedback = ans.text.clone();
+                                        } else if !ans.single.is_empty() {
+                                            feedback = ans.single.clone();
+                                        } else if !ans.multi.is_empty() {
+                                            feedback = ans.multi.join(", ");
+                                        }
+                                        break;
+                                    }
+                                }
+                                let trimmed = feedback.trim();
+                                // 如果用户表示满意（空或含满意字样），结束会话；否则作为改进建议继续迭代。
+                                if trimmed.is_empty() || trimmed.contains("满意") {
+                                    // 保存当前会话状态并结束。将来如果重新启动，用户需重新设定目标。
+                                    save_session_state(&cfg.workspace, &SessionState { goal: cfg.goal.clone(), messages: messages.clone() });
+                                    let _ = tx_evt.send(AgentEvent::Done {
+                                        success: true,
+                                        message: "用户满意，项目完成".into(),
+                                    });
+                                    return Ok(());
+                                } else {
+                                    // 将用户反馈添加到对话历史，要求模型根据反馈改进代码。
+                                    messages.push(deepseek_api::ChatMessage::assistant(patch_content.clone()));
+                                    messages.push(deepseek_api::ChatMessage::user(format!(
+                                        "用户反馈：{}。请根据反馈改进代码，生成新的 patch JSON（严格按照协议输出 JSON）。",
+                                        trimmed
+                                    )));
+                                    // 保存状态以便断点续跑
+                                    save_session_state(&cfg.workspace, &SessionState { goal: cfg.goal.clone(), messages: messages.clone() });
+                                    // 跳出等待，进入下一轮迭代
+                                    continue 'outer;
+                                }
+                            }
+                            Ok(AgentRequest::RevertLast) => {
+                                // 用户要求回滚：回滚最后提交并继续等待反馈
+                                let _ = git_utils::revert_last_commit(&cfg.workspace);
+                                let _ = tx_evt.send(AgentEvent::Log("[Agent] 已回滚上一次提交".into()));
+                            }
+                            Ok(AgentRequest::Stop) => {
+                                *stop_flag = true;
+                                return Ok(());
+                            }
+                            Err(_) | Ok(AgentRequest::Start { .. }) | Ok(AgentRequest::ApplyPatch { .. }) => {
+                                // 忽略其他消息
+                            }
                         }
                     }
+                } else {
+                    // 评测失败：将日志反馈给模型并继续迭代
+                    messages.push(deepseek_api::ChatMessage::assistant(patch_content));
+                    messages.push(deepseek_api::ChatMessage::user(format!(
+                        "本地评测失败。以下是执行日志，请你基于日志修复。\n\n命令：{}\nexit={}\n\nstdout:\n{}\n\nstderr:\n{}\n\n请继续输出 kind=patch JSON（只输出 JSON），用最小改动修复问题。",
+                        cfg.eval_cmd,
+                        result.exit_code,
+                        truncate(&result.stdout, 8000),
+                        truncate(&result.stderr, 8000)
+                    )));
+                    // 保存状态后继续下一轮迭代
+                    save_session_state(&cfg.workspace, &SessionState { goal: cfg.goal.clone(), messages: messages.clone() });
+                    continue;
                 }
             }
         }
     }
+    // 达到最大迭代次数后保存状态，以便可能的续跑。
+    save_session_state(&cfg.workspace, &SessionState { goal: cfg.goal.clone(), messages: messages.clone() });
     let _ = tx_evt.send(AgentEvent::Done {
         success: false,
         message: "达到最大迭代次数仍未收敛".into(),
@@ -406,13 +493,46 @@ async fn run_session(
 /// clarification questions or a patch with files. It uses a numbered list
 /// of rules to improve reliability.
 fn system_prompt() -> String {
+    // 新的系统提示用以指导模型完成端到端的自编程流程。
+    //
+    // 本代理的职责是：用户仅提供高层需求，之后的所有工作（立项、制定项目目标和大纲、编写代码、编译运行、测试程序、分析和修复 bug、再次编译运行等）都由模型在闭环中完成。模型应循环执行：
+    //  1. 生成或改进代码，并提供一个包含完整文件内容的补丁（patch）。每个补丁必须包含文件路径和完整内容。
+    //  2. 运行用户指定的评测命令。若运行失败（编译错误、测试失败或程序运行错误），模型应根据日志进行修复。
+    //  3. 当评测成功时，模型应询问用户是否满意或有改进建议。若用户提出改进意见，则根据建议继续迭代；若用户满意，则结束会话。
+    // 模型可以在需要更多信息时提出澄清问题（clarify）。所有回复必须是严格的 JSON 对象，禁止任何 Markdown 或代码块围栏。
+    // 允许输出的 JSON 只能有两种形式：
+    //  A) {"kind": "clarify", "questions": [{"id": "q1", "question": "...", "type": "single|multi|text", "options": ["..."]}]}
+    //     用于向用户提出疑问或选项。模型应尽量减少问题数量，确保问题关键且明确。
+    //  B) {"kind": "patch", "summary": "...", "files": [{"path": "relative/path", "content": "FULL FILE CONTENT"}]}
+    //     用于提供一个或多个文件的完整内容。summary 应说明补丁的目的，例如生成项目计划、编写某个模块代码、修复某个错误等。
+    // 其他规则：
+    //  - files.content 必须是完整文件内容（覆盖写入），不允许包含差异或补丁格式。
+    //  - path 必须是相对路径，且写入位置只能位于工作目录内，禁止写出工作区。
+    //  - 请采用小步迭代的方式：优先生成最小可运行版本，再逐步完善。
     r#"你是一个“自编程代理”。你必须严格遵守：
 1) 你每次回复只能输出一个 JSON 对象，禁止输出 Markdown、解释、代码块围栏、自然语言。
-2) JSON 只能是两种之一：
-   A) {"kind":"clarify","questions":[{"id":"q1","question":"...","type":"single|multi|text","options":[".."]}]}
+2) 允许输出的 JSON 只能有两种形式：
+   A) {"kind":"clarify","questions":[{"id":"q1","question":"...","type":"single|multi|text","options":["..."]}]}
+      用于向用户提出疑问或选项，问题应尽量关键、简洁。
    B) {"kind":"patch","summary":"...","files":[{"path":"relative/path","content":"FULL FILE CONTENT"}]}
-3) files.content 必须是完整文件内容（覆盖写），path 必须是相对路径，不允许写出工作区。
-4) 小步提交：优先最小可运行版本，再迭代修复。
+      用于生成或修改代码文件，summary 用中文说明补丁目的。
+3) files.content 必须是完整文件内容（覆盖写入），path 必须是相对路径，不允许写出工作区。
+4) 模型应在必要时创建或更新一个自动评测脚本（如 scripts/run_tests.sh），该脚本必须包含：编译项目、运行程序、按照项目要求自动操作程序、检测是否存在错误或未满足目标的情况。脚本应返回非零退出码以指示失败，并提供足够的日志供模型分析。
+5) 按照“小步迭代”原则生成补丁：先生成最小可运行版本，再逐步完善和修复 bug。
+6) 当评测脚本通过后，请在 summary 中提示已完成目标，并在下一轮中询问用户是否满意、是否有改进建议。若用户给出改进意见，请根据建议继续迭代。
+7) 本项目提供了一个可执行的鼠标键盘自动化工具 `input_cli`（位于本仓库的二进制目标中）。你可以通过命令 `cargo run --release --bin input_cli -- <subcommand> [args...]` 调用它。支持的子命令有：
+   - `move --x <int> --y <int>`：将鼠标移动到屏幕坐标 `(x, y)`。
+   - `click --x <int> --y <int>`：将鼠标移动到 `(x, y)` 并点击左键。
+   - `double-click --x <int> --y <int>`：移动并双击左键。
+   - `right-click --x <int> --y <int>`：移动并右键点击。
+   - `drag --from-x <int> --from-y <int> --to-x <int> --to-y <int>`：按住左键并从起点拖动到终点。
+   - `hold --x <int> --y <int> --ms <int>`：在 `(x, y)` 坐标按住左键 `ms` 毫秒后释放，用于长按。
+   - `type --text <string>`：在当前光标位置输入文本。
+   - `keypress --key <key>`：按下并释放一个键，例如 enter、backspace、tab 或单个字符。
+   - `shortcut --keys <k1> <k2> ...`：同时按下并释放多组组合键，例如 `--keys ctrl s` 对应 Ctrl+S。
+   - `sleep --ms <int>`：暂停指定毫秒数。
+   - `screenshot --output <path>`：捕获当前屏幕图像并保存为 PNG 文件。该图像可供用户或后续分析使用（模型本身无法直接读取图像）。
+   评测脚本可以调用这些命令来自动操作你的程序的用户界面，以查找并复现 bug。生成自动化脚本时，请根据程序窗口中的元素坐标、操作顺序调用这些命令，实现完整的交互测试。由于模型无法直接读取屏幕图像，截图功能主要供用户审查或外部分析使用。
 "#
         .to_string()
 }
@@ -466,4 +586,28 @@ fn extract_json(input: &str) -> Result<String> {
         }
     }
     Err(anyhow!("未找到合法 JSON 段"))
+}
+
+/// Attempt to load a persisted session state from the workspace. Returns
+/// None if the file does not exist or cannot be parsed. The state file
+/// name is hard-coded as `.autocoding_state.json` in the workspace root.
+fn load_session_state(workspace: &std::path::Path) -> Option<SessionState> {
+    let state_path = workspace.join(".autocoding_state.json");
+    match fs::read_to_string(&state_path) {
+        Ok(content) => serde_json::from_str::<SessionState>(&content).ok(),
+        Err(_) => None,
+    }
+}
+
+/// Save the current session state to the workspace. Errors during saving
+/// are ignored (logged to stderr) but do not interrupt the session.
+fn save_session_state(workspace: &std::path::Path, state: &SessionState) {
+    let state_path = workspace.join(".autocoding_state.json");
+    if let Ok(json) = serde_json::to_string_pretty(state) {
+        // Write to a temporary file then rename for atomicity.
+        let tmp_path = state_path.with_extension("tmp");
+        if fs::write(&tmp_path, json).is_ok() {
+            let _ = fs::rename(tmp_path, state_path);
+        }
+    }
 }

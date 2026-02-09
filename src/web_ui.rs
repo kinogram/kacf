@@ -70,10 +70,13 @@ struct ClarifyPayload {
     answers: serde_json::Value,
 }
 
-/// Payload for patch decision.
+/// Payload for pushing to a remote. Contains the remote name (e.g. "origin"),
+/// the full remote URL (including token if necessary) and the branch to push.
 #[derive(Debug, Deserialize)]
-struct PatchDecisionPayload {
-    accept: bool,
+struct PushPayload {
+    remote: String,
+    url: String,
+    branch: String,
 }
 
 /// HTTP handler: start a new session.
@@ -122,13 +125,20 @@ async fn answer_clarify(data: web::Data<AppState>, body: web::Json<ClarifyPayloa
     HttpResponse::Ok().body("clarify sent")
 }
 
-/// HTTP handler: decide to accept or reject patch.
-async fn patch_decision(data: web::Data<AppState>, body: web::Json<PatchDecisionPayload>) -> impl Responder {
-    if let Err(e) = data.tx_req.send(AgentRequest::ApplyPatch { accept: body.accept }) {
-        return HttpResponse::InternalServerError().body(format!("send patch decision failed: {}", e));
+/// HTTP handler: push current branch to remote. Accepts JSON with remote, url, branch.
+async fn push_remote(data: web::Data<AppState>, body: web::Json<PushPayload>) -> impl Responder {
+    let payload = body.into_inner();
+    let req = AgentRequest::PushRemote {
+        remote: payload.remote,
+        url: payload.url,
+        branch: payload.branch,
+    };
+    if let Err(e) = data.tx_req.send(req) {
+        return HttpResponse::InternalServerError().body(format!("send push failed: {}", e));
     }
-    HttpResponse::Ok().body("decision sent")
+    HttpResponse::Ok().body("push sent")
 }
+
 
 /// HTTP handler: revert last commit.
 async fn revert_last(data: web::Data<AppState>) -> impl Responder {
@@ -167,6 +177,14 @@ async fn index_page() -> impl Responder {
 fn spawn_event_collector(state: AppState) {
     std::thread::spawn(move || {
         for evt in state.rx_evt.iter() {
+            // If the event is a log, also print it to stdout. This provides
+            // immediate feedback in the terminal when running in web mode.
+            match &evt {
+                AgentEvent::Log(line) => {
+                    println!("{}", line);
+                }
+                _ => {}
+            }
             let serial: SerializableEvent = evt.clone().into();
             let mut evts = state.events.lock().unwrap();
             let mut next_id = state.next_event_id.lock().unwrap();
@@ -193,9 +211,10 @@ pub async fn run_web_server(tx_req: Sender<AgentRequest>, rx_evt: Receiver<Agent
             .route("/", web::get().to(index_page))
             .route("/start", web::post().to(start_session))
             .route("/clarify", web::post().to(answer_clarify))
-            .route("/decision", web::post().to(patch_decision))
+            // Patch decision route removed: patches are applied automatically in this version
             .route("/revert", web::post().to(revert_last))
             .route("/stop", web::post().to(stop_session))
+            .route("/push", web::post().to(push_remote))
             .route("/events", web::get().to(get_events))
     })
     .bind(("0.0.0.0", 8080))?

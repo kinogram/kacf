@@ -12,20 +12,17 @@ use std::path::PathBuf;
 use std::env;
 
 fn main() -> eframe::Result<()> {
-    // Determine mode based on command line arguments and environment. If "--web" is
-    // present or we detect no graphical display (no DISPLAY/WAYLAND env vars),
-    // run the HTTP server instead of the native GUI. This allows usage in
-    // headless environments (e.g. Termux) where a GUI is unavailable.
+    // Determine UI mode based on command line arguments. By default, use the
+    // web UI so that the interface can be accessed from other devices. Only
+    // when the user passes a `--gui` or `--native` flag will the native
+    // desktop GUI be launched. This inversion makes the web UI the default.
     let args: Vec<String> = env::args().collect();
-    let use_web_cli = args.iter().any(|a| a == "--web");
-    let headless_env = std::env::var_os("DISPLAY").is_none()
-        && std::env::var_os("WAYLAND_DISPLAY").is_none()
-        && std::env::var_os("WAYLAND_SOCKET").is_none();
-    if use_web_cli || headless_env {
-        // Set up channels for communicating with the agent loop
+    let use_native_gui = args.iter().any(|a| a == "--gui" || a == "--native");
+    if !use_native_gui {
+        // Always run the web server by default. This allows use on headless
+        // machines or remote access from other devices via the browser.
         let (tx_req, rx_req) = unbounded::<AgentRequest>();
         let (tx_evt, rx_evt) = unbounded::<AgentEvent>();
-
         // Spawn the agent loop on its own Tokio runtime in a background thread.
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
@@ -33,9 +30,6 @@ fn main() -> eframe::Result<()> {
                 protocol::agent_loop(rx_req, tx_evt).await;
             });
         });
-
-        // Run the Actix-web server on a separate Tokio runtime. If the
-        // server exits, just return Ok. Any error will panic via unwrap.
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         rt.block_on(async {
             web_ui::run_web_server(tx_req, rx_evt)
@@ -44,8 +38,7 @@ fn main() -> eframe::Result<()> {
         });
         return Ok(());
     }
-
-    // Default mode: run the native GUI using eframe
+    // Native GUI mode if `--gui` or `--native` is provided.
     let native_options = eframe::NativeOptions::default();
     eframe::run_native(
         "AutoCoding (DeepSeek) - Rust GUI",
@@ -69,13 +62,23 @@ struct App {
     eval_cmd: String,
     success_regex: String,
 
+    // Git remote configuration fields. These allow the user to specify
+    // a remote name, URL and branch to push code to. The push button
+    // will send a PushRemote request to the agent.
+    remote_name: String,
+    remote_url: String,
+    remote_branch: String,
+
     // Runtime state
     running: bool,
     log: String,
     last_diff: Option<String>,
 
-    /// When true, a patch has been proposed and is awaiting user decision.
-    awaiting_patch: bool,
+    // Whether to display the most recent diff. A diff is shown whenever
+    // `last_diff` is Some. This flag has been simplified: the system now
+    // automatically applies patches and no longer waits for the user to
+    // accept or reject them.
+    // awaiting_patch: removed
 
     /// Whether custom fonts have been configured on the egui context. We set
     /// this flag after calling `configure_fonts()` in `update()` to avoid
@@ -106,17 +109,24 @@ impl App {
 
         Self {
             api_key: std::env::var("DEEPSEEK_API_KEY").unwrap_or_default(),
-            model: "deepseek-chat".to_string(),
+            // Use the "deepseek-reasoner" model by default to leverage
+            // stronger reasoning capabilities. The user can still choose
+            // another model from the UI if desired.
+            model: "deepseek-reasoner".to_string(),
             base_url: "https://api.deepseek.com".to_string(),
             workspace_dir: "./workspace".to_string(),
             goal: "做一个最小示例：生成一个 Rust CLI 项目，运行 cargo test 成功。".to_string(),
             eval_cmd: "cargo test".to_string(),
             success_regex: "".to_string(),
 
+            // Default git remote settings: remote name "origin", empty URL and branch "main".
+            remote_name: "origin".to_string(),
+            remote_url: String::new(),
+            remote_branch: "main".to_string(),
+
             running: false,
             log: String::new(),
             last_diff: None,
-            awaiting_patch: false,
             fonts_configured: false,
 
             tx_req,
@@ -169,6 +179,10 @@ impl eframe::App for App {
         while let Ok(evt) = self.rx_evt.try_recv() {
             match evt {
                 AgentEvent::Log(line) => {
+                    // Print logs to stdout so they appear in the terminal. This
+                    // does not persist logs to disk but allows users to see
+                    // progress when running headlessly.
+                    println!("{}", line);
                     self.append_log(&line);
                 }
                 AgentEvent::NeedClarify { questions } => {
@@ -185,13 +199,12 @@ impl eframe::App for App {
                     // indicating a patch decision is needed. The UI displays
                     // this in a collapsible section for easy viewing.
                     self.last_diff = Some(diff);
-                    self.awaiting_patch = true;
                 }
                 AgentEvent::Done { success, message } => {
                     self.running = false;
                     self.append_log(&format!("[DONE] success={} | {}", success, message));
                     // When a session ends, clear any pending patch decision
-                    self.awaiting_patch = false;
+                    // (no longer used)
                 }
             }
         }
@@ -235,6 +248,17 @@ impl eframe::App for App {
                 ui.label("额外成功正则(可空):");
                 ui.text_edit_singleline(&mut self.success_regex);
             });
+
+            ui.separator();
+            ui.label("Git 推送配置");
+            ui.horizontal(|ui| {
+                ui.label("远程名:");
+                ui.text_edit_singleline(&mut self.remote_name);
+                ui.label("URL:");
+                ui.text_edit_singleline(&mut self.remote_url);
+                ui.label("分支:");
+                ui.text_edit_singleline(&mut self.remote_branch);
+            });
             ui.separator();
             // Control buttons: start/continue, stop, and revert last commit.
             ui.horizontal(|ui| {
@@ -267,6 +291,22 @@ impl eframe::App for App {
                     let _ = self.tx_req.send(AgentRequest::RevertLast);
                     self.append_log("[UI] 请求回滚最后一次提交...");
                 }
+
+                if ui
+                    .add_enabled(!self.remote_url.trim().is_empty(), egui::Button::new("推送到远程"))
+                    .clicked()
+                {
+                    let req = AgentRequest::PushRemote {
+                        remote: self.remote_name.clone(),
+                        url: self.remote_url.clone(),
+                        branch: self.remote_branch.clone(),
+                    };
+                    let _ = self.tx_req.send(req);
+                    self.append_log(&format!(
+                        "[UI] 请求推送到远程 {} (branch {})",
+                        self.remote_name, self.remote_branch
+                    ));
+                }
             });
             ui.separator();
             ui.label("日志 / 过程：");
@@ -294,23 +334,7 @@ impl eframe::App for App {
                 });
             }
 
-            // When a patch diff is awaiting user decision, show accept/reject buttons
-            if self.awaiting_patch {
-                ui.separator();
-                ui.label("补丁预览：请确认是否应用此补丁？");
-                ui.horizontal(|ui| {
-                    if ui.button("应用补丁").clicked() {
-                        let _ = self.tx_req.send(AgentRequest::ApplyPatch { accept: true });
-                        self.append_log("[UI] 用户选择应用补丁");
-                        self.awaiting_patch = false;
-                    }
-                    if ui.button("拒绝补丁").clicked() {
-                        let _ = self.tx_req.send(AgentRequest::ApplyPatch { accept: false });
-                        self.append_log("[UI] 用户拒绝补丁");
-                        self.awaiting_patch = false;
-                    }
-                });
-            }
+            // Patch acceptance UI removed: patches are applied automatically. Diff is shown above.
         });
         // Clarification modal: if there are pending questions from the agent
         // we pop up a window for the user to answer them. When submitted,

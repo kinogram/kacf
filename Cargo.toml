@@ -18,3 +18,7 @@ regex = "1.10"
 walkdir = "2.5"
 wait-timeout = "0.2"
 actix-web = { version = "4", features = ["macros"] }
+clap = { version = "4.3", features = ["derive"] }
+enigo = "0.1.1"
+image = { version = "0.24", features = ["png"] }
+screenshot = "0.7"
