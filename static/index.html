@@ -286,6 +286,10 @@ async function startSession() {
         eval_cmd: document.getElementById('eval_cmd').value.trim(),
         success_regex: document.getElementById('success_regex').value.trim(),
     };
+    if (!body.api_key) {
+        setStatus('启动失败：API Key 为空，请先填写 DeepSeek API Key');
+        return;
+    }
     try {
         const resp = await fetch('/start', {
             method: 'POST',

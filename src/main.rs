@@ -266,6 +266,10 @@ impl eframe::App for App {
                     .add_enabled(!self.running, egui::Button::new("开始/继续"))
                     .clicked()
                 {
+                    if self.api_key.trim().is_empty() {
+                        self.append_log("[UI] 启动失败：API Key 为空。请先填写 DeepSeek API Key。");
+                        return;
+                    }
                     self.running = true;
                     self.append_log("[UI] 启动 Agent Loop...");
                     let req = AgentRequest::Start {

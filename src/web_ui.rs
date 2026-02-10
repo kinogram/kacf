@@ -82,6 +82,9 @@ struct PushPayload {
 /// HTTP handler: start a new session.
 async fn start_session(data: web::Data<AppState>, body: web::Json<StartPayload>) -> impl Responder {
     let payload = body.into_inner();
+    if payload.api_key.trim().is_empty() {
+        return HttpResponse::BadRequest().body("api_key is empty");
+    }
     let req = AgentRequest::Start {
         api_key: payload.api_key,
         base_url: payload.base_url,
