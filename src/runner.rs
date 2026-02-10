@@ -1,9 +1,9 @@
 use anyhow::{anyhow, Context, Result};
-use wait_timeout::ChildExt;
-use std::time::Duration;
 use regex::Regex;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::time::Duration;
+use wait_timeout::ChildExt;
 
 /// Result of evaluating a command. Contains exit code, stdout, stderr.
 pub struct EvalResult {
@@ -20,7 +20,15 @@ pub fn run_eval(workspace: &Path, cmdline: &str) -> Result<EvalResult> {
     // 拦截危险命令关键字，防止误删系统文件或其他破坏行为。
     let lowered = cmdline.to_lowercase();
     let dangerous = [
-        "rm -rf", "del ", "format", "shutdown", "mkfs", "wipe", "rd ", "powershell remove-item", "sudo",
+        "rm -rf",
+        "del ",
+        "format",
+        "shutdown",
+        "mkfs",
+        "wipe",
+        "rd ",
+        "powershell remove-item",
+        "sudo",
     ];
     for bad in &dangerous {
         if lowered.contains(bad) {
@@ -44,10 +52,15 @@ pub fn run_eval(workspace: &Path, cmdline: &str) -> Result<EvalResult> {
     child_cmd.stderr(Stdio::piped());
 
     // 启动进程
-    let mut child = child_cmd.spawn().with_context(|| format!("run {}", cmdline))?;
+    let mut child = child_cmd
+        .spawn()
+        .with_context(|| format!("run {}", cmdline))?;
     // 等待最长 120 秒，超时则杀死进程
     let timeout = Duration::from_secs(120);
-    match child.wait_timeout(timeout).with_context(|| "wait_timeout failed")? {
+    match child
+        .wait_timeout(timeout)
+        .with_context(|| "wait_timeout failed")?
+    {
         Some(status) => {
             // 进程在限定时间内结束
             let exit_code = status.code().unwrap_or(-1);
@@ -66,7 +79,11 @@ pub fn run_eval(workspace: &Path, cmdline: &str) -> Result<EvalResult> {
                 err.read_to_end(&mut buf)?;
                 stderr = String::from_utf8_lossy(&buf).to_string();
             }
-            Ok(EvalResult { exit_code, stdout, stderr })
+            Ok(EvalResult {
+                exit_code,
+                stdout,
+                stderr,
+            })
         }
         None => {
             // 超时，强制终止
@@ -122,8 +139,28 @@ fn shell_split(s: &str) -> Result<Vec<String>> {
             _ => cur.push(ch),
         }
     }
+    if in_quote {
+        return Err(anyhow!("Unclosed quote in eval command"));
+    }
     if !cur.is_empty() {
         out.push(cur);
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shell_split;
+
+    #[test]
+    fn split_handles_quoted_segments() {
+        let parts = shell_split("cargo test --package \"my crate\"").expect("split");
+        assert_eq!(parts, vec!["cargo", "test", "--package", "my crate"]);
+    }
+
+    #[test]
+    fn split_rejects_unclosed_quote() {
+        let err = shell_split("cargo test \"unterminated").expect_err("must fail");
+        assert!(err.to_string().contains("Unclosed quote"));
+    }
 }

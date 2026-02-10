@@ -4,6 +4,10 @@ version = "0.4.4"
 edition = "2021"
 default-run = "autocoding-gui"
 
+[features]
+default = []
+input-automation = ["dep:enigo"]
+
 [dependencies]
 eframe = "0.29"
 egui = "0.29"
@@ -20,4 +24,9 @@ walkdir = "2.5"
 wait-timeout = "0.2"
 actix-web = { version = "4", features = ["macros"] }
 clap = { version = "4.3", features = ["derive"] }
-enigo = "0.1.1"
+enigo = { version = "0.1.1", optional = true }
+
+[[bin]]
+name = "input_cli"
+path = "src/bin/input_cli.rs"
+required-features = ["input-automation"]

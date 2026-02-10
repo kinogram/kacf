@@ -5,6 +5,7 @@ Cargo.lock
 .vscode/
 .idea/
 .workspace
+workspace/
 *.rs.bk
 *.dSYM/
 *.swp
@@ -13,4 +14,3 @@ Cargo.lock
 .DS_Store
 Thumbs.db
 *~
-

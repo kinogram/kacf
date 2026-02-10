@@ -561,7 +561,7 @@ fn system_prompt() -> String {
 4) 模型应在必要时创建或更新一个自动评测脚本（如 scripts/run_tests.sh），该脚本必须包含：编译项目、运行程序、按照项目要求自动操作程序、检测是否存在错误或未满足目标的情况。脚本应返回非零退出码以指示失败，并提供足够的日志供模型分析。
 5) 按照“小步迭代”原则生成补丁：先生成最小可运行版本，再逐步完善和修复 bug。
 6) 当评测脚本通过后，请在 summary 中提示已完成目标，并在下一轮中询问用户是否满意、是否有改进建议。若用户给出改进意见，请根据建议继续迭代。
-7) 本项目提供了一个可执行的鼠标键盘自动化工具 `input_cli`（位于本仓库的二进制目标中）。你可以通过命令 `cargo run --release --bin input_cli -- <subcommand> [args...]` 调用它。支持的子命令有：
+7) 本项目提供了一个可执行的鼠标键盘自动化工具 `input_cli`（位于本仓库的二进制目标中）。你可以通过命令 `cargo run --release --features input-automation --bin input_cli -- <subcommand> [args...]` 调用它。支持的子命令有：
    - `move --x <int> --y <int>`：将鼠标移动到屏幕坐标 `(x, y)`。
    - `click --x <int> --y <int>`：将鼠标移动到 `(x, y)` 并点击左键。
    - `double-click --x <int> --y <int>`：移动并双击左键。
