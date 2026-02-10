@@ -6,6 +6,7 @@ use std::time::Duration;
 use wait_timeout::ChildExt;
 
 /// Result of evaluating a command. Contains exit code, stdout, stderr.
+#[derive(Clone, Debug)]
 pub struct EvalResult {
     pub exit_code: i32,
     pub stdout: String,
@@ -56,7 +57,7 @@ pub fn run_eval(workspace: &Path, cmdline: &str) -> Result<EvalResult> {
         .spawn()
         .with_context(|| format!("run {}", cmdline))?;
     // 等待最长 120 秒，超时则杀死进程
-    let timeout = Duration::from_secs(120);
+    let timeout = Duration::from_secs(read_eval_timeout_secs());
     match child
         .wait_timeout(timeout)
         .with_context(|| "wait_timeout failed")?
@@ -96,6 +97,14 @@ pub fn run_eval(workspace: &Path, cmdline: &str) -> Result<EvalResult> {
             })
         }
     }
+}
+
+fn read_eval_timeout_secs() -> u64 {
+    std::env::var("AUTOCODING_EVAL_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|v| *v >= 10 && *v <= 1800)
+        .unwrap_or(120)
 }
 
 /// Evaluate a regex pattern against the given text. Returns true if the pattern
@@ -150,7 +159,7 @@ fn shell_split(s: &str) -> Result<Vec<String>> {
 
 #[cfg(test)]
 mod tests {
-    use super::shell_split;
+    use super::{read_eval_timeout_secs, shell_split};
 
     #[test]
     fn split_handles_quoted_segments() {
@@ -162,5 +171,11 @@ mod tests {
     fn split_rejects_unclosed_quote() {
         let err = shell_split("cargo test \"unterminated").expect_err("must fail");
         assert!(err.to_string().contains("Unclosed quote"));
+    }
+
+    #[test]
+    fn eval_timeout_has_reasonable_default() {
+        std::env::remove_var("AUTOCODING_EVAL_TIMEOUT_SECS");
+        assert_eq!(read_eval_timeout_secs(), 120);
     }
 }

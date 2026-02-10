@@ -33,7 +33,7 @@ pub fn init_repo_if_needed(workspace: &Path) -> Result<()> {
     // Stage all existing files for the initial commit. Use -A to include
     // ignored/untracked files that were just created.
     let status = Command::new("git")
-        .args(&["add", "-A"])
+        .args(["add", "-A"])
         .current_dir(workspace)
         .status()
         .with_context(|| "failed to run git add in init_repo_if_needed")?;
@@ -43,7 +43,7 @@ pub fn init_repo_if_needed(workspace: &Path) -> Result<()> {
     // Perform the initial commit. We set author/committer env vars so git
     // doesn't complain about missing user.name/email.
     let status = Command::new("git")
-        .args(&["commit", "-m", "Initial commit"])
+        .args(["commit", "-m", "Initial commit"])
         .current_dir(workspace)
         .env("GIT_AUTHOR_NAME", "AutoCoding")
         .env("GIT_AUTHOR_EMAIL", "autocoding@example.com")
@@ -66,7 +66,7 @@ pub fn init_repo_if_needed(workspace: &Path) -> Result<()> {
 pub fn commit_all(workspace: &Path, message: &str) -> Result<()> {
     // Stage all changes.
     let status = Command::new("git")
-        .args(&["add", "-A"])
+        .args(["add", "-A"])
         .current_dir(workspace)
         .status()
         .with_context(|| "failed to run git add in commit_all")?;
@@ -75,7 +75,7 @@ pub fn commit_all(workspace: &Path, message: &str) -> Result<()> {
     }
     // Commit the changes with provided message. Use env vars for identity.
     let commit_status = Command::new("git")
-        .args(&["commit", "-m", message])
+        .args(["commit", "-m", message])
         .current_dir(workspace)
         .env("GIT_AUTHOR_NAME", "AutoCoding")
         .env("GIT_AUTHOR_EMAIL", "autocoding@example.com")
@@ -97,7 +97,7 @@ pub fn commit_all(workspace: &Path, message: &str) -> Result<()> {
 /// found) will result in an error being returned.
 pub fn revert_last_commit(workspace: &Path) -> Result<()> {
     let status = Command::new("git")
-        .args(&["reset", "--hard", "HEAD~1"])
+        .args(["reset", "--hard", "HEAD~1"])
         .current_dir(workspace)
         .status()
         .with_context(|| "failed to run git reset --hard")?;
@@ -116,7 +116,7 @@ pub fn revert_last_commit(workspace: &Path) -> Result<()> {
 /// executing the git command are propagated.
 pub fn diff_last_commit(workspace: &Path) -> Result<String> {
     let output = Command::new("git")
-        .args(&["diff", "HEAD~1..HEAD"])
+        .args(["diff", "HEAD~1..HEAD"])
         .current_dir(workspace)
         .stdout(Stdio::piped())
         .output()
@@ -133,13 +133,13 @@ pub fn add_remote(workspace: &Path, name: &str, url: &str) -> Result<()> {
     // First try to set the remote; if it fails because the remote doesn't
     // exist, fall back to adding it.
     let status = Command::new("git")
-        .args(&["remote", "set-url", name, url])
+        .args(["remote", "set-url", name, url])
         .current_dir(workspace)
         .status()
         .with_context(|| "failed to run git remote set-url")?;
     if !status.success() {
         let status = Command::new("git")
-            .args(&["remote", "add", name, url])
+            .args(["remote", "add", name, url])
             .current_dir(workspace)
             .status()
             .with_context(|| "failed to run git remote add")?;
@@ -154,7 +154,7 @@ pub fn add_remote(workspace: &Path, name: &str, url: &str) -> Result<()> {
 /// execution are propagated.
 pub fn push(workspace: &Path, remote: &str, branch: &str) -> Result<()> {
     let status = Command::new("git")
-        .args(&["push", "--set-upstream", remote, branch])
+        .args(["push", "--set-upstream", remote, branch])
         .current_dir(workspace)
         .status()
         .with_context(|| "failed to run git push")?;

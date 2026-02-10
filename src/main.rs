@@ -1,15 +1,15 @@
 mod deepseek_api;
+mod git_utils;
 mod protocol;
 mod runner;
-mod workspace;
-mod git_utils;
 mod web_ui;
+mod workspace;
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use eframe::egui;
 use protocol::{AgentEvent, AgentRequest, ClarifyAnswer};
-use std::path::PathBuf;
 use std::env;
+use std::path::PathBuf;
 
 fn main() -> eframe::Result<()> {
     // Determine UI mode based on command line arguments. By default, use the
@@ -61,6 +61,7 @@ struct App {
     goal: String,
     eval_cmd: String,
     success_regex: String,
+    auto_revert_profile: String,
 
     // Git remote configuration fields. These allow the user to specify
     // a remote name, URL and branch to push code to. The push button
@@ -79,7 +80,6 @@ struct App {
     // automatically applies patches and no longer waits for the user to
     // accept or reject them.
     // awaiting_patch: removed
-
     /// Whether custom fonts have been configured on the egui context. We set
     /// this flag after calling `configure_fonts()` in `update()` to avoid
     /// reconfiguring fonts on every frame.
@@ -118,6 +118,7 @@ impl App {
             goal: "做一个最小示例：生成一个 Rust CLI 项目，运行 cargo test 成功。".to_string(),
             eval_cmd: "cargo test".to_string(),
             success_regex: "".to_string(),
+            auto_revert_profile: "balanced".to_string(),
 
             // Default git remote settings: remote name "origin", empty URL and branch "main".
             remote_name: "origin".to_string(),
@@ -228,8 +229,16 @@ impl eframe::App for App {
                 egui::ComboBox::from_id_salt("model")
                     .selected_text(&self.model)
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut self.model, "deepseek-chat".to_string(), "deepseek-chat");
-                        ui.selectable_value(&mut self.model, "deepseek-reasoner".to_string(), "deepseek-reasoner");
+                        ui.selectable_value(
+                            &mut self.model,
+                            "deepseek-chat".to_string(),
+                            "deepseek-chat",
+                        );
+                        ui.selectable_value(
+                            &mut self.model,
+                            "deepseek-reasoner".to_string(),
+                            "deepseek-reasoner",
+                        );
                     });
             });
             ui.separator();
@@ -247,6 +256,28 @@ impl eframe::App for App {
             ui.horizontal(|ui| {
                 ui.label("额外成功正则(可空):");
                 ui.text_edit_singleline(&mut self.success_regex);
+            });
+            ui.horizontal(|ui| {
+                ui.label("回滚策略:");
+                egui::ComboBox::from_id_salt("auto_revert_profile")
+                    .selected_text(&self.auto_revert_profile)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut self.auto_revert_profile,
+                            "conservative".to_string(),
+                            "conservative",
+                        );
+                        ui.selectable_value(
+                            &mut self.auto_revert_profile,
+                            "balanced".to_string(),
+                            "balanced",
+                        );
+                        ui.selectable_value(
+                            &mut self.auto_revert_profile,
+                            "aggressive".to_string(),
+                            "aggressive",
+                        );
+                    });
             });
 
             ui.separator();
@@ -276,6 +307,7 @@ impl eframe::App for App {
                         api_key: self.api_key.clone(),
                         base_url: self.base_url.clone(),
                         model: self.model.clone(),
+                        auto_revert_profile: self.auto_revert_profile.clone(),
                         workspace: PathBuf::from(self.workspace_dir.clone()),
                         goal: self.goal.clone(),
                         eval_cmd: self.eval_cmd.clone(),
@@ -283,7 +315,10 @@ impl eframe::App for App {
                     };
                     let _ = self.tx_req.send(req);
                 }
-                if ui.add_enabled(self.running, egui::Button::new("停止")).clicked() {
+                if ui
+                    .add_enabled(self.running, egui::Button::new("停止"))
+                    .clicked()
+                {
                     self.running = false;
                     let _ = self.tx_req.send(AgentRequest::Stop);
                     self.append_log("[UI] 已请求停止。");
@@ -297,7 +332,10 @@ impl eframe::App for App {
                 }
 
                 if ui
-                    .add_enabled(!self.remote_url.trim().is_empty(), egui::Button::new("推送到远程"))
+                    .add_enabled(
+                        !self.remote_url.trim().is_empty(),
+                        egui::Button::new("推送到远程"),
+                    )
                     .clicked()
                 {
                     let req = AgentRequest::PushRemote {

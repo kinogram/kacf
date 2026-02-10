@@ -26,14 +26,14 @@
 //! ```
 
 use clap::{Parser, Subcommand};
-use enigo::{Enigo, KeyboardControllable, MouseButton, MouseControllable};
 use enigo::Key;
+use enigo::{Enigo, KeyboardControllable, MouseButton, MouseControllable};
 use std::thread::sleep;
 use std::time::Duration;
 
 /// Top-level CLI definition. The user must specify exactly one subcommand.
 #[derive(Parser)]
-#[command(name = "input_cli", about = "Simulate mouse and keyboard actions")] 
+#[command(name = "input_cli", about = "Simulate mouse and keyboard actions")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -139,9 +139,7 @@ fn main() {
                 "ctrl" | "control" => Some(Key::Control),
                 "alt" => Some(Key::Alt),
                 // Single ASCII character: treat as a unicode layout key
-                _ if lower.chars().count() == 1 => {
-                    lower.chars().next().map(Key::Layout)
-                }
+                _ if lower.chars().count() == 1 => lower.chars().next().map(Key::Layout),
                 _ => None,
             };
             if let Some(key_code) = k {
@@ -153,7 +151,12 @@ fn main() {
         Command::Sleep { ms } => {
             sleep(Duration::from_millis(ms));
         }
-        Command::Drag { from_x, from_y, to_x, to_y } => {
+        Command::Drag {
+            from_x,
+            from_y,
+            to_x,
+            to_y,
+        } => {
             enigo.mouse_move_to(from_x, from_y);
             // Press and hold left button
             enigo.mouse_down(MouseButton::Left);
@@ -182,9 +185,7 @@ fn main() {
                     "shift" => Some(Key::Shift),
                     "ctrl" | "control" => Some(Key::Control),
                     "alt" => Some(Key::Alt),
-                    _ if lower.chars().count() == 1 => {
-                        lower.chars().next().map(Key::Layout)
-                    }
+                    _ if lower.chars().count() == 1 => lower.chars().next().map(Key::Layout),
                     _ => None,
                 };
                 if let Some(c) = code {
@@ -194,11 +195,11 @@ fn main() {
                 }
             }
             for kc in &key_codes {
-                enigo.key_down(kc.clone());
+                enigo.key_down(*kc);
             }
             // release in reverse order
             for kc in key_codes.iter().rev() {
-                enigo.key_up(kc.clone());
+                enigo.key_up(*kc);
             }
         }
         Command::Screenshot { output } => {

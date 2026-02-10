@@ -6,6 +6,10 @@ AutoCoding 是一个基于 AI 自编程的工具，旨在通过人工智能自�
 
 * **自动生成代码**：根据用户需求，AI 会生成符合要求的代码，并能在执行过程中自动调试、修复 bugs。
 * **自动化测试**：通过自定义评测脚本，模型能够自动操作程序界面进行测试，定位问题并修复。
+* **AI 修复逻辑强化**：新增失败分类、关键错误提取、重复错误检测与分层修复提示，减少无效重写，提高修复收敛速度。
+* **输入自动恢复**：Web UI 会自动保存所有输入内容（本地 + 服务器草稿），刷新页面后自动恢复。
+* **断点续运行**：支持从历史断点一键恢复，模型会继续之前的会话上下文和迭代状态。
+* **配置模板**：内置 Web 应用、命令行工具、桌面应用模板，减少新手配置成本。
 * **远程仓库推送**：支持将代码推送到 Git 仓库，可以指定远程仓库的名称、URL 和分支。
 * **Web 和桌面 GUI 支持**：支持通过 Web 浏览器操作，也可以在桌面环境中运行本地 GUI。
 * **实时日志**：操作过程中的日志将实时显示在终端或界面，帮助用户查看程序运行情况。
@@ -61,9 +65,13 @@ cargo run --release -- --gui
 ## 使用说明
 
 1. **模型选择**：在启动时，你可以选择不同的模型进行代码生成。默认为 `deepseek-reasoner` 模型，它具有较强的推理和规划能力。
-2. **代码生成**：在界面上输入需求，AI 将生成相应代码并自动进行修复和优化，直到满足目标。
-3. **评测脚本**：可以配置评测脚本，自动执行测试并反馈问题，模型将继续迭代直到任务完成。
-4. **远程推送**：你可以将生成的代码推送到远程 Git 仓库，便于版本控制和团队协作。
+2. **代码生成**：在界面上输入需求，AI 将生成相应代码并自动修复优化，直到满足目标。
+3. **自动保存配置**：输入内容会自动保存为草稿，下次打开页面自动恢复。
+4. **断点恢复**：如果任务中断，可点击“从断点恢复”继续之前运行。
+5. **模板快速配置**：可使用预设模板快速填充目标与工作目录。
+6. **评测脚本**：可配置评测脚本，自动执行测试并反馈问题，模型持续迭代。
+7. **远程推送**：可将生成代码推送到 Git 远程仓库，便于版本控制和协作。
+8. **发布诊断导出**：Web UI 支持导出诊断快照（JSON）和发布诊断报告（Markdown），便于审查与归档。
 
 ## 项目结构
 
@@ -86,6 +94,44 @@ autocoding-gui/
 ## 开发和贡献
 
 欢迎贡献代码！如果你有好的建议或遇到问题，可以创建 Issue 或直接提交 Pull Request。我们欢迎任何帮助来完善这个项目。
+
+## 发布前检查
+
+可执行以下脚本做发布前检查：
+
+```bash
+bash scripts/release_check.sh
+```
+
+该脚本会检查格式、静态检查、测试和 release 构建。若系统安装了 `xdo` 依赖，也会额外验证 `input-automation` 特性。
+
+常用环境变量：
+
+* `AUTOCODING_PORT`：Web 服务监听端口（默认 `8080`）。
+* `AUTOCODING_API_TIMEOUT_SECS`：模型 API 超时秒数（默认 `90`）。
+* `AUTOCODING_EVAL_TIMEOUT_SECS`：评测命令超时秒数（默认 `120`）。
+* `AUTOCODING_PRECHECK_CMD`：评测前预检命令（可选，例如 `cargo check`）。
+* `AUTOCODING_AUTO_REVERT_ON_REPEAT`：连续重复失败时自动回滚最近补丁（默认关闭）。
+* `AUTOCODING_AUTO_REVERT_REPEAT_COUNT`：触发自动回滚的最小重复失败次数（默认 `3`）。
+* `AUTOCODING_AUTO_REVERT_MIN_SEVERITY`：自动回滚最小错误严重度阈值（`0-3`，默认 `2`）。
+* `AUTOCODING_AUTO_REVERT_ON_WORSE`：错误严重度恶化时是否自动回滚（默认开启）。
+* `AUTOCODING_AUTO_REVERT_COOLDOWN_ITERS`：自动回滚触发后的冷却轮次（默认 `2`）。
+* `AUTOCODING_AUTO_REVERT_MIN_WORSE_DELTA`：错误恶化触发自动回滚所需的最小严重度增量（默认 `1`）。
+* `AUTOCODING_AUTO_REVERT_SIGNATURE_ALLOW`：自动回滚签名白名单关键字（逗号分隔，可选）。
+* `AUTOCODING_AUTO_REVERT_SIGNATURE_DENY`：自动回滚签名黑名单关键字（逗号分隔，可选，优先级高于白名单）。
+* `AUTOCODING_AUTO_REVERT_PROFILE`：自动回滚策略模板（`conservative|balanced|aggressive`，默认 `balanced`）。
+* `AUTOCODING_RELEASE_GATE_THRESHOLD`：发布门禁评分阈值（`0-100`，默认 `75`）。
+* `AUTOCODING_HISTORY_MAX_MESSAGES`：会话历史最大消息数（默认 `40`）。
+* `AUTOCODING_HISTORY_MAX_CHARS`：会话历史最大字符数（默认 `70000`）。
+
+说明：
+
+* Web UI 中可直接选择“回滚策略模板”，会随任务启动写入工作目录的 `.autocoding_project.json`。
+* `/metrics` 提供发布评分、阻断项、建议动作、5 分钟错误分布与根因 TopN，可用于自动化发布门禁。
+* 可使用 `bash scripts/metrics_gate.sh` 基于 `/metrics` 自动判定是否通过发布门禁。
+  可选参数：`--min-score <0-100>`、`--allow-running`、`--allow-blockers`、`--json`。
+* Web UI 会记住最近工作目录，并在切换 workspace 时自动尝试读取该目录下 `.autocoding_project.json` 的策略配置。
+  当前会持久化：回滚策略模板、预检命令、历史上下文上限、发布门禁阈值。
 
 ### 提交代码
 

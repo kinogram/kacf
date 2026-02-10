@@ -2,182 +2,353 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>AutoCoding (DeepSeek) - Web UI</title>
+    <title>AutoCoding - 智能编程助手</title>
     <style>
-        /* Overall typography and colours for a modern, clean look */
+        :root {
+            --bg-0: #eef4ff;
+            --bg-1: #f7fbff;
+            --card: #ffffff;
+            --text: #1b2b46;
+            --subtle: #5c6f8f;
+            --line: #d8e2f0;
+            --primary: #1b67d8;
+            --primary-2: #1252af;
+            --warn: #9c4b00;
+            --ok: #0f7a34;
+            --danger: #b3261e;
+        }
+        * { box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
             margin: 0;
-            padding: 0;
-            background-color: #f5f7fa;
-            color: #333;
+            color: var(--text);
+            font-family: "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+            background: radial-gradient(circle at 10% 10%, var(--bg-0), var(--bg-1) 45%, #ffffff 100%);
         }
-        h1 {
-            margin: 0;
-            padding: 16px 0;
-            font-size: 24px;
-            text-align: center;
-            color: #007acc;
-        }
-        .container {
-            max-width: 1000px;
+        .shell {
+            max-width: 1120px;
             margin: 0 auto;
+            padding: 24px 16px 40px;
+        }
+        .hero {
             padding: 20px;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            background: linear-gradient(120deg, #f6faff, #ffffff);
+            box-shadow: 0 8px 28px rgba(20, 60, 130, 0.08);
+        }
+        .hero h1 {
+            margin: 0 0 6px;
+            font-size: 28px;
+        }
+        .hero p {
+            margin: 0;
+            color: var(--subtle);
+            line-height: 1.55;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 14px;
+            margin-top: 14px;
         }
         .card {
-            background-color: #ffffff;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-            padding: 20px;
-            margin-top: 20px;
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 16px;
+        }
+        .title {
+            margin: 0 0 10px;
+            font-size: 18px;
+            font-weight: 700;
+        }
+        .sub {
+            margin: 0 0 12px;
+            color: var(--subtle);
+            font-size: 13px;
+        }
+        .row {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 10px;
         }
         label {
             display: block;
-            margin-top: 12px;
-            font-weight: 600;
+            font-size: 13px;
+            font-weight: 700;
+            margin-bottom: 4px;
         }
-        input, textarea {
+        input, textarea, select {
             width: 100%;
-            box-sizing: border-box;
-            padding: 8px;
-            margin-top: 4px;
-            border: 1px solid #d0d7de;
-            border-radius: 4px;
-            background-color: #fafbfc;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 9px 10px;
+            background: #fbfdff;
+            color: var(--text);
+            font-size: 14px;
         }
         textarea {
-            height: 80px;
+            min-height: 92px;
             resize: vertical;
         }
+        .buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 12px;
+        }
         button {
-            margin-top: 10px;
-            margin-right: 8px;
-            padding: 8px 16px;
             border: none;
-            border-radius: 4px;
-            background-color: #007acc;
-            color: white;
-            font-weight: 600;
+            border-radius: 8px;
+            padding: 9px 14px;
+            background: var(--primary);
+            color: #fff;
+            font-weight: 700;
             cursor: pointer;
-            transition: background-color 0.2s;
         }
-        button:hover:not(:disabled) {
-            background-color: #005fa3;
-        }
+        button:hover:not(:disabled) { background: var(--primary-2); }
         button:disabled {
-            background-color: #a6aebf;
             cursor: default;
+            background: #9db3d6;
+        }
+        .btn-ghost { background: #edf3fd; color: #24406d; }
+        .btn-warn { background: #dc7a13; }
+        .btn-danger { background: var(--danger); }
+        .hint {
+            margin-top: 10px;
+            font-size: 12px;
+            color: var(--subtle);
+            line-height: 1.5;
+        }
+        .readiness {
+            margin-top: 8px;
+            font-size: 12px;
+            font-weight: 700;
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 999px;
+            background: #eef2fb;
+            color: #30496f;
+        }
+        .readiness.green { background: #e7f7ec; color: #0d6b2d; }
+        .readiness.yellow { background: #fff4df; color: #8a5600; }
+        .readiness.red { background: #fde9e8; color: #9b201a; }
+        .readiness.running { background: #e6f0ff; color: #194f9f; }
+        .status-box {
+            border-left: 4px solid var(--primary);
+            background: #f4f8ff;
+            padding: 10px;
+            border-radius: 8px;
+            white-space: pre-wrap;
+            font-size: 14px;
+        }
+        .status-ok { border-left-color: var(--ok); }
+        .status-warn { border-left-color: var(--warn); }
+        .status-danger { border-left-color: var(--danger); }
+        .banner {
+            display: none;
+            margin-top: 10px;
+            border: 1px dashed #8fa9d5;
+            background: #f0f6ff;
+            border-radius: 9px;
+            padding: 10px;
+            color: #24406d;
+            font-size: 13px;
         }
         pre {
-            background-color: #f0f4f8;
-            border: 1px solid #d0d7de;
-            border-radius: 4px;
-            padding: 12px;
+            margin: 0;
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            background: #f7fbff;
+            padding: 10px;
+            min-height: 160px;
+            max-height: 290px;
             overflow: auto;
             white-space: pre-wrap;
-            font-family: SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
-            color: #2c3e50;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 13px;
         }
-        /* Diff highlighting colours */
-        .diff-line-add {
-            color: #1b5e20; /* dark green */
-        }
-        .diff-line-del {
-            color: #b71c1c; /* dark red */
-        }
-        .diff-line-other {
-            color: #37474f; /* blue grey for context */
-        }
-        #log {
-            height: 200px;
-        }
-        #diff {
-            height: 180px;
-        }
-        .section-title {
-            font-size: 18px;
-            font-weight: 600;
-            margin-bottom: 8px;
-            color: #007acc;
+        .diff-line-add { color: #0b7a2f; }
+        .diff-line-del { color: #b3261e; }
+        .diff-line-other { color: #2e3f5f; }
+        @media (min-width: 900px) {
+            .grid { grid-template-columns: 1.15fr 1fr; }
+            .row.two { grid-template-columns: 1fr 1fr; }
+            .row.three { grid-template-columns: 1fr 1fr 1fr; }
         }
     </style>
 </head>
 <body>
-<h1>AutoCoding (DeepSeek) - Web UI</h1>
-<div class="container">
-    <!-- Configuration card -->
-    <div class="card" id="config">
-        <div class="section-title">配置</div>
-        <label for="api_key">API Key</label>
-        <input type="text" id="api_key" placeholder="输入你的 DeepSeek API Key">
-        <label for="base_url">Base URL</label>
-        <input type="text" id="base_url" value="https://api.deepseek.com">
-        <label for="model">Model</label>
-        <!-- Use a select to avoid typos and offer both chat and reasoner models -->
-        <select id="model">
-            <option value="deepseek-reasoner" selected>deepseek-reasoner</option>
-            <option value="deepseek-chat">deepseek-chat</option>
-        </select>
-        <label for="workspace">Workspace</label>
-        <input type="text" id="workspace" value="./workspace" placeholder="工作目录，相对路径会自动创建">
-        <label for="goal">Goal (大需求)</label>
-        <textarea id="goal" placeholder="描述你要实现的目标"></textarea>
-    <label for="eval_cmd">Eval Command (评测脚本)</label>
-    <!-- 默认建议运行自动评测脚本，可按需修改 -->
-    <input type="text" id="eval_cmd" value="bash scripts/run_tests.sh">
-        <label for="success_regex">Success Regex (额外成功正则，可选)</label>
-        <input type="text" id="success_regex" placeholder="可选，留空即可">
-        <hr style="margin-top:16px;margin-bottom:16px;" />
-        <label for="remote">远程名称 (Remote Name)</label>
-        <input type="text" id="remote" value="origin" placeholder="通常为 origin">
-        <label for="remote_url">远程 URL (Remote URL)</label>
-        <input type="text" id="remote_url" placeholder="如 https://token@github.com/username/repo.git">
-        <label for="branch">推送分支 (Branch)</label>
-        <input type="text" id="branch" value="main" placeholder="推送的分支名，例如 main">
-        <div>
-            <button id="push_btn">推送到远程</button>
-        </div>
-        <div>
-            <button id="start_btn">开始 / 继续</button>
-            <button id="stop_btn">停止</button>
-            <button id="revert_btn">回滚上一次提交</button>
-        </div>
+<div class="shell">
+    <section class="hero">
+        <h1>AutoCoding 智能编程助手</h1>
+        <p>输入需求后，系统会自动写代码、运行测试、修复问题。已支持自动记住输入、断点恢复、模板配置，降低上手门槛。</p>
+        <div class="banner" id="resume_banner"></div>
+    </section>
+
+    <div class="grid">
+        <section class="card">
+            <h2 class="title">1. 配置</h2>
+            <p class="sub">所有输入会自动保存，刷新页面后会自动恢复。</p>
+
+            <div class="row two">
+                <div>
+                    <label for="api_key">API Key</label>
+                    <input id="api_key" type="text" placeholder="输入你的 API Key">
+                </div>
+                <div>
+                    <label for="model">Model</label>
+                    <select id="model">
+                        <option value="deepseek-reasoner">deepseek-reasoner</option>
+                        <option value="deepseek-chat">deepseek-chat</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="row two">
+                <div>
+                    <label for="base_url">Base URL</label>
+                    <input id="base_url" type="text" value="https://api.deepseek.com">
+                </div>
+                <div>
+                    <label for="workspace">Workspace</label>
+                    <input id="workspace" type="text" value="./workspace" list="workspace_suggestions">
+                    <datalist id="workspace_suggestions"></datalist>
+                </div>
+            </div>
+
+            <div class="row two">
+                <div>
+                    <label for="auto_revert_profile">回滚策略模板</label>
+                    <select id="auto_revert_profile">
+                        <option value="balanced" selected>balanced</option>
+                        <option value="conservative">conservative</option>
+                        <option value="aggressive">aggressive</option>
+                    </select>
+                </div>
+                <div></div>
+            </div>
+
+            <div class="row two">
+                <div>
+                    <label for="precheck_cmd">预检命令（可选）</label>
+                    <input id="precheck_cmd" type="text" placeholder="如 cargo check">
+                </div>
+                <div>
+                    <label for="release_gate_threshold">发布门禁阈值（0-100）</label>
+                    <input id="release_gate_threshold" type="text" placeholder="默认 75">
+                </div>
+            </div>
+
+            <div class="row two">
+                <div>
+                    <label for="history_max_messages">历史消息上限</label>
+                    <input id="history_max_messages" type="text" placeholder="默认 40">
+                </div>
+                <div>
+                    <label for="history_max_chars">历史字符上限</label>
+                    <input id="history_max_chars" type="text" placeholder="默认 70000">
+                </div>
+            </div>
+
+            <div>
+                <label for="goal">目标需求</label>
+                <textarea id="goal" placeholder="例：做一个可视化任务管理软件，支持用户登录、看板、导出报表"></textarea>
+            </div>
+
+            <div class="row two">
+                <div>
+                    <label for="eval_cmd">评测命令</label>
+                    <input id="eval_cmd" type="text" value="bash scripts/run_tests.sh">
+                </div>
+                <div>
+                    <label for="success_regex">额外成功正则（可选）</label>
+                    <input id="success_regex" type="text" placeholder="可空">
+                </div>
+            </div>
+
+            <div class="buttons">
+                <button class="btn-ghost" id="preset_webapp_btn">模板：Web 应用</button>
+                <button class="btn-ghost" id="preset_cli_btn">模板：命令行工具</button>
+                <button class="btn-ghost" id="preset_desktop_btn">模板：桌面应用</button>
+                <button class="btn-ghost" id="reset_form_btn">恢复默认</button>
+            </div>
+
+            <hr style="border:none;border-top:1px solid var(--line);margin:14px 0;">
+
+            <h3 class="title" style="font-size:16px;">2. Git 推送（可选）</h3>
+            <div class="row three">
+                <div>
+                    <label for="remote">远程名称</label>
+                    <input id="remote" type="text" value="origin">
+                </div>
+                <div>
+                    <label for="remote_url">远程 URL</label>
+                    <input id="remote_url" type="text" placeholder="https://token@github.com/user/repo.git">
+                </div>
+                <div>
+                    <label for="branch">分支</label>
+                    <input id="branch" type="text" value="main">
+                </div>
+            </div>
+
+            <div class="buttons">
+                <button id="start_btn">开始 / 继续</button>
+                <button class="btn-warn" id="resume_btn">从断点恢复</button>
+                <button class="btn-danger" id="stop_btn">停止</button>
+                <button class="btn-ghost" id="revert_btn">回滚上次提交</button>
+                <button class="btn-ghost" id="push_btn">推送到远程</button>
+            </div>
+            <p class="hint">不会操作代码也可以直接使用：先写清需求，再点“开始/继续”。系统会自动迭代并展示过程。</p>
+        </section>
+
+        <section class="card">
+            <h2 class="title">状态</h2>
+            <div class="status-box" id="status">等待启动</div>
+            <div class="hint" id="auto_save_state">草稿状态：未保存</div>
+            <div class="hint" id="diagnostics">诊断：暂无</div>
+            <div class="hint" id="metrics_text">运行指标：暂无</div>
+            <div class="hint" id="digest_dist_text">错误分布(5m)：暂无</div>
+            <div class="hint" id="root_top_text">根因Top(5m)：暂无</div>
+            <div class="readiness idle" id="readiness_chip">发布就绪：IDLE</div>
+
+            <h2 class="title" style="margin-top:14px;">澄清问题</h2>
+            <form id="clarify_form"></form>
+            <div class="buttons">
+                <button id="clarify_submit_btn">提交澄清</button>
+            </div>
+        </section>
     </div>
-    <!-- Status card -->
-    <div class="card" id="status_card">
-        <div class="section-title">状态</div>
-        <div id="status"></div>
-    </div>
-    <!-- Logs card -->
-    <div class="card" id="logs">
-        <div class="section-title">日志</div>
+
+    <section class="card" style="margin-top:14px;">
+        <h2 class="title">日志</h2>
         <pre id="log"></pre>
-        <button id="clear_log_btn">清空日志</button>
-    </div>
-    <!-- Diff card -->
-    <div class="card" id="diff_section" style="display:none;">
-        <div class="section-title">补丁差异</div>
-        <!--
-            Use a div instead of a pre so we can inject styled HTML. We will
-            highlight added lines in green, removed lines in red, and other
-            context lines in a neutral colour. The CSS classes are defined
-            below. This improves readability of diffs.
-        -->
-        <div id="diff" style="white-space:pre-wrap; font-family: SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;"></div>
-        <!-- 补丁在当前版本中自动应用，无需用户确认，因此移除按钮 -->
-    </div>
-    <!-- Clarify card -->
-    <div class="card" id="clarify_section" style="display:none;">
-        <div class="section-title">澄清问题</div>
-        <form id="clarify_form"></form>
-        <button id="clarify_submit_btn">提交澄清</button>
-    </div>
+        <div class="buttons">
+            <button class="btn-ghost" id="clear_log_btn">清空日志</button>
+            <button class="btn-ghost" id="export_log_btn">导出日志</button>
+            <button class="btn-ghost" id="export_snapshot_btn">导出诊断快照</button>
+            <button class="btn-ghost" id="export_report_btn">导出发布报告</button>
+        </div>
+    </section>
+
+    <section class="card" id="diff_section" style="margin-top:14px;display:none;">
+        <h2 class="title">补丁差异</h2>
+        <div id="diff" style="white-space:pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;"></div>
+    </section>
 </div>
 
 <script>
-// Maintain the ID of the last processed event. Start from 0 so we get all events.
+const DRAFT_KEY = 'autocoding_webui_draft_v2';
+const RECENT_WORKSPACES_KEY = 'autocoding_recent_workspaces_v1';
 let lastEventId = 0;
 let polling = false;
+let saveTimer = null;
+const POLL_MS_ACTIVE = 1000;
+const POLL_MS_IDLE = 3000;
+
+function nowText() {
+    return new Date().toLocaleString();
+}
 
 function appendLog(text) {
     const log = document.getElementById('log');
@@ -185,8 +356,207 @@ function appendLog(text) {
     log.scrollTop = log.scrollHeight;
 }
 
-function setStatus(msg) {
-    document.getElementById('status').textContent = msg;
+function updateDiagnosticsFromLog(text) {
+    const m = text.match(/^\[Eval-Digest\]\s+category=([^\s]+)\s+severity=([^\s]+)\s+repeated=([^\s]+)\s+signature=(.*)$/);
+    if (!m) return;
+    const [, category, severity, repeated, signature] = m;
+    const diag = document.getElementById('diagnostics');
+    diag.textContent = `诊断：类别=${category} 严重度=${severity} 重复=${repeated} 关键签名=${signature}`;
+}
+
+function setStatus(msg, cls) {
+    const el = document.getElementById('status');
+    el.textContent = msg;
+    el.className = 'status-box ' + (cls || '');
+}
+
+function getFormData() {
+    return {
+        api_key: document.getElementById('api_key').value.trim(),
+        base_url: document.getElementById('base_url').value.trim(),
+        model: document.getElementById('model').value.trim(),
+        auto_revert_profile: document.getElementById('auto_revert_profile').value.trim(),
+        precheck_cmd: document.getElementById('precheck_cmd').value.trim(),
+        history_max_messages: document.getElementById('history_max_messages').value.trim(),
+        history_max_chars: document.getElementById('history_max_chars').value.trim(),
+        release_gate_threshold: document.getElementById('release_gate_threshold').value.trim(),
+        workspace: document.getElementById('workspace').value.trim(),
+        goal: document.getElementById('goal').value.trim(),
+        eval_cmd: document.getElementById('eval_cmd').value.trim(),
+        success_regex: document.getElementById('success_regex').value.trim(),
+        remote: document.getElementById('remote').value.trim(),
+        remote_url: document.getElementById('remote_url').value.trim(),
+        branch: document.getElementById('branch').value.trim(),
+    };
+}
+
+function applyFormData(d) {
+    if (!d) return;
+    const fields = ['api_key', 'base_url', 'model', 'auto_revert_profile', 'precheck_cmd', 'history_max_messages', 'history_max_chars', 'release_gate_threshold', 'workspace', 'goal', 'eval_cmd', 'success_regex', 'remote', 'remote_url', 'branch'];
+    fields.forEach(k => {
+        if (typeof d[k] === 'string' && document.getElementById(k)) {
+            document.getElementById(k).value = d[k];
+        }
+    });
+}
+
+function setAutoSaveState(text) {
+    document.getElementById('auto_save_state').textContent = text;
+}
+
+function loadRecentWorkspaces() {
+    try {
+        return JSON.parse(localStorage.getItem(RECENT_WORKSPACES_KEY) || '[]');
+    } catch (_e) {
+        return [];
+    }
+}
+
+function saveRecentWorkspace(path) {
+    const p = (path || '').trim();
+    if (!p) return;
+    const items = loadRecentWorkspaces().filter(x => x !== p);
+    items.unshift(p);
+    const sliced = items.slice(0, 12);
+    localStorage.setItem(RECENT_WORKSPACES_KEY, JSON.stringify(sliced));
+    renderRecentWorkspaceSuggestions();
+}
+
+function renderRecentWorkspaceSuggestions() {
+    const list = document.getElementById('workspace_suggestions');
+    if (!list) return;
+    list.innerHTML = '';
+    loadRecentWorkspaces().forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p;
+        list.appendChild(opt);
+    });
+}
+
+function saveDraftLocal() {
+    const body = getFormData();
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(body));
+}
+
+async function saveDraftRemote() {
+    const body = getFormData();
+    try {
+        const resp = await fetch('/draft', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        if (!resp.ok) throw new Error('save failed');
+        saveRecentWorkspace(body.workspace);
+        setAutoSaveState(`草稿状态：已保存 (${nowText()})`);
+    } catch (_e) {
+        setAutoSaveState(`草稿状态：仅本地保存 (${nowText()})`);
+    }
+}
+
+function scheduleDraftSave() {
+    saveDraftLocal();
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+        saveDraftRemote();
+    }, 400);
+}
+
+async function loadDraft() {
+    const localRaw = localStorage.getItem(DRAFT_KEY);
+    if (localRaw) {
+        try {
+            applyFormData(JSON.parse(localRaw));
+        } catch (_e) {}
+    }
+    try {
+        const resp = await fetch('/draft');
+        if (resp.ok) {
+            const data = await resp.json();
+            applyFormData(data);
+            saveDraftLocal();
+            setAutoSaveState('草稿状态：已从服务器恢复');
+            return;
+        }
+    } catch (_e) {}
+    if (localRaw) {
+        setAutoSaveState('草稿状态：已从本地恢复');
+    }
+}
+
+async function loadProjectConfigForWorkspace() {
+    const ws = document.getElementById('workspace').value.trim();
+    if (!ws) return;
+    try {
+        const resp = await fetch(`/project_config?workspace=${encodeURIComponent(ws)}`);
+        if (!resp.ok) return;
+        const cfg = await resp.json();
+        if (cfg && typeof cfg.auto_revert_profile === 'string' && cfg.auto_revert_profile) {
+            document.getElementById('auto_revert_profile').value = cfg.auto_revert_profile;
+        }
+        if (cfg && typeof cfg.precheck_cmd === 'string') {
+            document.getElementById('precheck_cmd').value = cfg.precheck_cmd;
+        }
+        if (cfg && typeof cfg.history_max_messages === 'string') {
+            document.getElementById('history_max_messages').value = cfg.history_max_messages;
+        }
+        if (cfg && typeof cfg.history_max_chars === 'string') {
+            document.getElementById('history_max_chars').value = cfg.history_max_chars;
+        }
+        if (cfg && typeof cfg.release_gate_threshold === 'string') {
+            document.getElementById('release_gate_threshold').value = cfg.release_gate_threshold;
+        }
+    } catch (_e) {}
+}
+
+function renderResumeBanner(info) {
+    const banner = document.getElementById('resume_banner');
+    if (!info || !info.resume) {
+        banner.style.display = 'none';
+        return;
+    }
+    const r = info.resume;
+    const timeText = r.updated_at_unix ? new Date(r.updated_at_unix * 1000).toLocaleString() : '未知时间';
+    const status = r.last_status || '未知状态';
+    const text = `检测到历史断点：${timeText}，轮次 ${r.iteration || '?'}，状态 ${status}。${r.resumable ? '可直接点击“从断点恢复”。' : '当前目标与断点不一致。'}`;
+    banner.textContent = text;
+    banner.style.display = 'block';
+}
+
+async function refreshUiState() {
+    try {
+        const resp = await fetch('/ui_state');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        renderResumeBanner(data);
+        if (data.runtime && data.runtime.running) {
+            document.getElementById('start_btn').disabled = true;
+            document.getElementById('stop_btn').disabled = false;
+            document.getElementById('revert_btn').disabled = false;
+            setStatus('检测到任务正在运行中', 'status-warn');
+        }
+    } catch (_e) {}
+}
+
+async function refreshMetrics() {
+    try {
+        const resp = await fetch('/metrics');
+        if (!resp.ok) return;
+        const m = await resp.json();
+        const success5 = m.done_5m_success_rate == null ? '-' : `${m.done_5m_success_rate.toFixed(1)}%`;
+        const trend = (m.success_rate_series_5m || []).map(p => `-${p.minute_ago}m:${p.success_rate == null ? '-' : p.success_rate.toFixed(0) + '%'}`).join(' ');
+        const gateText = `gate=${m.gate_passed ? 'PASS' : 'FAIL'}@${m.gate_threshold ?? '-'} (${m.gate_reason || '-'})`;
+        const txt = `运行指标：score=${m.readiness_score ?? '-'} ${gateText} events=${m.total_events} logs=${m.total_logs} done_ok=${m.total_done_ok} done_fail=${m.total_done_fail} buffer=${m.event_buffer_len} | 5m ok/fail=${m.done_5m_ok}/${m.done_5m_fail} (${success5}) trend=${trend} | api p50/p95=${m.api_p50_ms ?? '-'}ms/${m.api_p95_ms ?? '-'}ms | eval p50/p95=${m.eval_p50_ms ?? '-'}ms/${m.eval_p95_ms ?? '-'}ms`;
+        document.getElementById('metrics_text').textContent = txt;
+        const dist = (m.digest_5m || []).map(x => `${x.category}:${x.count}`).join(', ') || '暂无';
+        document.getElementById('digest_dist_text').textContent = `错误分布(5m)：${dist}`;
+        const rootTop = (m.root_causes_5m || []).map(x => `${x.category}:${x.count}`).join(' | ') || '暂无';
+        document.getElementById('root_top_text').textContent = `根因Top(5m)：${rootTop}`;
+        const chip = document.getElementById('readiness_chip');
+        const level = (m.readiness || 'idle').toLowerCase();
+        chip.className = `readiness ${level}`;
+        chip.textContent = `发布就绪：${level.toUpperCase()}`;
+    } catch (_e) {}
 }
 
 async function pollEvents() {
@@ -200,19 +570,18 @@ async function pollEvents() {
             lastEventId = Math.max(lastEventId, id + 1);
             handleEvent(evt);
         });
-    } catch (e) {
-        console.error('poll events error', e);
+    } catch (_e) {
     } finally {
         polling = false;
     }
-    // poll again after delay
-    setTimeout(pollEvents, 1000);
+    setTimeout(pollEvents, document.hidden ? POLL_MS_IDLE : POLL_MS_ACTIVE);
 }
 
 function handleEvent(evt) {
     switch (evt.type) {
         case 'log':
             appendLog(evt.line);
+            updateDiagnosticsFromLog(evt.line);
             break;
         case 'diff':
             renderDiff(evt.diff);
@@ -222,11 +591,7 @@ function handleEvent(evt) {
             showClarify(evt.questions);
             break;
         case 'done':
-            setStatus(`完成：${evt.success ? '成功' : '失败'} - ${evt.message}`);
-            // hide diff and clarify sections
-            document.getElementById('diff_section').style.display = 'none';
-            document.getElementById('clarify_section').style.display = 'none';
-            // Re-enable start button after completion, disable stop while idle
+            setStatus(`完成：${evt.success ? '成功' : '失败'} - ${evt.message}`, evt.success ? 'status-ok' : 'status-danger');
             document.getElementById('start_btn').disabled = false;
             document.getElementById('stop_btn').disabled = true;
             break;
@@ -238,18 +603,20 @@ function showClarify(questions) {
     form.innerHTML = '';
     questions.forEach(q => {
         const div = document.createElement('div');
+        div.style.marginBottom = '10px';
         const label = document.createElement('label');
         label.textContent = `${q.id}: ${q.question}`;
         div.appendChild(label);
+
         if (q.type === 'single') {
             q.options.forEach(opt => {
                 const radio = document.createElement('input');
                 radio.type = 'radio';
                 radio.name = q.id;
                 radio.value = opt;
-                const span = document.createElement('span');
-                span.textContent = opt;
                 div.appendChild(radio);
+                const span = document.createElement('span');
+                span.textContent = ` ${opt}`;
                 div.appendChild(span);
                 div.appendChild(document.createElement('br'));
             });
@@ -259,9 +626,9 @@ function showClarify(questions) {
                 checkbox.type = 'checkbox';
                 checkbox.name = q.id;
                 checkbox.value = opt;
-                const span = document.createElement('span');
-                span.textContent = opt;
                 div.appendChild(checkbox);
+                const span = document.createElement('span');
+                span.textContent = ` ${opt}`;
                 div.appendChild(span);
                 div.appendChild(document.createElement('br'));
             });
@@ -273,21 +640,12 @@ function showClarify(questions) {
         }
         form.appendChild(div);
     });
-    document.getElementById('clarify_section').style.display = 'block';
 }
 
 async function startSession() {
-    const body = {
-        api_key: document.getElementById('api_key').value.trim(),
-        base_url: document.getElementById('base_url').value.trim(),
-        model: document.getElementById('model').value.trim(),
-        workspace: document.getElementById('workspace').value.trim(),
-        goal: document.getElementById('goal').value.trim(),
-        eval_cmd: document.getElementById('eval_cmd').value.trim(),
-        success_regex: document.getElementById('success_regex').value.trim(),
-    };
+    const body = getFormData();
     if (!body.api_key) {
-        setStatus('启动失败：API Key 为空，请先填写 DeepSeek API Key');
+        setStatus('启动失败：API Key 为空，请先填写。', 'status-danger');
         return;
     }
     try {
@@ -296,18 +654,32 @@ async function startSession() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
         });
-        if (!resp.ok) throw new Error(`start error ${resp.status}`);
-        setStatus('已启动');
-        lastEventId = 0;
-        document.getElementById('log').textContent = '';
-        document.getElementById('diff_section').style.display = 'none';
-        document.getElementById('clarify_section').style.display = 'none';
-        // Disable start button to prevent multiple concurrent sessions and enable stop/revert
+        if (!resp.ok) {
+            const msg = await resp.text();
+            throw new Error(`${resp.status} ${msg}`);
+        }
+        await saveDraftRemote();
+        setStatus('已启动。系统将自动写代码并执行评测。', 'status-warn');
         document.getElementById('start_btn').disabled = true;
         document.getElementById('stop_btn').disabled = false;
         document.getElementById('revert_btn').disabled = false;
     } catch (e) {
-        setStatus('启动失败: ' + e);
+        setStatus('启动失败: ' + e, 'status-danger');
+    }
+}
+
+async function resumeSession() {
+    try {
+        const resp = await fetch('/resume', { method: 'POST' });
+        if (!resp.ok) {
+            const msg = await resp.text();
+            throw new Error(`${resp.status} ${msg}`);
+        }
+        setStatus('已从断点恢复运行。', 'status-warn');
+        document.getElementById('start_btn').disabled = true;
+        document.getElementById('stop_btn').disabled = false;
+    } catch (e) {
+        setStatus('恢复失败：请先保存并确保当前目标与历史断点一致。' + e, 'status-danger');
     }
 }
 
@@ -315,11 +687,11 @@ async function stopSession() {
     try {
         const resp = await fetch('/stop', { method: 'POST' });
         if (!resp.ok) throw new Error(`stop error ${resp.status}`);
-        setStatus('已停止');
-        // Re-enable start button when session stops
+        setStatus('已停止。可修改需求后继续。', 'status-warn');
         document.getElementById('start_btn').disabled = false;
+        document.getElementById('stop_btn').disabled = true;
     } catch (e) {
-        setStatus('停止失败: ' + e);
+        setStatus('停止失败: ' + e, 'status-danger');
     }
 }
 
@@ -329,39 +701,40 @@ async function revertLast() {
         if (!resp.ok) throw new Error(`revert error ${resp.status}`);
         appendLog('[UI] 已发送回滚请求');
     } catch (e) {
-        setStatus('回滚失败: ' + e);
+        setStatus('回滚失败: ' + e, 'status-danger');
     }
 }
 
 async function pushRemote() {
-    const remote = document.getElementById('remote').value.trim();
-    const url = document.getElementById('remote_url').value.trim();
-    const branch = document.getElementById('branch').value.trim();
-    if (!remote || !url || !branch) {
-        setStatus('请填写远程名称、URL 和分支');
+    const body = getFormData();
+    if (!body.remote || !body.remote_url || !body.branch) {
+        setStatus('请填写远程名称、URL 和分支。', 'status-danger');
         return;
     }
     try {
         const resp = await fetch('/push', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ remote, url, branch }),
+            body: JSON.stringify({
+                remote: body.remote,
+                url: body.remote_url,
+                branch: body.branch,
+            }),
         });
         if (!resp.ok) throw new Error(`push error ${resp.status}`);
-        appendLog(`[UI] 已发送推送请求：remote=${remote}, branch=${branch}`);
-        setStatus('已发送推送请求');
+        setStatus('已发送推送请求。', 'status-warn');
+        appendLog(`[UI] 已发送推送请求：${body.remote}/${body.branch}`);
     } catch (e) {
-        setStatus('推送失败: ' + e);
+        setStatus('推送失败: ' + e, 'status-danger');
     }
 }
 
-
-async function submitClarify() {
+async function submitClarify(e) {
+    if (e) e.preventDefault();
     const formData = new FormData(document.getElementById('clarify_form'));
     const answers = {};
     formData.forEach((value, key) => {
         if (answers[key]) {
-            // existing: convert to array
             if (!Array.isArray(answers[key])) {
                 answers[key] = [answers[key]];
             }
@@ -378,36 +751,26 @@ async function submitClarify() {
         });
         if (!resp.ok) throw new Error(`clarify error ${resp.status}`);
         appendLog('[UI] 已提交澄清');
-        document.getElementById('clarify_section').style.display = 'none';
-    } catch (e) {
-        setStatus('提交澄清失败: ' + e);
+        document.getElementById('clarify_form').innerHTML = '';
+    } catch (err) {
+        setStatus('提交澄清失败: ' + err, 'status-danger');
     }
 }
 
-/**
- * Render a unified diff string into the diff div. Added lines (starting
- * with '+', excluding '+++') are coloured green; removed lines (starting
- * with '-', excluding '---') are coloured red; context lines are a neutral
- * colour. This improves readability compared to plain text. The diff
- * container uses innerHTML to insert span elements, so HTML is safe
- * because diff text is not user-supplied.
- */
 function renderDiff(diffText) {
     const diffElem = document.getElementById('diff');
     const lines = diffText.split('\n');
-    const html = lines.map(line => {
+    diffElem.innerHTML = lines.map(line => {
         if (line.startsWith('+') && !line.startsWith('+++')) {
-            return `<span class="diff-line-add">${escapeHtml(line)}</span>`;
-        } else if (line.startsWith('-') && !line.startsWith('---')) {
-            return `<span class="diff-line-del">${escapeHtml(line)}</span>`;
-        } else {
-            return `<span class="diff-line-other">${escapeHtml(line)}</span>`;
+            return `<div class="diff-line-add">${escapeHtml(line)}</div>`;
         }
-    }).join('\n');
-    diffElem.innerHTML = html;
+        if (line.startsWith('-') && !line.startsWith('---')) {
+            return `<div class="diff-line-del">${escapeHtml(line)}</div>`;
+        }
+        return `<div class="diff-line-other">${escapeHtml(line)}</div>`;
+    }).join('');
 }
 
-// Helper to escape HTML special characters in diff lines
 function escapeHtml(text) {
     return text
         .replace(/&/g, '&amp;')
@@ -415,26 +778,189 @@ function escapeHtml(text) {
         .replace(/>/g, '&gt;');
 }
 
-// attach event handlers
-document.getElementById('start_btn').addEventListener('click', startSession);
-document.getElementById('stop_btn').addEventListener('click', stopSession);
-document.getElementById('revert_btn').addEventListener('click', revertLast);
-document.getElementById('clarify_submit_btn').addEventListener('click', submitClarify);
+function applyPreset(kind) {
+    const workspace = document.getElementById('workspace');
+    const goal = document.getElementById('goal');
+    const evalCmd = document.getElementById('eval_cmd');
 
-// Push remote handler
-document.getElementById('push_btn').addEventListener('click', pushRemote);
+    if (kind === 'webapp') {
+        workspace.value = './workspace_webapp';
+        goal.value = '做一个企业级 Web 应用：包含用户登录、权限管理、数据看板、可导出报表，并提供完整自动化测试脚本。';
+        evalCmd.value = 'bash scripts/run_tests.sh';
+    } else if (kind === 'cli') {
+        workspace.value = './workspace_cli';
+        goal.value = '做一个稳定的命令行工具：支持配置文件、日志、子命令和错误恢复，并附带自动化测试。';
+        evalCmd.value = 'bash scripts/run_tests.sh';
+    } else if (kind === 'desktop') {
+        workspace.value = './workspace_desktop';
+        goal.value = '做一个桌面程序：包含可视化界面、文件导入导出、设置页、完整自动化评测脚本。';
+        evalCmd.value = 'bash scripts/run_tests.sh';
+    }
+    scheduleDraftSave();
+}
 
-// Clear log when clicking the button
-document.getElementById('clear_log_btn').addEventListener('click', () => {
-    document.getElementById('log').textContent = '';
-});
+function resetForm() {
+    applyFormData({
+        api_key: '',
+        base_url: 'https://api.deepseek.com',
+        model: 'deepseek-reasoner',
+        auto_revert_profile: 'balanced',
+        precheck_cmd: '',
+        history_max_messages: '',
+        history_max_chars: '',
+        release_gate_threshold: '',
+        workspace: './workspace',
+        goal: '',
+        eval_cmd: 'bash scripts/run_tests.sh',
+        success_regex: '',
+        remote: 'origin',
+        remote_url: '',
+        branch: 'main',
+    });
+    scheduleDraftSave();
+}
 
-// start polling events immediately
-pollEvents();
+function bindAutoSave() {
+    const ids = ['api_key', 'base_url', 'model', 'auto_revert_profile', 'precheck_cmd', 'history_max_messages', 'history_max_chars', 'release_gate_threshold', 'workspace', 'goal', 'eval_cmd', 'success_regex', 'remote', 'remote_url', 'branch'];
+    ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('input', scheduleDraftSave);
+        el.addEventListener('change', scheduleDraftSave);
+    });
+    document.getElementById('workspace').addEventListener('change', async () => {
+        await loadProjectConfigForWorkspace();
+        scheduleDraftSave();
+    });
+}
 
-// Initialize button states: stop and revert disabled until a session starts
-document.getElementById('stop_btn').disabled = true;
-document.getElementById('revert_btn').disabled = true;
+function bindEvents() {
+    document.getElementById('start_btn').addEventListener('click', startSession);
+    document.getElementById('resume_btn').addEventListener('click', resumeSession);
+    document.getElementById('stop_btn').addEventListener('click', stopSession);
+    document.getElementById('revert_btn').addEventListener('click', revertLast);
+    document.getElementById('push_btn').addEventListener('click', pushRemote);
+    document.getElementById('clarify_submit_btn').addEventListener('click', submitClarify);
+    document.getElementById('clear_log_btn').addEventListener('click', () => {
+        document.getElementById('log').textContent = '';
+    });
+    document.getElementById('export_log_btn').addEventListener('click', exportLogs);
+    document.getElementById('export_snapshot_btn').addEventListener('click', exportSnapshot);
+    document.getElementById('export_report_btn').addEventListener('click', exportReleaseReport);
+    document.getElementById('preset_webapp_btn').addEventListener('click', () => applyPreset('webapp'));
+    document.getElementById('preset_cli_btn').addEventListener('click', () => applyPreset('cli'));
+    document.getElementById('preset_desktop_btn').addEventListener('click', () => applyPreset('desktop'));
+    document.getElementById('reset_form_btn').addEventListener('click', resetForm);
+}
+
+function exportLogs() {
+    const content = document.getElementById('log').textContent || '';
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `autocoding-log-${Date.now()}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+async function exportSnapshot() {
+    try {
+        const [mResp, sResp] = await Promise.all([fetch('/metrics'), fetch('/ui_state')]);
+        const metrics = mResp.ok ? await mResp.json() : { error: `metrics ${mResp.status}` };
+        const uiState = sResp.ok ? await sResp.json() : { error: `ui_state ${sResp.status}` };
+        const snapshot = {
+            exported_at: new Date().toISOString(),
+            status_text: document.getElementById('status').textContent,
+            diagnostics_text: document.getElementById('diagnostics').textContent,
+            metrics,
+            ui_state: uiState,
+        };
+        const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `autocoding-snapshot-${Date.now()}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    } catch (_e) {
+        setStatus('导出诊断快照失败', 'status-danger');
+    }
+}
+
+async function exportReleaseReport() {
+    try {
+        const [mResp, sResp] = await Promise.all([fetch('/metrics'), fetch('/ui_state')]);
+        const metrics = mResp.ok ? await mResp.json() : { error: `metrics ${mResp.status}` };
+        const uiState = sResp.ok ? await sResp.json() : { error: `ui_state ${sResp.status}` };
+        const lines = [];
+        lines.push(`# AutoCoding 发布诊断报告`);
+        lines.push('');
+        lines.push(`- 导出时间: ${new Date().toISOString()}`);
+        lines.push(`- 当前状态: ${document.getElementById('status').textContent}`);
+        lines.push(`- 发布就绪: ${(metrics.readiness || 'idle').toUpperCase()}`);
+        lines.push(`- 发布评分: ${metrics.readiness_score ?? '-'}`);
+        lines.push('');
+        lines.push('## 关键指标');
+        lines.push(`- events: ${metrics.total_events ?? '-'}`);
+        lines.push(`- logs: ${metrics.total_logs ?? '-'}`);
+        lines.push(`- done_ok/done_fail: ${metrics.total_done_ok ?? '-'}/${metrics.total_done_fail ?? '-'}`);
+        lines.push(`- 5m success: ${metrics.done_5m_success_rate == null ? '-' : metrics.done_5m_success_rate.toFixed(1) + '%'}`);
+        lines.push(`- api p50/p95: ${metrics.api_p50_ms ?? '-'}ms/${metrics.api_p95_ms ?? '-'}ms`);
+        lines.push(`- eval p50/p95: ${metrics.eval_p50_ms ?? '-'}ms/${metrics.eval_p95_ms ?? '-'}ms`);
+        lines.push('');
+        const blockers = metrics.blockers || [];
+        const actions = metrics.actions || [];
+        lines.push('## 发布阻断项');
+        blockers.forEach(x => lines.push(`- ${x}`));
+        if (blockers.length === 0) lines.push('- 无');
+        lines.push('');
+        lines.push('## 建议动作');
+        actions.forEach(x => lines.push(`- ${x}`));
+        lines.push('');
+        lines.push('## 错误分布(5m)');
+        (metrics.digest_5m || []).forEach(x => lines.push(`- ${x.category}: ${x.count}`));
+        lines.push('');
+        lines.push('## 根因 Top(5m)');
+        (metrics.root_causes_5m || []).forEach(x => lines.push(`- ${x.category}: ${x.count}`));
+        lines.push('');
+        lines.push('## UI State');
+        lines.push('```json');
+        lines.push(JSON.stringify(uiState, null, 2));
+        lines.push('```');
+        const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `autocoding-release-report-${Date.now()}.md`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    } catch (_e) {
+        setStatus('导出发布报告失败', 'status-danger');
+    }
+}
+
+async function init() {
+    renderRecentWorkspaceSuggestions();
+    bindEvents();
+    bindAutoSave();
+    document.getElementById('stop_btn').disabled = true;
+    document.getElementById('revert_btn').disabled = true;
+    await loadDraft();
+    await loadProjectConfigForWorkspace();
+    await refreshUiState();
+    await refreshMetrics();
+    setInterval(refreshMetrics, 5000);
+    pollEvents();
+}
+
+init();
 </script>
 </body>
 </html>
