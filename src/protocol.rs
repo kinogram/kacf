@@ -336,6 +336,27 @@ async fn run_session(
                             git_utils::revert_last_commit(&cfg.workspace).ok();
                             let _ = tx_evt.send(AgentEvent::Log("[Agent] 已回滚上一次提交".into()));
                         }
+                        Ok(AgentRequest::PushRemote { remote, url, branch }) => {
+                            // Handle push remote during clarification stage. Attempt to add/update the
+                            // remote and push the branch. Log any errors.
+                            let res: Result<(), anyhow::Error> = (|| {
+                                git_utils::add_remote(&cfg.workspace, &remote, &url)?;
+                                git_utils::push(&cfg.workspace, &remote, &branch)?;
+                                Ok(())
+                            })();
+                            match res {
+                                Ok(_) => {
+                                    let _ = tx_evt.send(AgentEvent::Log(format!(
+                                        "[Agent] 已推送到远程 {} 的 {} 分支", remote, branch
+                                    )));
+                                }
+                                Err(e) => {
+                                    let _ = tx_evt.send(AgentEvent::Log(format!(
+                                        "[Agent] 推送远程失败: {:#}", e
+                                    )));
+                                }
+                            }
+                        }
                         Ok(AgentRequest::Stop) => {
                             *stop_flag = true;
                             return Ok(());
@@ -456,6 +477,26 @@ async fn run_session(
                             Ok(AgentRequest::Stop) => {
                                 *stop_flag = true;
                                 return Ok(());
+                            }
+                            Ok(AgentRequest::PushRemote { remote, url, branch }) => {
+                                // Handle push remote during feedback stage. Attempt to push and log.
+                                let res: Result<(), anyhow::Error> = (|| {
+                                    git_utils::add_remote(&cfg.workspace, &remote, &url)?;
+                                    git_utils::push(&cfg.workspace, &remote, &branch)?;
+                                    Ok(())
+                                })();
+                                match res {
+                                    Ok(_) => {
+                                        let _ = tx_evt.send(AgentEvent::Log(format!(
+                                            "[Agent] 已推送到远程 {} 的 {} 分支", remote, branch
+                                        )));
+                                    }
+                                    Err(e) => {
+                                        let _ = tx_evt.send(AgentEvent::Log(format!(
+                                            "[Agent] 推送远程失败: {:#}", e
+                                        )));
+                                    }
+                                }
                             }
                             Err(_) | Ok(AgentRequest::Start { .. }) | Ok(AgentRequest::ApplyPatch { .. }) => {
                                 // 忽略其他消息
