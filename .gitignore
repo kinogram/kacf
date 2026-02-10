@@ -4,6 +4,7 @@ Cargo.lock
 .cargo/
 .vscode/
 .idea/
+.workspace
 *.rs.bk
 *.dSYM/
 *.swp
