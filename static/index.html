@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>AutoCoding (DeepSeek) - Web UI</title>
+    <style>
+        /* Overall typography and colours for a modern, clean look */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f7fa;
+            color: #333;
+        }
+        h1 {
+            margin: 0;
+            padding: 16px 0;
+            font-size: 24px;
+            text-align: center;
+            color: #007acc;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .card {
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            padding: 20px;
+            margin-top: 20px;
+        }
+        label {
+            display: block;
+            margin-top: 12px;
+            font-weight: 600;
+        }
+        input, textarea {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 8px;
+            margin-top: 4px;
+            border: 1px solid #d0d7de;
+            border-radius: 4px;
+            background-color: #fafbfc;
+        }
+        textarea {
+            height: 80px;
+            resize: vertical;
+        }
+        button {
+            margin-top: 10px;
+            margin-right: 8px;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            background-color: #007acc;
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        button:hover:not(:disabled) {
+            background-color: #005fa3;
+        }
+        button:disabled {
+            background-color: #a6aebf;
+            cursor: default;
+        }
+        pre {
+            background-color: #f0f4f8;
+            border: 1px solid #d0d7de;
+            border-radius: 4px;
+            padding: 12px;
+            overflow: auto;
+            white-space: pre-wrap;
+            font-family: SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+            color: #2c3e50;
+        }
+        /* Diff highlighting colours */
+        .diff-line-add {
+            color: #1b5e20; /* dark green */
+        }
+        .diff-line-del {
+            color: #b71c1c; /* dark red */
+        }
+        .diff-line-other {
+            color: #37474f; /* blue grey for context */
+        }
+        #log {
+            height: 200px;
+        }
+        #diff {
+            height: 180px;
+        }
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #007acc;
+        }
+    </style>
+</head>
+<body>
+<h1>AutoCoding (DeepSeek) - Web UI</h1>
+<div class="container">
+    <!-- Configuration card -->
+    <div class="card" id="config">
+        <div class="section-title">配置</div>
+        <label for="api_key">API Key</label>
+        <input type="text" id="api_key" placeholder="输入你的 DeepSeek API Key">
+        <label for="base_url">Base URL</label>
+        <input type="text" id="base_url" value="https://api.deepseek.com">
+        <label for="model">Model</label>
+        <!-- Use a select to avoid typos and offer both chat and reasoner models -->
+        <select id="model">
+            <option value="deepseek-reasoner" selected>deepseek-reasoner</option>
+            <option value="deepseek-chat">deepseek-chat</option>
+        </select>
+        <label for="workspace">Workspace</label>
+        <input type="text" id="workspace" value="./workspace" placeholder="工作目录，相对路径会自动创建">
+        <label for="goal">Goal (大需求)</label>
+        <textarea id="goal" placeholder="描述你要实现的目标"></textarea>
+    <label for="eval_cmd">Eval Command (评测脚本)</label>
+    <!-- 默认建议运行自动评测脚本，可按需修改 -->
+    <input type="text" id="eval_cmd" value="bash scripts/run_tests.sh">
+        <label for="success_regex">Success Regex (额外成功正则，可选)</label>
+        <input type="text" id="success_regex" placeholder="可选，留空即可">
+        <hr style="margin-top:16px;margin-bottom:16px;" />
+        <label for="remote">远程名称 (Remote Name)</label>
+        <input type="text" id="remote" value="origin" placeholder="通常为 origin">
+        <label for="remote_url">远程 URL (Remote URL)</label>
+        <input type="text" id="remote_url" placeholder="如 https://token@github.com/username/repo.git">
+        <label for="branch">推送分支 (Branch)</label>
+        <input type="text" id="branch" value="main" placeholder="推送的分支名，例如 main">
+        <div>
+            <button id="push_btn">推送到远程</button>
+        </div>
+        <div>
+            <button id="start_btn">开始 / 继续</button>
+            <button id="stop_btn">停止</button>
+            <button id="revert_btn">回滚上一次提交</button>
+        </div>
+    </div>
+    <!-- Status card -->
+    <div class="card" id="status_card">
+        <div class="section-title">状态</div>
+        <div id="status"></div>
+    </div>
+    <!-- Logs card -->
+    <div class="card" id="logs">
+        <div class="section-title">日志</div>
+        <pre id="log"></pre>
+        <button id="clear_log_btn">清空日志</button>
+    </div>
+    <!-- Diff card -->
+    <div class="card" id="diff_section" style="display:none;">
+        <div class="section-title">补丁差异</div>
+        <!--
+            Use a div instead of a pre so we can inject styled HTML. We will
+            highlight added lines in green, removed lines in red, and other
+            context lines in a neutral colour. The CSS classes are defined
+            below. This improves readability of diffs.
+        -->
+        <div id="diff" style="white-space:pre-wrap; font-family: SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;"></div>
+        <!-- 补丁在当前版本中自动应用，无需用户确认，因此移除按钮 -->
+    </div>
+    <!-- Clarify card -->
+    <div class="card" id="clarify_section" style="display:none;">
+        <div class="section-title">澄清问题</div>
+        <form id="clarify_form"></form>
+        <button id="clarify_submit_btn">提交澄清</button>
+    </div>
+</div>
+
+<script>
+// Maintain the ID of the last processed event. Start from 0 so we get all events.
+let lastEventId = 0;
+let polling = false;
+
+function appendLog(text) {
+    const log = document.getElementById('log');
+    log.textContent += text + "\n";
+    log.scrollTop = log.scrollHeight;
+}
+
+function setStatus(msg) {
+    document.getElementById('status').textContent = msg;
+}
+
+async function pollEvents() {
+    if (polling) return;
+    polling = true;
+    try {
+        const resp = await fetch(`/events?from=${lastEventId}`);
+        if (!resp.ok) throw new Error(`events error ${resp.status}`);
+        const events = await resp.json();
+        events.forEach(([id, evt]) => {
+            lastEventId = Math.max(lastEventId, id + 1);
+            handleEvent(evt);
+        });
+    } catch (e) {
+        console.error('poll events error', e);
+    } finally {
+        polling = false;
+    }
+    // poll again after delay
+    setTimeout(pollEvents, 1000);
+}
+
+function handleEvent(evt) {
+    switch (evt.type) {
+        case 'log':
+            appendLog(evt.line);
+            break;
+        case 'diff':
+            renderDiff(evt.diff);
+            document.getElementById('diff_section').style.display = 'block';
+            break;
+        case 'need_clarify':
+            showClarify(evt.questions);
+            break;
+        case 'done':
+            setStatus(`完成：${evt.success ? '成功' : '失败'} - ${evt.message}`);
+            // hide diff and clarify sections
+            document.getElementById('diff_section').style.display = 'none';
+            document.getElementById('clarify_section').style.display = 'none';
+            // Re-enable start button after completion, disable stop while idle
+            document.getElementById('start_btn').disabled = false;
+            document.getElementById('stop_btn').disabled = true;
+            break;
+    }
+}
+
+function showClarify(questions) {
+    const form = document.getElementById('clarify_form');
+    form.innerHTML = '';
+    questions.forEach(q => {
+        const div = document.createElement('div');
+        const label = document.createElement('label');
+        label.textContent = `${q.id}: ${q.question}`;
+        div.appendChild(label);
+        if (q.type === 'single') {
+            q.options.forEach(opt => {
+                const radio = document.createElement('input');
+                radio.type = 'radio';
+                radio.name = q.id;
+                radio.value = opt;
+                const span = document.createElement('span');
+                span.textContent = opt;
+                div.appendChild(radio);
+                div.appendChild(span);
+                div.appendChild(document.createElement('br'));
+            });
+        } else if (q.type === 'multi') {
+            q.options.forEach(opt => {
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.name = q.id;
+                checkbox.value = opt;
+                const span = document.createElement('span');
+                span.textContent = opt;
+                div.appendChild(checkbox);
+                div.appendChild(span);
+                div.appendChild(document.createElement('br'));
+            });
+        } else {
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.name = q.id;
+            div.appendChild(input);
+        }
+        form.appendChild(div);
+    });
+    document.getElementById('clarify_section').style.display = 'block';
+}
+
+async function startSession() {
+    const body = {
+        api_key: document.getElementById('api_key').value.trim(),
+        base_url: document.getElementById('base_url').value.trim(),
+        model: document.getElementById('model').value.trim(),
+        workspace: document.getElementById('workspace').value.trim(),
+        goal: document.getElementById('goal').value.trim(),
+        eval_cmd: document.getElementById('eval_cmd').value.trim(),
+        success_regex: document.getElementById('success_regex').value.trim(),
+    };
+    try {
+        const resp = await fetch('/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        if (!resp.ok) throw new Error(`start error ${resp.status}`);
+        setStatus('已启动');
+        lastEventId = 0;
+        document.getElementById('log').textContent = '';
+        document.getElementById('diff_section').style.display = 'none';
+        document.getElementById('clarify_section').style.display = 'none';
+        // Disable start button to prevent multiple concurrent sessions and enable stop/revert
+        document.getElementById('start_btn').disabled = true;
+        document.getElementById('stop_btn').disabled = false;
+        document.getElementById('revert_btn').disabled = false;
+    } catch (e) {
+        setStatus('启动失败: ' + e);
+    }
+}
+
+async function stopSession() {
+    try {
+        const resp = await fetch('/stop', { method: 'POST' });
+        if (!resp.ok) throw new Error(`stop error ${resp.status}`);
+        setStatus('已停止');
+        // Re-enable start button when session stops
+        document.getElementById('start_btn').disabled = false;
+    } catch (e) {
+        setStatus('停止失败: ' + e);
+    }
+}
+
+async function revertLast() {
+    try {
+        const resp = await fetch('/revert', { method: 'POST' });
+        if (!resp.ok) throw new Error(`revert error ${resp.status}`);
+        appendLog('[UI] 已发送回滚请求');
+    } catch (e) {
+        setStatus('回滚失败: ' + e);
+    }
+}
+
+async function pushRemote() {
+    const remote = document.getElementById('remote').value.trim();
+    const url = document.getElementById('remote_url').value.trim();
+    const branch = document.getElementById('branch').value.trim();
+    if (!remote || !url || !branch) {
+        setStatus('请填写远程名称、URL 和分支');
+        return;
+    }
+    try {
+        const resp = await fetch('/push', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ remote, url, branch }),
+        });
+        if (!resp.ok) throw new Error(`push error ${resp.status}`);
+        appendLog(`[UI] 已发送推送请求：remote=${remote}, branch=${branch}`);
+        setStatus('已发送推送请求');
+    } catch (e) {
+        setStatus('推送失败: ' + e);
+    }
+}
+
+
+async function submitClarify() {
+    const formData = new FormData(document.getElementById('clarify_form'));
+    const answers = {};
+    formData.forEach((value, key) => {
+        if (answers[key]) {
+            // existing: convert to array
+            if (!Array.isArray(answers[key])) {
+                answers[key] = [answers[key]];
+            }
+            answers[key].push(value);
+        } else {
+            answers[key] = value;
+        }
+    });
+    try {
+        const resp = await fetch('/clarify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ answers }),
+        });
+        if (!resp.ok) throw new Error(`clarify error ${resp.status}`);
+        appendLog('[UI] 已提交澄清');
+        document.getElementById('clarify_section').style.display = 'none';
+    } catch (e) {
+        setStatus('提交澄清失败: ' + e);
+    }
+}
+
+/**
+ * Render a unified diff string into the diff div. Added lines (starting
+ * with '+', excluding '+++') are coloured green; removed lines (starting
+ * with '-', excluding '---') are coloured red; context lines are a neutral
+ * colour. This improves readability compared to plain text. The diff
+ * container uses innerHTML to insert span elements, so HTML is safe
+ * because diff text is not user-supplied.
+ */
+function renderDiff(diffText) {
+    const diffElem = document.getElementById('diff');
+    const lines = diffText.split('\n');
+    const html = lines.map(line => {
+        if (line.startsWith('+') && !line.startsWith('+++')) {
+            return `<span class="diff-line-add">${escapeHtml(line)}</span>`;
+        } else if (line.startsWith('-') && !line.startsWith('---')) {
+            return `<span class="diff-line-del">${escapeHtml(line)}</span>`;
+        } else {
+            return `<span class="diff-line-other">${escapeHtml(line)}</span>`;
+        }
+    }).join('\n');
+    diffElem.innerHTML = html;
+}
+
+// Helper to escape HTML special characters in diff lines
+function escapeHtml(text) {
+    return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+// attach event handlers
+document.getElementById('start_btn').addEventListener('click', startSession);
+document.getElementById('stop_btn').addEventListener('click', stopSession);
+document.getElementById('revert_btn').addEventListener('click', revertLast);
+document.getElementById('clarify_submit_btn').addEventListener('click', submitClarify);
+
+// Push remote handler
+document.getElementById('push_btn').addEventListener('click', pushRemote);
+
+// Clear log when clicking the button
+document.getElementById('clear_log_btn').addEventListener('click', () => {
+    document.getElementById('log').textContent = '';
+});
+
+// start polling events immediately
+pollEvents();
+
+// Initialize button states: stop and revert disabled until a session starts
+document.getElementById('stop_btn').disabled = true;
+document.getElementById('revert_btn').disabled = true;
+</script>
+</body>
+</html>
