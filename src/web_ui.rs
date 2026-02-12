@@ -697,7 +697,8 @@ async fn stream_events(
     let from_id: usize = query.get("from").and_then(|v| v.parse().ok()).unwrap_or(0);
     let mut next_id = from_id;
     let s = stream! {
-        yield Ok::<_, actix_web::Error>(web::Bytes::from_static(b": connected\n\n"));
+        yield Ok::<_, actix_web::Error>(web::Bytes::from_static(b"retry: 1200\n\n"));
+        yield Ok(web::Bytes::from_static(b"data: {\"heartbeat\":true}\n\n"));
         loop {
             let batch: Vec<(usize, SerializableEvent)> = {
                 let events = data.events.lock().unwrap();
@@ -708,12 +709,12 @@ async fn stream_events(
                     .collect()
             };
             if batch.is_empty() {
-                yield Ok(web::Bytes::from_static(b": ping\n\n"));
+                yield Ok(web::Bytes::from_static(b"data: {\"heartbeat\":true}\n\n"));
             } else {
                 for (id, evt) in batch {
                     next_id = next_id.max(id + 1);
                     let payload = serde_json::json!({ "id": id, "evt": evt });
-                    let line = format!("data: {}\n\n", payload);
+                    let line = format!("id: {}\ndata: {}\n\n", id, payload);
                     yield Ok(web::Bytes::from(line));
                 }
             }
@@ -724,6 +725,7 @@ async fn stream_events(
         .insert_header(("Content-Type", "text/event-stream"))
         .insert_header(("Cache-Control", "no-cache"))
         .insert_header(("Connection", "keep-alive"))
+        .insert_header(("X-Accel-Buffering", "no"))
         .streaming(s)
 }
 
@@ -778,6 +780,36 @@ fn spawn_event_collector(state: AppState) {
             let mut evts = state.events.lock().unwrap();
             let mut next_id = state.next_event_id.lock().unwrap();
             evts.push((*next_id, serial));
+            if evts.len() > MAX_EVENT_BUFFER {
+                let drop_n = evts.len() - MAX_EVENT_BUFFER;
+                evts.drain(0..drop_n);
+            }
+            *next_id += 1;
+        }
+        // If event channel closes unexpectedly while UI still thinks it's running,
+        // force a terminal event so the WebUI can converge to a stopped state.
+        let should_emit_done = {
+            let mut runtime = state.runtime.lock().unwrap();
+            if runtime.running {
+                runtime.running = false;
+                if runtime.last_error.trim().is_empty() {
+                    runtime.last_error = "agent event channel closed".to_string();
+                }
+                true
+            } else {
+                false
+            }
+        };
+        if should_emit_done {
+            let mut evts = state.events.lock().unwrap();
+            let mut next_id = state.next_event_id.lock().unwrap();
+            evts.push((
+                *next_id,
+                SerializableEvent::Done {
+                    success: false,
+                    message: "Agent event channel closed".to_string(),
+                },
+            ));
             if evts.len() > MAX_EVENT_BUFFER {
                 let drop_n = evts.len() - MAX_EVENT_BUFFER;
                 evts.drain(0..drop_n);

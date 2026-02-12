@@ -405,8 +405,13 @@ let eventSource = null;
 let sseRetryTimer = null;
 let sseErrorCount = 0;
 let pollingStarted = false;
+let pollTimer = null;
+let lastSseMessageAt = 0;
+let completionAlertShown = false;
 const POLL_MS_ACTIVE = 1000;
 const POLL_MS_IDLE = 3000;
+const UI_STATE_SYNC_MS = 3000;
+const SSE_STALE_MS = 8000;
 
 function nowText() {
     return new Date().toLocaleString();
@@ -437,6 +442,27 @@ function setRunState(state, text) {
     const tip = document.getElementById('runbar_text');
     bar.dataset.state = state || 'idle';
     tip.textContent = `运行状态：${text}`;
+}
+
+function currentRunState() {
+    return document.getElementById('runbar').dataset.state || 'idle';
+}
+
+function syncStoppedStateIfNeeded(reason) {
+    const state = currentRunState();
+    if (state !== 'running' && state !== 'stopping') return;
+    clearStopAckTimer();
+    stopRequested = false;
+    setRunState('idle', '空闲');
+    document.getElementById('start_btn').disabled = false;
+    document.getElementById('stop_btn').disabled = true;
+    if (!completionAlertShown) {
+        completionAlertShown = true;
+        alert('任务已停止。');
+    }
+    if (reason) {
+        appendLog(`[UI] 运行态已与后端同步：${reason}`);
+    }
 }
 
 function isInterruptedMessage(msg) {
@@ -618,6 +644,8 @@ async function refreshUiState() {
             document.getElementById('revert_btn').disabled = false;
             setStatus('检测到任务正在运行中', 'status-warn');
             setRunState('running', '运行中，可点击停止中断');
+        } else {
+            syncStoppedStateIfNeeded('后端已停止运行');
         }
     } catch (_e) {}
 }
@@ -636,6 +664,9 @@ async function refreshMetrics() {
         document.getElementById('digest_dist_text').textContent = `错误分布(5m)：${dist}`;
         const rootTop = (m.root_causes_5m || []).map(x => `${x.category}:${x.count}`).join(' | ') || '暂无';
         document.getElementById('root_top_text').textContent = `根因Top(5m)：${rootTop}`;
+        if (!m.running) {
+            syncStoppedStateIfNeeded('metrics.running=false');
+        }
         const chip = document.getElementById('readiness_chip');
         const level = (m.readiness || 'idle').toLowerCase();
         chip.className = `readiness ${level}`;
@@ -644,7 +675,7 @@ async function refreshMetrics() {
 }
 
 async function pollEvents() {
-    pollingStarted = true;
+    if (!pollingStarted) return;
     if (polling) return;
     polling = true;
     try {
@@ -659,7 +690,11 @@ async function pollEvents() {
     } finally {
         polling = false;
     }
-    setTimeout(pollEvents, document.hidden ? POLL_MS_IDLE : POLL_MS_ACTIVE);
+    if (pollingStarted) {
+        pollTimer = setTimeout(pollEvents, document.hidden ? POLL_MS_IDLE : POLL_MS_ACTIVE);
+    } else {
+        pollTimer = null;
+    }
 }
 
 function closeEventStream() {
@@ -671,6 +706,7 @@ function closeEventStream() {
         eventSource.close();
         eventSource = null;
     }
+    lastSseMessageAt = 0;
 }
 
 function clearStopAckTimer() {
@@ -682,6 +718,7 @@ function clearStopAckTimer() {
 
 function ensurePollingFallback(reason) {
     if (pollingStarted) return;
+    pollingStarted = true;
     appendLog(`[UI] 实时流不可用，已切换轮询模式：${reason}`);
     pollEvents();
 }
@@ -695,11 +732,22 @@ function startEventStream() {
     eventSource = new EventSource(`/events/stream?from=${lastEventId}`);
     eventSource.onopen = () => {
         sseErrorCount = 0;
+        lastSseMessageAt = Date.now();
+        if (pollingStarted) {
+            pollingStarted = false;
+            if (pollTimer) {
+                clearTimeout(pollTimer);
+                pollTimer = null;
+            }
+            appendLog('[UI] 已恢复实时流通道，停止轮询');
+        }
         appendLog('[UI] 已连接实时流通道');
     };
     eventSource.onmessage = (event) => {
+        lastSseMessageAt = Date.now();
         try {
             const data = JSON.parse(event.data || '{}');
+            if (data.heartbeat) return;
             const id = Number(data.id || 0);
             const evt = data.evt;
             if (!evt || Number.isNaN(id)) return;
@@ -721,6 +769,13 @@ function startEventStream() {
     };
 }
 
+function monitorRealtimeChannel() {
+    if (!eventSource || !lastSseMessageAt) return;
+    if (Date.now() - lastSseMessageAt <= SSE_STALE_MS) return;
+    appendLog('[UI] 实时流超时无消息，正在重连');
+    startEventStream();
+}
+
 function handleEvent(evt) {
     switch (evt.type) {
         case 'log':
@@ -739,12 +794,24 @@ function handleEvent(evt) {
             if (evt.success) {
                 setRunState('success', '已完成（成功）');
                 setStatus(`完成：成功 - ${evt.message}`, 'status-ok');
+                if (!completionAlertShown) {
+                    completionAlertShown = true;
+                    alert(`任务已完成（成功）：${evt.message}`);
+                }
             } else if (stopRequested || isInterruptedMessage(evt.message)) {
                 setRunState('interrupted', '已中断');
                 setStatus(`完成：已中断 - ${evt.message}`, 'status-warn');
+                if (!completionAlertShown) {
+                    completionAlertShown = true;
+                    alert(`任务已停止：${evt.message}`);
+                }
             } else {
                 setRunState('failed', '已完成（失败）');
                 setStatus(`完成：失败 - ${evt.message}`, 'status-danger');
+                if (!completionAlertShown) {
+                    completionAlertShown = true;
+                    alert(`任务已完成（失败）：${evt.message}`);
+                }
             }
             stopRequested = false;
             document.getElementById('start_btn').disabled = false;
@@ -817,6 +884,7 @@ async function startSession() {
         setStatus('已启动。系统将自动写代码并执行评测。', 'status-warn');
         setRunState('running', '运行中，可点击停止中断');
         stopRequested = false;
+        completionAlertShown = false;
         document.getElementById('start_btn').disabled = true;
         document.getElementById('stop_btn').disabled = false;
         document.getElementById('revert_btn').disabled = false;
@@ -840,6 +908,7 @@ async function resumeSession() {
         setStatus('已从断点恢复运行。', 'status-warn');
         setRunState('running', '运行中，可点击停止中断');
         stopRequested = false;
+        completionAlertShown = false;
         document.getElementById('start_btn').disabled = true;
         document.getElementById('stop_btn').disabled = false;
     } catch (e) {
@@ -1135,9 +1204,10 @@ async function init() {
     await loadProjectConfigForWorkspace();
     await refreshUiState();
     await refreshMetrics();
+    setInterval(refreshUiState, UI_STATE_SYNC_MS);
     setInterval(refreshMetrics, 5000);
-    // Keep long-polling always on for reliability; SSE acts as low-latency acceleration.
-    pollEvents();
+    setInterval(monitorRealtimeChannel, 2000);
+    // Prefer SSE for low-latency updates, fallback to long-polling only on failure.
     startEventStream();
     window.addEventListener('beforeunload', closeEventStream);
 }
