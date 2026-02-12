@@ -367,6 +367,7 @@
                 <button id="start_btn">开始新任务</button>
                 <button class="btn-warn" id="resume_btn">从断点恢复</button>
                 <button class="btn-danger" id="stop_btn">停止</button>
+                <button class="btn-ghost" id="go_running_project_btn">回到运行项目</button>
                 <button class="btn-ghost" id="revert_btn">回滚上次提交</button>
                 <button class="btn-ghost" id="push_btn">推送到远程</button>
             </div>
@@ -526,6 +527,43 @@ function applyReadOnlyMode() {
     document.getElementById('revert_btn').disabled = readonly || !runSessionActive;
     document.getElementById('push_btn').disabled = readonly;
     document.getElementById('clarify_submit_btn').disabled = readonly;
+    updateGoRunningProjectButton();
+}
+
+function updateGoRunningProjectButton() {
+    const btn = document.getElementById('go_running_project_btn');
+    if (!btn) return;
+    if (!runSessionActive || !activeRunLogBucket) {
+        btn.disabled = true;
+        btn.title = '当前没有运行中的项目';
+        return;
+    }
+    if (!activeRunLogBucket.startsWith('project:')) {
+        btn.disabled = true;
+        btn.title = '当前运行任务不是已保存项目，无法快速定位';
+        return;
+    }
+    const id = activeRunLogBucket.slice('project:'.length);
+    const exists = loadProjects().some(x => x.id === id);
+    btn.disabled = !exists;
+    btn.title = exists ? '点击切回当前运行项目视图' : '运行项目不在当前列表中';
+}
+
+function goToRunningProjectView() {
+    if (!runSessionActive || !activeRunLogBucket) {
+        setStatus('当前没有运行中的项目。', 'status-danger');
+        return;
+    }
+    if (!activeRunLogBucket.startsWith('project:')) {
+        setStatus('当前运行任务不是已保存项目，无法一键切回。', 'status-danger');
+        return;
+    }
+    const id = activeRunLogBucket.slice('project:'.length);
+    const sel = document.getElementById('project_selector');
+    if (!sel) return;
+    sel.value = id;
+    syncProjectNameFromSelection();
+    setStatus(`已切回运行项目：${activeRunProjectLabel || id}`, 'status-warn');
 }
 
 function currentProjectLabel() {
@@ -1648,6 +1686,7 @@ function bindEvents() {
     document.getElementById('start_btn').addEventListener('click', startSession);
     document.getElementById('resume_btn').addEventListener('click', resumeSession);
     document.getElementById('stop_btn').addEventListener('click', stopSession);
+    document.getElementById('go_running_project_btn').addEventListener('click', goToRunningProjectView);
     document.getElementById('revert_btn').addEventListener('click', revertLast);
     document.getElementById('push_btn').addEventListener('click', pushRemote);
     document.getElementById('clarify_submit_btn').addEventListener('click', submitClarify);
@@ -1775,6 +1814,7 @@ async function init() {
     setRunningProjectIndicator('无');
     setProjectControlsDisabled(false);
     applyReadOnlyMode();
+    updateGoRunningProjectButton();
     document.getElementById('stop_btn').disabled = true;
     document.getElementById('revert_btn').disabled = true;
     setRunState('idle', '空闲');
