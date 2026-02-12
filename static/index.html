@@ -1487,10 +1487,14 @@ async function resumeSession() {
         const body = getFormData();
         activeRunLogBucket = currentLogBucket();
         activeRunProjectLabel = currentProjectLabel();
+        const selectedProjectId = document.getElementById('project_selector')?.value || '';
         const resp = await fetch('/resume', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ workspace: body.workspace }),
+            body: JSON.stringify({
+                workspace: body.workspace,
+                project_id: selectedProjectId,
+            }),
         });
         if (!resp.ok) {
             const msg = await resp.text();

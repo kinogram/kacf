@@ -116,6 +116,8 @@ struct DraftQuery {
 struct ResumePayload {
     #[serde(default)]
     workspace: String,
+    #[serde(default)]
+    project_id: String,
 }
 
 impl DraftPayload {
@@ -632,14 +634,25 @@ async fn resume_session(
     data: web::Data<AppState>,
     body: web::Json<ResumePayload>,
 ) -> impl Responder {
-    let Some(draft_path) = draft_path_for_workspace(&body.workspace) else {
-        return HttpResponse::BadRequest().body("workspace is empty");
-    };
-    let Some(draft) = read_draft(&draft_path) else {
-        return HttpResponse::NotFound().body("draft not found");
+    let payload = body.into_inner();
+    let draft: DraftPayload = if !payload.project_id.trim().is_empty() {
+        let _guard = data.projects_lock.lock().unwrap();
+        let cache = read_ui_cache();
+        let Some(project) = cache.projects.into_iter().find(|p| p.id == payload.project_id) else {
+            return HttpResponse::NotFound().body("project not found");
+        };
+        project.snapshot
+    } else {
+        let Some(draft_path) = draft_path_for_workspace(&payload.workspace) else {
+            return HttpResponse::BadRequest().body("workspace is empty");
+        };
+        let Some(d) = read_draft(&draft_path) else {
+            return HttpResponse::NotFound().body("draft not found");
+        };
+        d
     };
     if draft.api_key.trim().is_empty() {
-        return HttpResponse::BadRequest().body("api_key is empty in draft");
+        return HttpResponse::BadRequest().body("api_key is empty in snapshot");
     }
     let resume = read_resume_info(&draft.workspace, &draft.goal);
     if resume.as_ref().map(|x| x.resumable).unwrap_or(false) {
