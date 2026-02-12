@@ -446,6 +446,14 @@
             <label for="base_url">Base URL</label>
             <input id="base_url" type="text" value="https://api.deepseek.com">
         </div>
+        <div class="row two">
+            <div>
+                <label><input id="encrypt_api_key" type="checkbox"> 加密存储 API Key</label>
+            </div>
+            <div>
+                <label><input id="mask_api_key" type="checkbox"> 部分掩码显示 API Key</label>
+            </div>
+        </div>
         <div>
             <label for="language_select">Language</label>
             <select id="language_select"></select>
@@ -497,6 +505,8 @@ let sharedConfig = {
     base_url: 'https://api.deepseek.com',
     model: 'deepseek-reasoner',
     language: '',
+    encrypt_api_key: false,
+    mask_api_key: false,
 };
 let COPY = {};
 
@@ -604,6 +614,52 @@ function txt(key, fallback) {
     return COPY[key] || fallback || key;
 }
 
+function maskApiKey(raw) {
+    const v = (raw || '').trim();
+    if (!v) return '';
+    if (v.length <= 8) return '*'.repeat(v.length);
+    return `${v.slice(0, 4)}${'*'.repeat(Math.max(4, v.length - 8))}${v.slice(-4)}`;
+}
+
+function getApiKeyInputValue() {
+    const el = document.getElementById('api_key');
+    if (!el) return '';
+    if (el.dataset.masked === '1') {
+        return (sharedConfig.api_key || '').trim();
+    }
+    return el.value.trim();
+}
+
+function renderApiKeyInput() {
+    const el = document.getElementById('api_key');
+    if (!el) return;
+    const real = sharedConfig.api_key || '';
+    if (sharedConfig.mask_api_key && real) {
+        el.type = 'text';
+        el.value = maskApiKey(real);
+        el.dataset.masked = '1';
+    } else {
+        el.type = 'text';
+        el.value = real;
+        el.dataset.masked = '0';
+    }
+}
+
+function revealApiKeyForEdit() {
+    const el = document.getElementById('api_key');
+    if (!el || el.dataset.masked !== '1') return;
+    el.value = sharedConfig.api_key || '';
+    el.dataset.masked = '0';
+}
+
+function reMaskApiKeyIfNeeded() {
+    const el = document.getElementById('api_key');
+    if (!el) return;
+    if (!sharedConfig.mask_api_key) return;
+    sharedConfig.api_key = el.value.trim();
+    renderApiKeyInput();
+}
+
 async function suggestProjectSlug(projectName, goal) {
     try {
         const resp = await fetch('/projects/suggest_slug', {
@@ -670,16 +726,21 @@ function defaultFormData() {
 }
 
 function updateSharedConfigFromInputs() {
+    const apiKeyValue = getApiKeyInputValue();
     sharedConfig = {
-        api_key: document.getElementById('api_key').value.trim(),
+        api_key: apiKeyValue,
         base_url: document.getElementById('base_url').value.trim(),
         model: document.getElementById('model').value.trim(),
         language: normalizeLanguageCode(document.getElementById('language_select')?.value || currentLanguage),
+        encrypt_api_key: !!document.getElementById('encrypt_api_key')?.checked,
+        mask_api_key: !!document.getElementById('mask_api_key')?.checked,
     };
 }
 
 function applySharedConfigToInputs() {
-    document.getElementById('api_key').value = sharedConfig.api_key || '';
+    document.getElementById('encrypt_api_key').checked = !!sharedConfig.encrypt_api_key;
+    document.getElementById('mask_api_key').checked = !!sharedConfig.mask_api_key;
+    renderApiKeyInput();
     document.getElementById('base_url').value = sharedConfig.base_url || 'https://api.deepseek.com';
     document.getElementById('model').value = sharedConfig.model || 'deepseek-reasoner';
     renderLanguageOptions();
@@ -716,7 +777,7 @@ function setConfigInputsDisabled(disabled) {
         'precheck_cmd', 'history_max_messages', 'history_max_chars', 'release_gate_threshold',
         'goal', 'eval_cmd', 'success_regex', 'remote', 'remote_url', 'branch',
         'preset_webapp_btn', 'preset_cli_btn', 'preset_desktop_btn', 'reset_form_btn',
-        'open_global_config_btn', 'language_select',
+        'open_global_config_btn', 'language_select', 'encrypt_api_key', 'mask_api_key',
     ];
     ids.forEach(id => {
         const el = document.getElementById(id);
@@ -832,6 +893,8 @@ async function fetchUiCacheFromServer() {
                 base_url: data.shared_config.base_url || 'https://api.deepseek.com',
                 model: data.shared_config.model || 'deepseek-reasoner',
                 language: normalizeLanguageCode(data.shared_config.language || ''),
+                encrypt_api_key: !!data.shared_config.encrypt_api_key,
+                mask_api_key: !!data.shared_config.mask_api_key,
             };
         }
         return true;
@@ -1091,7 +1154,7 @@ function isInterruptedMessage(msg) {
 
 function getFormData() {
     return {
-        api_key: document.getElementById('api_key').value.trim(),
+        api_key: getApiKeyInputValue(),
         base_url: document.getElementById('base_url').value.trim(),
         model: document.getElementById('model').value.trim(),
         auto_revert_profile: document.getElementById('auto_revert_profile').value.trim(),
@@ -2074,6 +2137,17 @@ function bindEvents() {
     document.getElementById('open_global_config_btn').addEventListener('click', openGlobalConfigModal);
     document.getElementById('save_global_config_btn').addEventListener('click', saveGlobalConfig);
     document.getElementById('close_global_config_btn').addEventListener('click', closeGlobalConfigModal);
+    document.getElementById('api_key').addEventListener('focus', revealApiKeyForEdit);
+    document.getElementById('api_key').addEventListener('blur', reMaskApiKeyIfNeeded);
+    document.getElementById('mask_api_key').addEventListener('change', () => {
+        updateSharedConfigFromInputs();
+        renderApiKeyInput();
+        scheduleUiCacheSave();
+    });
+    document.getElementById('encrypt_api_key').addEventListener('change', () => {
+        updateSharedConfigFromInputs();
+        scheduleUiCacheSave();
+    });
     document.getElementById('language_select').addEventListener('change', async () => {
         const next = normalizeLanguageCode(document.getElementById('language_select').value);
         if (!next || next === currentLanguage) return;
