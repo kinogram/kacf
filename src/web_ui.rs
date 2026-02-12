@@ -25,6 +25,8 @@ const DRAFT_FILENAME: &str = ".autocoding_webui_draft.json";
 const SESSION_STATE_FILENAME: &str = ".autocoding_state.json";
 const PROJECT_CONFIG_FILENAME: &str = ".autocoding_project.json";
 const UI_CACHE_FILENAME: &str = ".autocoding_webui_cache.json";
+const MANAGED_ROOT_DIR: &str = "autocoding_data";
+const MANAGED_WORKSPACES_DIR: &str = "workspaces";
 const MAX_EVENT_BUFFER: usize = 5000;
 
 #[derive(Clone)]
@@ -352,17 +354,67 @@ fn now_unix() -> u64 {
         .unwrap_or(0)
 }
 
+fn managed_root_path() -> PathBuf {
+    std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join(MANAGED_ROOT_DIR)
+}
+
+fn managed_workspaces_path() -> PathBuf {
+    managed_root_path().join(MANAGED_WORKSPACES_DIR)
+}
+
+fn normalize_rel_path(path: &Path) -> Option<PathBuf> {
+    if path.is_absolute() {
+        return None;
+    }
+    let mut out = PathBuf::new();
+    for comp in path.components() {
+        match comp {
+            std::path::Component::CurDir => {}
+            std::path::Component::Normal(seg) => out.push(seg),
+            _ => return None,
+        }
+    }
+    if out.as_os_str().is_empty() {
+        return None;
+    }
+    Some(out)
+}
+
+fn workspace_path_for_input(workspace: &str) -> Option<PathBuf> {
+    let ws = workspace.trim();
+    if ws.is_empty() {
+        return None;
+    }
+    let rel = normalize_rel_path(Path::new(ws))?;
+    let root_rel = normalize_rel_path(Path::new(MANAGED_ROOT_DIR))?;
+    if !rel.starts_with(&root_rel) {
+        return None;
+    }
+    Some(rel)
+}
+
+fn require_managed_workspace(workspace: &str) -> Result<PathBuf, String> {
+    let rel = workspace_path_for_input(workspace).ok_or_else(|| {
+        format!(
+            "workspace must be under ./{}/{}",
+            MANAGED_ROOT_DIR, MANAGED_WORKSPACES_DIR
+        )
+    })?;
+    Ok(std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join(rel))
+}
+
 fn read_draft(path: &Path) -> Option<DraftPayload> {
     let content = fs::read_to_string(path).ok()?;
     serde_json::from_str(&content).ok()
 }
 
 fn draft_path_for_workspace(workspace: &str) -> Option<PathBuf> {
-    let ws = workspace.trim();
-    if ws.is_empty() {
-        return None;
-    }
-    Some(Path::new(ws).join(DRAFT_FILENAME))
+    let full = require_managed_workspace(workspace).ok()?;
+    Some(full.join(DRAFT_FILENAME))
 }
 
 fn save_draft(path: &Path, draft: &DraftPayload) -> std::io::Result<()> {
@@ -384,11 +436,10 @@ fn save_project_config(
     history_max_chars: &str,
     release_gate_threshold: &str,
 ) -> std::io::Result<()> {
-    if workspace.trim().is_empty() {
+    let Ok(ws) = require_managed_workspace(workspace) else {
         return Ok(());
-    }
-    let ws = Path::new(workspace);
-    fs::create_dir_all(ws)?;
+    };
+    fs::create_dir_all(&ws)?;
     let cfg = ProjectConfig {
         auto_revert_profile: profile.to_string(),
         precheck_cmd: precheck_cmd.to_string(),
@@ -406,18 +457,14 @@ fn save_project_config(
 }
 
 fn read_project_config(workspace: &str) -> Option<ProjectConfig> {
-    if workspace.trim().is_empty() {
-        return None;
-    }
-    let path = Path::new(workspace).join(PROJECT_CONFIG_FILENAME);
+    let ws = require_managed_workspace(workspace).ok()?;
+    let path = ws.join(PROJECT_CONFIG_FILENAME);
     let content = fs::read_to_string(path).ok()?;
     serde_json::from_str::<ProjectConfig>(&content).ok()
 }
 
 fn ui_cache_path() -> PathBuf {
-    std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join(UI_CACHE_FILENAME)
+    managed_root_path().join(UI_CACHE_FILENAME)
 }
 
 fn read_ui_cache() -> UiCachePayload {
@@ -431,6 +478,9 @@ fn read_ui_cache() -> UiCachePayload {
 
 fn write_ui_cache(payload: &UiCachePayload) -> std::io::Result<()> {
     let path = ui_cache_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
     let json = serde_json::to_string_pretty(payload)?;
     let tmp = path.with_extension("tmp");
     fs::write(&tmp, json)?;
@@ -499,6 +549,7 @@ fn start_from_payload(
         }
     }
     let auto_revert_profile = payload.auto_revert_profile.clone();
+    let workspace_full = require_managed_workspace(&payload.workspace)?;
     apply_runtime_config_envs(&payload);
     let req = AgentRequest::Start {
         api_key: payload.api_key,
@@ -506,7 +557,7 @@ fn start_from_payload(
         model: payload.model,
         auto_revert_profile: auto_revert_profile.clone(),
         resume_from_checkpoint,
-        workspace: payload.workspace.clone().into(),
+        workspace: workspace_full.clone(),
         goal: payload.goal.clone(),
         eval_cmd: payload.eval_cmd,
         success_regex: payload.success_regex,
@@ -527,7 +578,7 @@ fn start_from_payload(
     let mut runtime = data.runtime.lock().unwrap();
     runtime.running = true;
     runtime.last_start_unix = now_unix();
-    runtime.last_workspace = payload.workspace;
+    runtime.last_workspace = workspace_full.display().to_string();
     runtime.last_goal = payload.goal;
     runtime.last_error.clear();
     Ok(())
@@ -1380,6 +1431,8 @@ pub async fn run_web_server(
     tx_req: Sender<AgentRequest>,
     rx_evt: Receiver<AgentEvent>,
 ) -> std::io::Result<()> {
+    fs::create_dir_all(managed_root_path())?;
+    fs::create_dir_all(managed_workspaces_path())?;
     let port = std::env::var("AUTOCODING_PORT")
         .ok()
         .and_then(|v| v.parse::<u16>().ok())
