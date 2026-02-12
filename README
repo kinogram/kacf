@@ -1,6 +1,6 @@
-# AutoCoding
+# KACF (Kevin AutoCoding Framework)
 
-AutoCoding 是一个基于 AI 自编程的工具，旨在通过人工智能自动生成、调试、测试代码，支持与用户的互动，逐步完善和优化程序。项目提供 Web UI 交互方式，并能与 Git 仓库同步，提供了推送远程仓库的功能。
+KACF（Kevin AutoCoding Framework）是一个基于 AI 自编程的工具，旨在通过人工智能自动生成、调试、测试代码，支持与用户的互动，逐步完善和优化程序。项目提供 Web UI 交互方式，并能与 Git 仓库同步，提供了推送远程仓库的功能。
 
 ## 功能概述
 
@@ -68,7 +68,7 @@ Web UI 将会监听 `http://localhost:8080`，可以在浏览器中访问。
 ## 项目结构
 
 ```
-autocoding-gui/
+kacf/
 ├── Cargo.toml          # 项目依赖和配置文件
 ├── src/                # 源代码文件
 │   ├── bin/            # 包含可执行文件，如 input_cli

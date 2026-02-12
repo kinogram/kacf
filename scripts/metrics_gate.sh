@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 PORT="${AUTOCODING_SMOKE_PORT:-18080}"
-BIN="${ROOT_DIR}/target/release/autocoding-gui"
+BIN="${ROOT_DIR}/target/release/kacf"
 MIN_SCORE="${AUTOCODING_GATE_MIN_SCORE:-}"
 ALLOW_RUNNING="${AUTOCODING_GATE_ALLOW_RUNNING:-0}"
 ALLOW_BLOCKERS="${AUTOCODING_GATE_ALLOW_BLOCKERS:-0}"
@@ -41,7 +41,7 @@ if [[ ! -x "$BIN" ]]; then
   cargo build --release
 fi
 
-LOG_FILE="$(mktemp -t autocoding-metrics-gate.XXXXXX.log)"
+LOG_FILE="$(mktemp -t kacf-metrics-gate.XXXXXX.log)"
 cleanup() {
   if [[ -n "${SERVER_PID:-}" ]] && kill -0 "$SERVER_PID" >/dev/null 2>&1; then
     kill "$SERVER_PID" >/dev/null 2>&1 || true

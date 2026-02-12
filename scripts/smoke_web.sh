@@ -5,14 +5,14 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 PORT="${AUTOCODING_SMOKE_PORT:-18080}"
-BIN="${ROOT_DIR}/target/release/autocoding-gui"
+BIN="${ROOT_DIR}/target/release/kacf"
 
 if [[ ! -x "$BIN" ]]; then
   echo "[smoke-web] release binary missing, building..."
   cargo build --release
 fi
 
-LOG_FILE="$(mktemp -t autocoding-smoke.XXXXXX.log)"
+LOG_FILE="$(mktemp -t kacf-smoke.XXXXXX.log)"
 cleanup() {
   if [[ -n "${SERVER_PID:-}" ]] && kill -0 "$SERVER_PID" >/dev/null 2>&1; then
     kill "$SERVER_PID" >/dev/null 2>&1 || true

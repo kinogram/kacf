@@ -45,10 +45,10 @@ pub fn init_repo_if_needed(workspace: &Path) -> Result<()> {
     let status = Command::new("git")
         .args(["commit", "-m", "Initial commit"])
         .current_dir(workspace)
-        .env("GIT_AUTHOR_NAME", "AutoCoding")
-        .env("GIT_AUTHOR_EMAIL", "autocoding@example.com")
-        .env("GIT_COMMITTER_NAME", "AutoCoding")
-        .env("GIT_COMMITTER_EMAIL", "autocoding@example.com")
+        .env("GIT_AUTHOR_NAME", "KACF")
+        .env("GIT_AUTHOR_EMAIL", "kacf@example.com")
+        .env("GIT_COMMITTER_NAME", "KACF")
+        .env("GIT_COMMITTER_EMAIL", "kacf@example.com")
         .status()
         .with_context(|| "failed to run git commit during initialization")?;
     // It's okay if commit fails (e.g. nothing to commit) – the next commit
@@ -77,10 +77,10 @@ pub fn commit_all(workspace: &Path, message: &str) -> Result<()> {
     let commit_status = Command::new("git")
         .args(["commit", "-m", message])
         .current_dir(workspace)
-        .env("GIT_AUTHOR_NAME", "AutoCoding")
-        .env("GIT_AUTHOR_EMAIL", "autocoding@example.com")
-        .env("GIT_COMMITTER_NAME", "AutoCoding")
-        .env("GIT_COMMITTER_EMAIL", "autocoding@example.com")
+        .env("GIT_AUTHOR_NAME", "KACF")
+        .env("GIT_AUTHOR_EMAIL", "kacf@example.com")
+        .env("GIT_COMMITTER_NAME", "KACF")
+        .env("GIT_COMMITTER_EMAIL", "kacf@example.com")
         .status()
         .with_context(|| "failed to run git commit in commit_all")?;
     // If there's nothing to commit, git exits with non-zero. We don't treat

@@ -1,4 +1,4 @@
-//! Minimal web UI mode for the AutoCoding agent.
+//! Minimal web UI mode for the KACF (Kevin AutoCoding Framework) agent.
 //!
 //! This module exposes HTTP endpoints to control the agent loop and to
 //! retrieve events (logs, diffs, clarifications, completion). It is
@@ -510,10 +510,7 @@ fn set_or_clear_env(key: &str, value: &str) {
 }
 
 fn read_resume_info(workspace: &str, goal: &str) -> Option<ResumeInfo> {
-    if workspace.trim().is_empty() {
-        return None;
-    }
-    let path = Path::new(workspace).join(SESSION_STATE_FILENAME);
+    let path = require_managed_workspace(workspace).ok()?.join(SESSION_STATE_FILENAME);
     let content = fs::read_to_string(path).ok()?;
     let meta: ResumeMeta = serde_json::from_str(&content).ok()?;
     if !goal.trim().is_empty() && !meta.goal.trim().is_empty() && meta.goal.trim() != goal.trim() {
@@ -578,7 +575,7 @@ fn start_from_payload(
     let mut runtime = data.runtime.lock().unwrap();
     runtime.running = true;
     runtime.last_start_unix = now_unix();
-    runtime.last_workspace = workspace_full.display().to_string();
+    runtime.last_workspace = payload.workspace;
     runtime.last_goal = payload.goal;
     runtime.last_error.clear();
     Ok(())
@@ -855,7 +852,7 @@ async fn get_ui_state(data: web::Data<AppState>) -> impl Responder {
 async fn health() -> impl Responder {
     HttpResponse::Ok().json(HealthResponse {
         ok: true,
-        service: "autocoding-web-ui",
+        service: "kacf-web-ui",
         version: env!("CARGO_PKG_VERSION"),
         unix_time: now_unix(),
     })

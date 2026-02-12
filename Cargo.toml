@@ -1,8 +1,8 @@
 [package]
-name = "autocoding-gui"
+name = "kacf"
 version = "0.4.4"
 edition = "2021"
-default-run = "autocoding-gui"
+default-run = "kacf"
 
 [features]
 default = []

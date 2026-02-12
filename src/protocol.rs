@@ -85,18 +85,6 @@ pub struct ClarifyAnswer {
     pub text: String,
 }
 
-impl ClarifyAnswer {
-    pub fn empty(id: &str, qtype: String) -> Self {
-        Self {
-            id: id.to_string(),
-            qtype,
-            single: String::new(),
-            multi: vec![],
-            text: String::new(),
-        }
-    }
-}
-
 /// Structured output returned by the model. The `kind` field determines
 /// whether the model is asking clarification questions or providing a patch.
 #[derive(Debug, Serialize, Deserialize)]
