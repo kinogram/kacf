@@ -283,7 +283,7 @@
             <div class="row two">
                 <div>
                     <label for="project_name">项目名称</label>
-                    <input id="project_name" type="text" placeholder="例如：桌面贪吃蛇优化">
+                    <input id="project_name" type="text" placeholder="将根据目标需求自动生成，可手动修改">
                 </div>
                 <div>
                     <label>全局配置</label>
@@ -293,7 +293,7 @@
                 </div>
             </div>
             <div class="buttons">
-                <button class="btn-ghost" id="project_new_btn">新建项目</button>
+                <button class="btn-ghost" id="project_new_btn">新建草稿</button>
                 <button class="btn-ghost" id="project_save_btn">保存当前项目</button>
                 <button class="btn-ghost" id="project_load_btn">载入当前项目</button>
                 <button class="btn-ghost" id="project_delete_btn">删除当前项目</button>
@@ -378,14 +378,14 @@
             </div>
 
             <div class="buttons">
-                <button id="start_btn">开始新任务</button>
+                <button id="start_btn">运行当前项目</button>
                 <button class="btn-warn" id="resume_btn">从断点恢复</button>
                 <button class="btn-danger" id="stop_btn">停止</button>
                 <button class="btn-ghost" id="go_running_project_btn">回到运行项目</button>
                 <button class="btn-ghost" id="revert_btn">回滚上次提交</button>
                 <button class="btn-ghost" id="push_btn">推送到远程</button>
             </div>
-            <p class="hint">“开始新任务”会忽略旧会话；如需接着上次做，请点“从断点恢复”。</p>
+            <p class="hint">“运行当前项目”会从当前项目发起新一轮执行；如需接着上次做，请点“从断点恢复”。</p>
         </section>
 
         <section class="card">
@@ -498,6 +498,8 @@ let cacheProjectLogs = {};
 let cacheProjectUiState = {};
 let uiCacheSaveTimer = null;
 const WORKSPACE_ROOT = './autocoding_data/workspaces';
+let projectNameManualOverride = false;
+let lastAutoProjectName = '';
 let availableLanguages = [];
 let currentLanguage = '';
 let sharedConfig = {
@@ -612,6 +614,34 @@ async function initLanguagePack() {
 
 function txt(key, fallback) {
     return COPY[key] || fallback || key;
+}
+
+function inferProjectNameFromGoal(goal) {
+    let text = (goal || '').replace(/\s+/g, ' ').trim();
+    if (!text) return '';
+    text = text
+        .replace(/^(做一个|开发一个|实现一个|创建一个|请做一个|请实现一个|帮我做一个)\s*/i, '')
+        .replace(/^(build|create|implement|develop)\s+(a|an)?\s*/i, '');
+    const cut = text.search(/[。！？.!?]/);
+    if (cut > 0) text = text.slice(0, cut);
+    text = text.trim();
+    if (!text) return '';
+    const maxLen = 26;
+    if (text.length > maxLen) text = text.slice(0, maxLen).trim();
+    return text;
+}
+
+function autoFillProjectNameFromGoal(force) {
+    const el = document.getElementById('project_name');
+    if (!el) return;
+    const current = el.value.trim();
+    const canAuto = force || !projectNameManualOverride || !current || current === lastAutoProjectName;
+    if (!canAuto) return;
+    const next = inferProjectNameFromGoal(document.getElementById('goal')?.value || '');
+    if (!next) return;
+    el.value = next;
+    lastAutoProjectName = next;
+    projectNameManualOverride = false;
 }
 
 function maskApiKey(raw) {
@@ -1379,6 +1409,8 @@ function selectProjectByCurrentForm() {
     if (found) {
         renderProjectSelector(found.id);
         document.getElementById('project_name').value = found.name || '';
+        projectNameManualOverride = true;
+        lastAutoProjectName = '';
     }
 }
 
@@ -1386,7 +1418,16 @@ function syncProjectNameFromSelection() {
     const sel = document.getElementById('project_selector');
     const items = loadProjects();
     const found = items.find(x => x.id === sel.value);
-    document.getElementById('project_name').value = found ? (found.name || '') : '';
+    if (found) {
+        document.getElementById('project_name').value = found.name || '';
+        projectNameManualOverride = true;
+        lastAutoProjectName = '';
+    } else {
+        document.getElementById('project_name').value = '';
+        projectNameManualOverride = false;
+        lastAutoProjectName = '';
+        autoFillProjectNameFromGoal(false);
+    }
     renderCurrentLogView();
     renderUiForViewBucket();
     applyReadOnlyMode();
@@ -1394,6 +1435,7 @@ function syncProjectNameFromSelection() {
 
 async function saveCurrentProject() {
     updateSharedConfigFromInputs();
+    autoFillProjectNameFromGoal(false);
     const body = { ...getFormData() };
     const sel = document.getElementById('project_selector');
     const items = loadProjects();
@@ -1438,6 +1480,8 @@ async function saveCurrentProject() {
     }
     renderProjectSelector(project.id);
     document.getElementById('project_name').value = project.name;
+    projectNameManualOverride = true;
+    lastAutoProjectName = '';
     document.getElementById('workspace').value = projectWorkspace;
     appendLog(
         txt('log_project_saved', '[UI] 项目已保存：{name}{suffix}')
@@ -1465,6 +1509,8 @@ function loadSelectedProject() {
     };
     applyFormData(merged);
     document.getElementById('project_name').value = found.name || '';
+    projectNameManualOverride = true;
+    lastAutoProjectName = '';
     ensureWorkspaceForCurrentProject();
     scheduleDraftSave();
     setStatus(`已载入项目：${found.name || '未命名'}`, 'status-warn');
@@ -1490,6 +1536,8 @@ async function deleteSelectedProject() {
     }
     renderProjectSelector('');
     document.getElementById('project_name').value = '';
+    projectNameManualOverride = false;
+    lastAutoProjectName = '';
     const logs = loadProjectLogs();
     delete logs[`project:${found.id}`];
     saveProjectLogs(logs);
@@ -1514,9 +1562,12 @@ function createNewProject() {
     applyFormData(defaults);
     document.getElementById('project_selector').value = '';
     document.getElementById('project_name').value = '';
+    projectNameManualOverride = false;
+    lastAutoProjectName = '';
     document.getElementById('workspace').value = '';
     activeRunLogBucket = '';
     scheduleDraftSave();
+    autoFillProjectNameFromGoal(false);
     renderCurrentLogView();
     renderUiForViewBucket();
     applyReadOnlyMode();
@@ -2088,11 +2139,15 @@ function applyPreset(kind) {
         goal.value = '做一个桌面程序：包含可视化界面、文件导入导出、设置页、完整自动化评测脚本。';
         evalCmd.value = 'bash scripts/run_tests.sh';
     }
+    autoFillProjectNameFromGoal(false);
     scheduleDraftSave();
 }
 
 function resetForm() {
     applyFormData(defaultFormData());
+    projectNameManualOverride = false;
+    lastAutoProjectName = '';
+    autoFillProjectNameFromGoal(true);
     scheduleDraftSave();
 }
 
@@ -2104,6 +2159,15 @@ function bindAutoSave() {
         el.addEventListener('input', scheduleDraftSave);
         el.addEventListener('change', scheduleDraftSave);
     });
+    const goal = document.getElementById('goal');
+    if (goal) {
+        goal.addEventListener('input', () => {
+            autoFillProjectNameFromGoal(false);
+        });
+        goal.addEventListener('change', () => {
+            autoFillProjectNameFromGoal(false);
+        });
+    }
 }
 
 function bindEvents() {
@@ -2134,6 +2198,15 @@ function bindEvents() {
     document.getElementById('project_load_btn').addEventListener('click', loadSelectedProject);
     document.getElementById('project_delete_btn').addEventListener('click', () => { deleteSelectedProject(); });
     document.getElementById('project_selector').addEventListener('change', syncProjectNameFromSelection);
+    document.getElementById('project_name').addEventListener('input', () => {
+        const value = document.getElementById('project_name').value.trim();
+        if (!value) {
+            projectNameManualOverride = false;
+            autoFillProjectNameFromGoal(false);
+            return;
+        }
+        projectNameManualOverride = value !== lastAutoProjectName;
+    });
     document.getElementById('open_global_config_btn').addEventListener('click', openGlobalConfigModal);
     document.getElementById('save_global_config_btn').addEventListener('click', saveGlobalConfig);
     document.getElementById('close_global_config_btn').addEventListener('click', closeGlobalConfigModal);
@@ -2272,6 +2345,7 @@ async function init() {
     document.getElementById('revert_btn').disabled = true;
     setRunState('idle', txt('run_idle', '空闲'));
     await loadDraft();
+    autoFillProjectNameFromGoal(false);
     applySharedConfigToInputs();
     selectProjectByCurrentForm();
     renderCurrentLogView();
