@@ -378,6 +378,7 @@
             <div class="status-box" id="status">等待启动</div>
             <div class="runbar" id="runbar" data-state="idle"><div class="runbar-fill"></div></div>
             <div class="hint" id="runbar_text">运行状态：空闲</div>
+            <div class="hint" id="running_project_text">当前运行项目：无</div>
             <div class="hint" id="auto_save_state">草稿状态：未保存</div>
             <div class="hint" id="diagnostics">诊断：暂无</div>
             <div class="hint" id="metrics_text">运行指标：暂无</div>
@@ -441,6 +442,7 @@ const BACKEND_FAILURE_THRESHOLD = 3;
 const SSE_ERROR_LIMIT = 6;
 const SSE_CONNECT_GRACE_MS = 10000;
 let activeRunLogBucket = '';
+let activeRunProjectLabel = '';
 
 function defaultFormData() {
     return {
@@ -464,6 +466,45 @@ function defaultFormData() {
 
 function nowText() {
     return new Date().toLocaleString();
+}
+
+function setRunningProjectIndicator(label) {
+    const el = document.getElementById('running_project_text');
+    if (!el) return;
+    el.textContent = `当前运行项目：${label || '无'}`;
+}
+
+function setProjectControlsDisabled(disabled) {
+    const ids = [
+        'project_selector',
+        'project_name',
+        'project_new_btn',
+        'project_save_btn',
+        'project_load_btn',
+        'project_delete_btn',
+    ];
+    ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.disabled = !!disabled;
+    });
+}
+
+function currentProjectLabel() {
+    const sel = document.getElementById('project_selector');
+    const selectedId = sel?.value || '';
+    if (selectedId) {
+        const item = loadProjects().find(x => x.id === selectedId);
+        if (item && (item.name || item.workspace)) {
+            return item.name || item.workspace;
+        }
+    }
+    const body = getFormData();
+    const ws = (body.workspace || '').trim();
+    const goal = (body.goal || '').trim();
+    if (ws) return ws;
+    if (goal) return goal.slice(0, 24);
+    return '未命名项目';
 }
 
 function adHocLogBucketFromForm() {
@@ -696,6 +737,9 @@ function syncStoppedStateIfNeeded(reason) {
     clearStopAckTimer();
     stopRequested = false;
     activeRunLogBucket = '';
+    activeRunProjectLabel = '';
+    setRunningProjectIndicator('无');
+    setProjectControlsDisabled(false);
     setRunState('idle', '空闲');
     document.getElementById('start_btn').disabled = false;
     document.getElementById('stop_btn').disabled = true;
@@ -1080,6 +1124,9 @@ async function refreshUiState() {
         const data = await resp.json();
         renderResumeBanner(data);
         if (data.runtime && data.runtime.running) {
+            const label = (data.runtime.last_workspace || '').trim() || '后端任务运行中';
+            setRunningProjectIndicator(label);
+            setProjectControlsDisabled(true);
             document.getElementById('start_btn').disabled = true;
             document.getElementById('stop_btn').disabled = false;
             document.getElementById('revert_btn').disabled = false;
@@ -1087,6 +1134,8 @@ async function refreshUiState() {
             setRunState('running', '运行中，可点击停止中断');
         } else {
             syncStoppedStateIfNeeded('后端已停止运行');
+            setProjectControlsDisabled(false);
+            setRunningProjectIndicator('无');
         }
     } catch (_e) {
         markBackendFailure('ui_state');
@@ -1255,6 +1304,9 @@ function handleEvent(evt) {
         case 'done':
             clearStopAckTimer();
             activeRunLogBucket = '';
+            activeRunProjectLabel = '';
+            setRunningProjectIndicator('无');
+            setProjectControlsDisabled(false);
             if (evt.success) {
                 setRunState('success', '已完成（成功）');
                 setStatus(`完成：成功 - ${evt.message}`, 'status-ok');
@@ -1298,6 +1350,7 @@ async function startSession() {
     }
     try {
         activeRunLogBucket = currentLogBucket();
+        activeRunProjectLabel = currentProjectLabel();
         const resp = await fetch('/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1309,6 +1362,8 @@ async function startSession() {
         }
         await saveDraftRemote();
         setStatus('已启动新任务。系统将自动写代码并执行评测。', 'status-warn');
+        setRunningProjectIndicator(activeRunProjectLabel);
+        setProjectControlsDisabled(true);
         setRunState('running', '运行中，可点击停止中断');
         stopRequested = false;
         completionAlertShown = false;
@@ -1317,6 +1372,9 @@ async function startSession() {
         document.getElementById('revert_btn').disabled = false;
     } catch (e) {
         activeRunLogBucket = '';
+        activeRunProjectLabel = '';
+        setRunningProjectIndicator('无');
+        setProjectControlsDisabled(false);
         setStatus('启动失败: ' + e, 'status-danger');
     }
 }
@@ -1325,6 +1383,7 @@ async function resumeSession() {
     try {
         const body = getFormData();
         activeRunLogBucket = currentLogBucket();
+        activeRunProjectLabel = currentProjectLabel();
         const resp = await fetch('/resume', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1335,6 +1394,8 @@ async function resumeSession() {
             throw new Error(`${resp.status} ${msg}`);
         }
         setStatus('已从断点恢复运行。', 'status-warn');
+        setRunningProjectIndicator(activeRunProjectLabel);
+        setProjectControlsDisabled(true);
         setRunState('running', '运行中，可点击停止中断');
         stopRequested = false;
         completionAlertShown = false;
@@ -1342,6 +1403,9 @@ async function resumeSession() {
         document.getElementById('stop_btn').disabled = false;
     } catch (e) {
         activeRunLogBucket = '';
+        activeRunProjectLabel = '';
+        setRunningProjectIndicator('无');
+        setProjectControlsDisabled(false);
         setStatus('恢复失败：请先保存并确保当前目标与历史断点一致。' + e, 'status-danger');
     }
 }
@@ -1624,6 +1688,8 @@ async function init() {
     renderProjectSelector('');
     bindEvents();
     bindAutoSave();
+    setRunningProjectIndicator('无');
+    setProjectControlsDisabled(false);
     document.getElementById('stop_btn').disabled = true;
     document.getElementById('revert_btn').disabled = true;
     setRunState('idle', '空闲');
