@@ -20,6 +20,8 @@ use crate::protocol::{AgentEvent, AgentRequest, ClarifyAnswer, ClarifyQuestion};
 
 /// Index HTML page embedded at compile time.
 const INDEX_HTML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/index.html"));
+const COPY_ZH_CN_JSON: &str =
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/copy.zh-CN.json"));
 
 const DRAFT_FILENAME: &str = ".autocoding_webui_draft.json";
 const SESSION_STATE_FILENAME: &str = ".autocoding_state.json";
@@ -1064,6 +1066,12 @@ async fn index_page() -> impl Responder {
         .body(INDEX_HTML)
 }
 
+async fn copy_zh_cn() -> impl Responder {
+    HttpResponse::Ok()
+        .content_type("application/json; charset=utf-8")
+        .body(COPY_ZH_CN_JSON)
+}
+
 fn spawn_event_collector(state: AppState) {
     std::thread::spawn(move || {
         for evt in state.rx_evt.iter() {
@@ -1448,6 +1456,7 @@ pub async fn run_web_server(
         App::new()
             .app_data(web::Data::new(state.clone()))
             .route("/", web::get().to(index_page))
+            .route("/assets/copy.zh-CN.json", web::get().to(copy_zh_cn))
             .route("/start", web::post().to(start_session))
             .route("/stop", web::post().to(stop_session))
             .route("/resume", web::post().to(resume_session))

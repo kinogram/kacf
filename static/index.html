@@ -491,6 +491,22 @@ let sharedConfig = {
     base_url: 'https://api.deepseek.com',
     model: 'deepseek-reasoner',
 };
+let COPY = {};
+
+async function loadCopyFile() {
+    try {
+        const resp = await fetch('/assets/copy.zh-CN.json');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (data && typeof data === 'object') {
+            COPY = data;
+        }
+    } catch (_e) {}
+}
+
+function txt(key, fallback) {
+    return COPY[key] || fallback || key;
+}
 
 async function suggestProjectSlug(projectName, goal) {
     try {
@@ -578,7 +594,7 @@ function nowText() {
 function setRunningProjectIndicator(label) {
     const el = document.getElementById('running_project_text');
     if (!el) return;
-    el.textContent = `当前运行项目：${label || '无'}`;
+    el.textContent = `当前运行项目：${label || txt('running_project_none', '无')}`;
 }
 
 function setProjectControlsDisabled(disabled) {
@@ -622,8 +638,8 @@ function applyReadOnlyMode() {
     const hint = document.getElementById('readonly_mode_text');
     if (hint) {
         hint.textContent = readonly
-            ? '只读模式：当前正在运行其他项目。你可以查看本项目，但不能编辑或执行会影响运行任务的操作。'
-            : '只读模式：关闭';
+            ? txt('readonly_on', '只读模式：当前正在运行其他项目。你可以查看本项目，但不能编辑或执行会影响运行任务的操作。')
+            : txt('readonly_off', '只读模式：关闭');
     }
     setConfigInputsDisabled(readonly || runSessionActive);
     document.getElementById('start_btn').disabled = readonly || runSessionActive;
@@ -640,7 +656,7 @@ function updateGoRunningProjectButton() {
     if (!btn) return;
     if (!runSessionActive || !activeRunLogBucket) {
         btn.disabled = true;
-        btn.title = '当前没有运行中的项目';
+        btn.title = txt('status_no_running_project', '当前没有运行中的项目。');
         return;
     }
     if (!activeRunLogBucket.startsWith('project:')) {
@@ -656,7 +672,7 @@ function updateGoRunningProjectButton() {
 
 function goToRunningProjectView() {
     if (!runSessionActive || !activeRunLogBucket) {
-        setStatus('当前没有运行中的项目。', 'status-danger');
+        setStatus(txt('status_no_running_project', '当前没有运行中的项目。'), 'status-danger');
         return;
     }
     if (!activeRunLogBucket.startsWith('project:')) {
@@ -754,10 +770,10 @@ function saveProjectUiStateMap(obj) {
 
 function defaultBucketUiState() {
     return {
-        status_text: '等待启动',
+        status_text: txt('status_waiting', '等待启动'),
         status_class: '',
         run_state: 'idle',
-        run_text: '空闲',
+        run_text: txt('run_idle', '空闲'),
         diagnostics_text: '诊断：暂无',
         diff_text: '',
         clarify_questions: [],
@@ -824,11 +840,11 @@ function renderUiForViewBucket() {
     const bucket = viewLogBucket();
     const state = readBucketUiState(bucket);
     const status = document.getElementById('status');
-    status.textContent = state.status_text || '等待启动';
+    status.textContent = state.status_text || txt('status_waiting', '等待启动');
     status.className = 'status-box ' + (state.status_class || '');
     const bar = document.getElementById('runbar');
     bar.dataset.state = state.run_state || 'idle';
-    document.getElementById('runbar_text').textContent = `运行状态：${state.run_text || '空闲'}`;
+    document.getElementById('runbar_text').textContent = `运行状态：${state.run_text || txt('run_idle', '空闲')}`;
     document.getElementById('diagnostics').textContent = state.diagnostics_text || '诊断：暂无';
     if (state.diff_text) {
         const diffElem = document.getElementById('diff');
@@ -911,7 +927,7 @@ function setRunState(state, text) {
     const bucket = currentLogBucket();
     writeBucketUiState(bucket, {
         run_state: state || 'idle',
-        run_text: text || '空闲',
+        run_text: text || txt('run_idle', '空闲'),
     });
     if (viewLogBucket() === bucket) renderUiForViewBucket();
 }
@@ -953,7 +969,7 @@ function syncStoppedStateIfNeeded(reason) {
     setRunningProjectIndicator('无');
     setProjectControlsDisabled(false);
     applyReadOnlyMode();
-    setRunState('idle', '空闲');
+    setRunState('idle', txt('run_idle', '空闲'));
     document.getElementById('start_btn').disabled = false;
     document.getElementById('stop_btn').disabled = true;
     if (!completionAlertShown) {
@@ -1004,6 +1020,31 @@ function applyFormData(d) {
     });
 }
 
+function applyStaticCopyToDom() {
+    document.title = txt('app_title', document.title);
+    const h1 = document.querySelector('.hero h1');
+    if (h1) h1.textContent = txt('app_header', h1.textContent);
+    const map = [
+        ['start_btn', 'btn_start'],
+        ['resume_btn', 'btn_resume'],
+        ['stop_btn', 'btn_stop'],
+        ['go_running_project_btn', 'btn_go_running'],
+        ['revert_btn', 'btn_revert'],
+        ['push_btn', 'btn_push'],
+        ['open_global_config_btn', 'btn_open_global'],
+        ['save_global_config_btn', 'btn_save_global'],
+        ['close_global_config_btn', 'btn_close'],
+        ['project_new_btn', 'btn_project_new'],
+        ['project_save_btn', 'btn_project_save'],
+        ['project_load_btn', 'btn_project_load'],
+        ['project_delete_btn', 'btn_project_delete']
+    ];
+    map.forEach(([id, key]) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = txt(key, el.textContent);
+    });
+}
+
 function openGlobalConfigModal() {
     document.getElementById('global_config_modal').style.display = 'flex';
 }
@@ -1016,7 +1057,7 @@ async function saveGlobalConfig() {
     updateSharedConfigFromInputs();
     scheduleUiCacheSave();
     closeGlobalConfigModal();
-    setStatus('全局配置已保存。', 'status-warn');
+    setStatus(txt('status_global_saved', '全局配置已保存。'), 'status-warn');
 }
 
 function setAutoSaveState(text) {
@@ -1232,7 +1273,11 @@ async function saveCurrentProject() {
     renderProjectSelector(project.id);
     document.getElementById('project_name').value = project.name;
     document.getElementById('workspace').value = projectWorkspace;
-    appendLog(`[UI] 项目已保存：${project.name}${serverOk ? '' : '（后端未同步）'}`);
+    appendLog(
+        txt('log_project_saved', '[UI] 项目已保存：{name}{suffix}')
+            .replace('{name}', project.name)
+            .replace('{suffix}', serverOk ? '' : txt('log_fallback_suffix_unsynced', '（后端未同步）'))
+    );
     return true;
 }
 
@@ -1242,7 +1287,7 @@ function loadSelectedProject() {
     const items = loadProjects();
     const found = items.find(x => x.id === sel.value);
     if (!found || !found.snapshot) {
-        setStatus('请先选择一个可加载的项目。', 'status-danger');
+        setStatus(txt('status_need_select_project', '请先选择一个可加载的项目。'), 'status-danger');
         return;
     }
     const merged = {
@@ -1257,7 +1302,7 @@ function loadSelectedProject() {
     ensureWorkspaceForCurrentProject();
     scheduleDraftSave();
     setStatus(`已载入项目：${found.name || '未命名'}`, 'status-warn');
-    appendLog(`[UI] 已载入项目：${found.name || '未命名'}`);
+    appendLog(txt('log_project_loaded', '[UI] 已载入项目：{name}').replace('{name}', (found.name || '未命名')));
     renderCurrentLogView();
     renderUiForViewBucket();
     applyReadOnlyMode();
@@ -1268,7 +1313,7 @@ async function deleteSelectedProject() {
     const items = loadProjects();
     const found = items.find(x => x.id === sel.value);
     if (!found) {
-        setStatus('请先选择要删除的项目。', 'status-danger');
+        setStatus(txt('status_need_delete_project', '请先选择要删除的项目。'), 'status-danger');
         return;
     }
     const next = items.filter(x => x.id !== found.id);
@@ -1287,7 +1332,11 @@ async function deleteSelectedProject() {
     saveProjectUiStateMap(uiMap);
     renderCurrentLogView();
     renderUiForViewBucket();
-    appendLog(`[UI] 已删除项目：${found.name || '未命名'}${serverOk ? '' : '（后端未同步）'}`);
+    appendLog(
+        txt('log_project_deleted', '[UI] 已删除项目：{name}{suffix}')
+            .replace('{name}', (found.name || '未命名'))
+            .replace('{suffix}', serverOk ? '' : txt('log_fallback_suffix_unsynced', '（后端未同步）'))
+    );
 }
 
 function createNewProject() {
@@ -1305,7 +1354,7 @@ function createNewProject() {
     renderCurrentLogView();
     renderUiForViewBucket();
     applyReadOnlyMode();
-    setStatus('已切换到新项目草稿，请填写需求后保存项目。', 'status-warn');
+    setStatus(txt('status_new_project_draft', '已切换到新项目草稿，请填写需求后保存项目。'), 'status-warn');
 }
 
 async function saveDraftRemote() {
@@ -1629,7 +1678,7 @@ async function startSession() {
     ensureWorkspaceForCurrentProject();
     let body = getFormData();
     if (isReadOnlyView()) {
-        setStatus('当前是只读视图，请切回正在运行的项目。', 'status-danger');
+        setStatus(txt('status_readonly_view', '当前是只读视图，请切回正在运行的项目。'), 'status-danger');
         return;
     }
     if (!body.workspace) {
@@ -1637,12 +1686,12 @@ async function startSession() {
         ensureWorkspaceForCurrentProject();
         body = getFormData();
         if (!ok || !body.workspace) {
-            setStatus('启动失败：无法为项目分配目录，请先保存项目。', 'status-danger');
+            setStatus(txt('status_start_alloc_workspace_failed', '启动失败：无法为项目分配目录，请先保存项目。'), 'status-danger');
             return;
         }
     }
     if (!body.api_key) {
-        setStatus('启动失败：API Key 为空，请先填写。', 'status-danger');
+        setStatus(txt('status_start_api_key_empty', '启动失败：API Key 为空，请先填写。'), 'status-danger');
         return;
     }
     try {
@@ -1658,7 +1707,7 @@ async function startSession() {
             throw new Error(`${resp.status} ${msg}`);
         }
         await saveDraftRemote();
-        setStatus('已启动新任务。系统将自动写代码并执行评测。', 'status-warn');
+        setStatus(txt('status_started_new_task', '已启动新任务。系统将自动写代码并执行评测。'), 'status-warn');
         setRunningProjectIndicator(activeRunProjectLabel);
         setProjectControlsDisabled(true);
         runSessionActive = true;
@@ -1684,7 +1733,7 @@ async function resumeSession() {
     try {
         ensureWorkspaceForCurrentProject();
         if (isReadOnlyView()) {
-            setStatus('当前是只读视图，请切回正在运行的项目。', 'status-danger');
+            setStatus(txt('status_readonly_view', '当前是只读视图，请切回正在运行的项目。'), 'status-danger');
             return;
         }
         let body = getFormData();
@@ -1693,7 +1742,7 @@ async function resumeSession() {
             ensureWorkspaceForCurrentProject();
             body = getFormData();
             if (!ok || !body.workspace) {
-                setStatus('恢复失败：无法为项目分配目录，请先保存项目。', 'status-danger');
+                setStatus(txt('status_resume_alloc_workspace_failed', '恢复失败：无法为项目分配目录，请先保存项目。'), 'status-danger');
                 return;
             }
         }
@@ -1712,7 +1761,7 @@ async function resumeSession() {
             const msg = await resp.text();
             throw new Error(`${resp.status} ${msg}`);
         }
-        setStatus('已从断点恢复运行。', 'status-warn');
+        setStatus(txt('status_resumed', '已从断点恢复运行。'), 'status-warn');
         setRunningProjectIndicator(activeRunProjectLabel);
         setProjectControlsDisabled(true);
         runSessionActive = true;
@@ -1933,7 +1982,7 @@ function exportLogs() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `kacf-log-${Date.now()}.txt`;
+    a.download = `${txt('download_log_prefix', 'kacf-log')}-${Date.now()}.txt`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -1956,7 +2005,7 @@ async function exportSnapshot() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `kacf-snapshot-${Date.now()}.json`;
+        a.download = `${txt('download_snapshot_prefix', 'kacf-snapshot')}-${Date.now()}.json`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -1972,7 +2021,7 @@ async function exportReleaseReport() {
         const metrics = mResp.ok ? await mResp.json() : { error: `metrics ${mResp.status}` };
         const uiState = sResp.ok ? await sResp.json() : { error: `ui_state ${sResp.status}` };
         const lines = [];
-        lines.push(`# KACF 发布诊断报告`);
+        lines.push(txt('report_title', '# KACF 发布诊断报告'));
         lines.push('');
         lines.push(`- 导出时间: ${new Date().toISOString()}`);
         lines.push(`- 当前状态: ${document.getElementById('status').textContent}`);
@@ -2010,7 +2059,7 @@ async function exportReleaseReport() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `kacf-release-report-${Date.now()}.md`;
+        a.download = `${txt('download_report_prefix', 'kacf-release-report')}-${Date.now()}.md`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -2021,19 +2070,21 @@ async function exportReleaseReport() {
 }
 
 async function init() {
+    await loadCopyFile();
+    applyStaticCopyToDom();
     await fetchUiCacheFromServer();
     applySharedConfigToInputs();
     await refreshProjectsFromServer();
     renderProjectSelector('');
     bindEvents();
     bindAutoSave();
-    setRunningProjectIndicator('无');
+    setRunningProjectIndicator(txt('running_project_none', '无'));
     setProjectControlsDisabled(false);
     applyReadOnlyMode();
     updateGoRunningProjectButton();
     document.getElementById('stop_btn').disabled = true;
     document.getElementById('revert_btn').disabled = true;
-    setRunState('idle', '空闲');
+    setRunState('idle', txt('run_idle', '空闲'));
     await loadDraft();
     applySharedConfigToInputs();
     selectProjectByCurrentForm();
