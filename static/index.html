@@ -415,6 +415,7 @@ const DRAFT_KEY = 'autocoding_webui_draft_v2';
 const RECENT_WORKSPACES_KEY = 'autocoding_recent_workspaces_v1';
 const PROJECTS_KEY = 'autocoding_projects_v1';
 const PROJECT_LOGS_KEY = 'autocoding_project_logs_v1';
+const PROJECT_UI_STATE_KEY = 'autocoding_project_ui_state_v1';
 let lastEventId = 0;
 let polling = false;
 let saveTimer = null;
@@ -472,11 +473,125 @@ function adHocLogBucketFromForm() {
     return `adhoc:${ws}::${goal}`;
 }
 
-function currentLogBucket() {
-    if (activeRunLogBucket) return activeRunLogBucket;
+function viewLogBucket() {
     const selectedProjectId = document.getElementById('project_selector')?.value || '';
     if (selectedProjectId) return `project:${selectedProjectId}`;
     return adHocLogBucketFromForm();
+}
+
+function currentLogBucket() {
+    return activeRunLogBucket || viewLogBucket();
+}
+
+function loadProjectUiStateMap() {
+    try {
+        const data = JSON.parse(localStorage.getItem(PROJECT_UI_STATE_KEY) || '{}');
+        return data && typeof data === 'object' ? data : {};
+    } catch (_e) {
+        return {};
+    }
+}
+
+function saveProjectUiStateMap(obj) {
+    localStorage.setItem(PROJECT_UI_STATE_KEY, JSON.stringify(obj || {}));
+}
+
+function defaultBucketUiState() {
+    return {
+        status_text: '等待启动',
+        status_class: '',
+        run_state: 'idle',
+        run_text: '空闲',
+        diagnostics_text: '诊断：暂无',
+        diff_text: '',
+        clarify_questions: [],
+    };
+}
+
+function readBucketUiState(bucket) {
+    const all = loadProjectUiStateMap();
+    const raw = all[bucket];
+    if (!raw || typeof raw !== 'object') return defaultBucketUiState();
+    return { ...defaultBucketUiState(), ...raw };
+}
+
+function writeBucketUiState(bucket, patch) {
+    const all = loadProjectUiStateMap();
+    all[bucket] = { ...readBucketUiState(bucket), ...(patch || {}) };
+    saveProjectUiStateMap(all);
+}
+
+function renderClarifyQuestions(questions) {
+    const form = document.getElementById('clarify_form');
+    form.innerHTML = '';
+    (questions || []).forEach(q => {
+        const div = document.createElement('div');
+        div.style.marginBottom = '10px';
+        const label = document.createElement('label');
+        label.textContent = `${q.id}: ${q.question}`;
+        div.appendChild(label);
+        if (q.type === 'single') {
+            q.options.forEach(opt => {
+                const radio = document.createElement('input');
+                radio.type = 'radio';
+                radio.name = q.id;
+                radio.value = opt;
+                div.appendChild(radio);
+                const span = document.createElement('span');
+                span.textContent = ` ${opt}`;
+                div.appendChild(span);
+                div.appendChild(document.createElement('br'));
+            });
+        } else if (q.type === 'multi') {
+            q.options.forEach(opt => {
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.name = q.id;
+                checkbox.value = opt;
+                div.appendChild(checkbox);
+                const span = document.createElement('span');
+                span.textContent = ` ${opt}`;
+                div.appendChild(span);
+                div.appendChild(document.createElement('br'));
+            });
+        } else {
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.name = q.id;
+            div.appendChild(input);
+        }
+        form.appendChild(div);
+    });
+}
+
+function renderUiForViewBucket() {
+    const bucket = viewLogBucket();
+    const state = readBucketUiState(bucket);
+    const status = document.getElementById('status');
+    status.textContent = state.status_text || '等待启动';
+    status.className = 'status-box ' + (state.status_class || '');
+    const bar = document.getElementById('runbar');
+    bar.dataset.state = state.run_state || 'idle';
+    document.getElementById('runbar_text').textContent = `运行状态：${state.run_text || '空闲'}`;
+    document.getElementById('diagnostics').textContent = state.diagnostics_text || '诊断：暂无';
+    if (state.diff_text) {
+        const diffElem = document.getElementById('diff');
+        const lines = state.diff_text.split('\n');
+        diffElem.innerHTML = lines.map(line => {
+            if (line.startsWith('+') && !line.startsWith('+++')) {
+                return `<div class="diff-line-add">${escapeHtml(line)}</div>`;
+            }
+            if (line.startsWith('-') && !line.startsWith('---')) {
+                return `<div class="diff-line-del">${escapeHtml(line)}</div>`;
+            }
+            return `<div class="diff-line-other">${escapeHtml(line)}</div>`;
+        }).join('');
+        document.getElementById('diff_section').style.display = 'block';
+    } else {
+        document.getElementById('diff_section').style.display = 'none';
+        document.getElementById('diff').innerHTML = '';
+    }
+    renderClarifyQuestions(state.clarify_questions || []);
 }
 
 function loadProjectLogs() {
@@ -507,7 +622,7 @@ function writeLogForBucket(bucket, content) {
 
 function renderCurrentLogView() {
     const log = document.getElementById('log');
-    log.textContent = readLogForBucket(currentLogBucket());
+    log.textContent = readLogForBucket(viewLogBucket());
     log.scrollTop = log.scrollHeight;
 }
 
@@ -524,25 +639,33 @@ function updateDiagnosticsFromLog(text) {
     const m = text.match(/^\[Eval-Digest\]\s+category=([^\s]+)\s+severity=([^\s]+)\s+repeated=([^\s]+)\s+signature=(.*)$/);
     if (!m) return;
     const [, category, severity, repeated, signature] = m;
-    const diag = document.getElementById('diagnostics');
-    diag.textContent = `诊断：类别=${category} 严重度=${severity} 重复=${repeated} 关键签名=${signature}`;
+    const bucket = currentLogBucket();
+    writeBucketUiState(bucket, {
+        diagnostics_text: `诊断：类别=${category} 严重度=${severity} 重复=${repeated} 关键签名=${signature}`,
+    });
+    if (viewLogBucket() === bucket) renderUiForViewBucket();
 }
 
 function setStatus(msg, cls) {
-    const el = document.getElementById('status');
-    el.textContent = msg;
-    el.className = 'status-box ' + (cls || '');
+    const bucket = currentLogBucket();
+    writeBucketUiState(bucket, {
+        status_text: msg,
+        status_class: cls || '',
+    });
+    if (viewLogBucket() === bucket) renderUiForViewBucket();
 }
 
 function setRunState(state, text) {
-    const bar = document.getElementById('runbar');
-    const tip = document.getElementById('runbar_text');
-    bar.dataset.state = state || 'idle';
-    tip.textContent = `运行状态：${text}`;
+    const bucket = currentLogBucket();
+    writeBucketUiState(bucket, {
+        run_state: state || 'idle',
+        run_text: text || '空闲',
+    });
+    if (viewLogBucket() === bucket) renderUiForViewBucket();
 }
 
 function currentRunState() {
-    return document.getElementById('runbar').dataset.state || 'idle';
+    return readBucketUiState(currentLogBucket()).run_state || 'idle';
 }
 
 function markBackendAlive() {
@@ -730,6 +853,7 @@ function syncProjectNameFromSelection() {
     const found = items.find(x => x.id === sel.value);
     document.getElementById('project_name').value = found ? (found.name || '') : '';
     renderCurrentLogView();
+    renderUiForViewBucket();
 }
 
 async function saveCurrentProject() {
@@ -778,6 +902,7 @@ function loadSelectedProject() {
     setStatus(`已载入项目：${found.name || '未命名'}`, 'status-warn');
     appendLog(`[UI] 已载入项目：${found.name || '未命名'}`);
     renderCurrentLogView();
+    renderUiForViewBucket();
 }
 
 async function deleteSelectedProject() {
@@ -799,7 +924,11 @@ async function deleteSelectedProject() {
     const logs = loadProjectLogs();
     delete logs[`project:${found.id}`];
     saveProjectLogs(logs);
+    const uiMap = loadProjectUiStateMap();
+    delete uiMap[`project:${found.id}`];
+    saveProjectUiStateMap(uiMap);
     renderCurrentLogView();
+    renderUiForViewBucket();
     appendLog(`[UI] 已删除项目：${found.name || '未命名'}${serverOk ? '' : '（仅本地）'}`);
 }
 
@@ -815,6 +944,7 @@ function createNewProject() {
     activeRunLogBucket = '';
     scheduleDraftSave();
     renderCurrentLogView();
+    renderUiForViewBucket();
     setStatus('已切换到新项目草稿，请填写需求后保存项目。', 'status-warn');
 }
 
@@ -1118,7 +1248,6 @@ function handleEvent(evt) {
             break;
         case 'diff':
             renderDiff(evt.diff);
-            document.getElementById('diff_section').style.display = 'block';
             break;
         case 'need_clarify':
             showClarify(evt.questions);
@@ -1156,47 +1285,9 @@ function handleEvent(evt) {
 }
 
 function showClarify(questions) {
-    const form = document.getElementById('clarify_form');
-    form.innerHTML = '';
-    questions.forEach(q => {
-        const div = document.createElement('div');
-        div.style.marginBottom = '10px';
-        const label = document.createElement('label');
-        label.textContent = `${q.id}: ${q.question}`;
-        div.appendChild(label);
-
-        if (q.type === 'single') {
-            q.options.forEach(opt => {
-                const radio = document.createElement('input');
-                radio.type = 'radio';
-                radio.name = q.id;
-                radio.value = opt;
-                div.appendChild(radio);
-                const span = document.createElement('span');
-                span.textContent = ` ${opt}`;
-                div.appendChild(span);
-                div.appendChild(document.createElement('br'));
-            });
-        } else if (q.type === 'multi') {
-            q.options.forEach(opt => {
-                const checkbox = document.createElement('input');
-                checkbox.type = 'checkbox';
-                checkbox.name = q.id;
-                checkbox.value = opt;
-                div.appendChild(checkbox);
-                const span = document.createElement('span');
-                span.textContent = ` ${opt}`;
-                div.appendChild(span);
-                div.appendChild(document.createElement('br'));
-            });
-        } else {
-            const input = document.createElement('input');
-            input.type = 'text';
-            input.name = q.id;
-            div.appendChild(input);
-        }
-        form.appendChild(div);
-    });
+    const bucket = currentLogBucket();
+    writeBucketUiState(bucket, { clarify_questions: questions || [] });
+    if (viewLogBucket() === bucket) renderUiForViewBucket();
 }
 
 async function startSession() {
@@ -1336,14 +1427,18 @@ async function submitClarify(e) {
             body: JSON.stringify({ answers }),
         });
         if (!resp.ok) throw new Error(`clarify error ${resp.status}`);
+        writeBucketUiState(currentLogBucket(), { clarify_questions: [] });
         appendLog('[UI] 已提交澄清');
-        document.getElementById('clarify_form').innerHTML = '';
+        if (viewLogBucket() === currentLogBucket()) renderUiForViewBucket();
     } catch (err) {
         setStatus('提交澄清失败: ' + err, 'status-danger');
     }
 }
 
 function renderDiff(diffText) {
+    const bucket = currentLogBucket();
+    writeBucketUiState(bucket, { diff_text: diffText || '' });
+    if (viewLogBucket() !== bucket) return;
     const diffElem = document.getElementById('diff');
     const lines = diffText.split('\n');
     diffElem.innerHTML = lines.map(line => {
@@ -1355,6 +1450,7 @@ function renderDiff(diffText) {
         }
         return `<div class="diff-line-other">${escapeHtml(line)}</div>`;
     }).join('');
+    document.getElementById('diff_section').style.display = 'block';
 }
 
 function escapeHtml(text) {
@@ -1412,7 +1508,7 @@ function bindEvents() {
     document.getElementById('push_btn').addEventListener('click', pushRemote);
     document.getElementById('clarify_submit_btn').addEventListener('click', submitClarify);
     document.getElementById('clear_log_btn').addEventListener('click', () => {
-        writeLogForBucket(currentLogBucket(), '');
+        writeLogForBucket(viewLogBucket(), '');
         renderCurrentLogView();
     });
     document.getElementById('export_log_btn').addEventListener('click', exportLogs);
@@ -1534,6 +1630,7 @@ async function init() {
     await loadDraft();
     selectProjectByCurrentForm();
     renderCurrentLogView();
+    renderUiForViewBucket();
     await loadProjectConfigForWorkspace();
     await refreshUiState();
     await refreshMetrics();
