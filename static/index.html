@@ -400,6 +400,8 @@ let lastEventId = 0;
 let polling = false;
 let saveTimer = null;
 let stopRequested = false;
+let eventSource = null;
+let sseRetryTimer = null;
 const POLL_MS_ACTIVE = 1000;
 const POLL_MS_IDLE = 3000;
 
@@ -654,6 +656,40 @@ async function pollEvents() {
         polling = false;
     }
     setTimeout(pollEvents, document.hidden ? POLL_MS_IDLE : POLL_MS_ACTIVE);
+}
+
+function closeEventStream() {
+    if (sseRetryTimer) {
+        clearTimeout(sseRetryTimer);
+        sseRetryTimer = null;
+    }
+    if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+    }
+}
+
+function startEventStream() {
+    if (!window.EventSource) {
+        pollEvents();
+        return;
+    }
+    closeEventStream();
+    eventSource = new EventSource(`/events/stream?from=${lastEventId}`);
+    eventSource.onmessage = (event) => {
+        try {
+            const data = JSON.parse(event.data || '{}');
+            const id = Number(data.id || 0);
+            const evt = data.evt;
+            if (!evt || Number.isNaN(id)) return;
+            lastEventId = Math.max(lastEventId, id + 1);
+            handleEvent(evt);
+        } catch (_e) {}
+    };
+    eventSource.onerror = () => {
+        closeEventStream();
+        sseRetryTimer = setTimeout(startEventStream, 1200);
+    };
 }
 
 function handleEvent(evt) {
@@ -1058,7 +1094,8 @@ async function init() {
     await refreshUiState();
     await refreshMetrics();
     setInterval(refreshMetrics, 5000);
-    pollEvents();
+    startEventStream();
+    window.addEventListener('beforeunload', closeEventStream);
 }
 
 init();

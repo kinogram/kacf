@@ -7,12 +7,13 @@
 //! browser. The server listens on 0.0.0.0:8080 by default.
 
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
+use async_stream::stream;
 use crossbeam_channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::protocol::{AgentEvent, AgentRequest, ClarifyAnswer, ClarifyQuestion};
 
@@ -686,6 +687,43 @@ async fn get_events(
     HttpResponse::Ok().json(list)
 }
 
+async fn stream_events(
+    data: web::Data<AppState>,
+    query: web::Query<std::collections::HashMap<String, String>>,
+) -> impl Responder {
+    let from_id: usize = query.get("from").and_then(|v| v.parse().ok()).unwrap_or(0);
+    let mut next_id = from_id;
+    let s = stream! {
+        yield Ok::<_, actix_web::Error>(web::Bytes::from_static(b": connected\n\n"));
+        loop {
+            let batch: Vec<(usize, SerializableEvent)> = {
+                let events = data.events.lock().unwrap();
+                events
+                    .iter()
+                    .filter(|(id, _)| *id >= next_id)
+                    .cloned()
+                    .collect()
+            };
+            if batch.is_empty() {
+                yield Ok(web::Bytes::from_static(b": ping\n\n"));
+            } else {
+                for (id, evt) in batch {
+                    next_id = next_id.max(id + 1);
+                    let payload = serde_json::json!({ "id": id, "evt": evt });
+                    let line = format!("data: {}\n\n", payload);
+                    yield Ok(web::Bytes::from(line));
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+    };
+    HttpResponse::Ok()
+        .insert_header(("Content-Type", "text/event-stream"))
+        .insert_header(("Cache-Control", "no-cache"))
+        .insert_header(("Connection", "keep-alive"))
+        .streaming(s)
+}
+
 async fn index_page() -> impl Responder {
     HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
@@ -1056,6 +1094,7 @@ pub async fn run_web_server(
             .route("/revert", web::post().to(revert_last))
             .route("/push", web::post().to(push_remote))
             .route("/events", web::get().to(get_events))
+            .route("/events/stream", web::get().to(stream_events))
     })
     .bind(("0.0.0.0", port))?
     .run()
