@@ -247,6 +247,23 @@
 
             <div class="row two">
                 <div>
+                    <label for="project_selector">项目管理</label>
+                    <select id="project_selector"></select>
+                </div>
+                <div>
+                    <label for="project_name">项目名称</label>
+                    <input id="project_name" type="text" placeholder="例如：桌面贪吃蛇优化">
+                </div>
+            </div>
+            <div class="buttons">
+                <button class="btn-ghost" id="project_new_btn">新建项目</button>
+                <button class="btn-ghost" id="project_save_btn">保存当前项目</button>
+                <button class="btn-ghost" id="project_load_btn">载入所选项目</button>
+                <button class="btn-ghost" id="project_delete_btn">删除所选项目</button>
+            </div>
+
+            <div class="row two">
+                <div>
                     <label for="api_key">API Key</label>
                     <input id="api_key" type="text" placeholder="输入你的 API Key">
                 </div>
@@ -396,6 +413,7 @@
 <script>
 const DRAFT_KEY = 'autocoding_webui_draft_v2';
 const RECENT_WORKSPACES_KEY = 'autocoding_recent_workspaces_v1';
+const PROJECTS_KEY = 'autocoding_projects_v1';
 let lastEventId = 0;
 let polling = false;
 let saveTimer = null;
@@ -420,6 +438,26 @@ const FALLBACK_LOG_DEDUP_MS = 30000;
 const BACKEND_FAILURE_THRESHOLD = 3;
 const SSE_ERROR_LIMIT = 6;
 const SSE_CONNECT_GRACE_MS = 10000;
+
+function defaultFormData() {
+    return {
+        api_key: '',
+        base_url: 'https://api.deepseek.com',
+        model: 'deepseek-reasoner',
+        auto_revert_profile: 'balanced',
+        precheck_cmd: '',
+        history_max_messages: '',
+        history_max_chars: '',
+        release_gate_threshold: '',
+        workspace: './workspace',
+        goal: '',
+        eval_cmd: 'bash scripts/run_tests.sh',
+        success_regex: '',
+        remote: 'origin',
+        remote_url: '',
+        branch: 'main',
+    };
+}
 
 function nowText() {
     return new Date().toLocaleString();
@@ -536,6 +574,139 @@ function applyFormData(d) {
 
 function setAutoSaveState(text) {
     document.getElementById('auto_save_state').textContent = text;
+}
+
+function loadProjects() {
+    try {
+        const data = JSON.parse(localStorage.getItem(PROJECTS_KEY) || '[]');
+        return Array.isArray(data) ? data : [];
+    } catch (_e) {
+        return [];
+    }
+}
+
+function saveProjects(items) {
+    localStorage.setItem(PROJECTS_KEY, JSON.stringify(items || []));
+}
+
+function randomProjectId() {
+    return `p_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function renderProjectSelector(selectedId) {
+    const sel = document.getElementById('project_selector');
+    if (!sel) return;
+    const items = loadProjects();
+    sel.innerHTML = '';
+    const empty = document.createElement('option');
+    empty.value = '';
+    empty.textContent = items.length ? '选择一个项目...' : '暂无项目，请先保存当前项目';
+    sel.appendChild(empty);
+    items.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        const ws = (p.workspace || '').trim();
+        opt.textContent = ws ? `${p.name || '未命名'} (${ws})` : (p.name || '未命名');
+        sel.appendChild(opt);
+    });
+    if (selectedId && items.some(x => x.id === selectedId)) {
+        sel.value = selectedId;
+    } else {
+        sel.value = '';
+    }
+}
+
+function selectProjectByCurrentForm() {
+    const body = getFormData();
+    const ws = (body.workspace || '').trim();
+    const goal = (body.goal || '').trim();
+    const items = loadProjects();
+    const found = items.find(x =>
+        (x.workspace || '').trim() === ws
+        && (x.goal || '').trim() === goal
+    );
+    if (found) {
+        renderProjectSelector(found.id);
+        document.getElementById('project_name').value = found.name || '';
+    }
+}
+
+function syncProjectNameFromSelection() {
+    const sel = document.getElementById('project_selector');
+    const items = loadProjects();
+    const found = items.find(x => x.id === sel.value);
+    document.getElementById('project_name').value = found ? (found.name || '') : '';
+}
+
+function saveCurrentProject() {
+    const body = getFormData();
+    const sel = document.getElementById('project_selector');
+    const items = loadProjects();
+    const selectedId = sel.value;
+    const idx = items.findIndex(x => x.id === selectedId);
+    const inputName = document.getElementById('project_name').value.trim();
+    const fallbackName = body.workspace.trim() || `项目 ${items.length + 1}`;
+    const project = {
+        id: idx >= 0 ? items[idx].id : randomProjectId(),
+        name: inputName || fallbackName,
+        workspace: body.workspace,
+        goal: body.goal,
+        updated_at: Date.now(),
+        snapshot: body,
+    };
+    if (idx >= 0) {
+        items[idx] = project;
+    } else {
+        items.unshift(project);
+    }
+    saveProjects(items);
+    renderProjectSelector(project.id);
+    document.getElementById('project_name').value = project.name;
+    appendLog(`[UI] 项目已保存：${project.name}`);
+}
+
+function loadSelectedProject() {
+    const sel = document.getElementById('project_selector');
+    const items = loadProjects();
+    const found = items.find(x => x.id === sel.value);
+    if (!found || !found.snapshot) {
+        setStatus('请先选择一个可加载的项目。', 'status-danger');
+        return;
+    }
+    applyFormData(found.snapshot);
+    document.getElementById('project_name').value = found.name || '';
+    scheduleDraftSave();
+    saveRecentWorkspace(found.workspace || '');
+    setStatus(`已载入项目：${found.name || '未命名'}`, 'status-warn');
+    appendLog(`[UI] 已载入项目：${found.name || '未命名'}`);
+}
+
+function deleteSelectedProject() {
+    const sel = document.getElementById('project_selector');
+    const items = loadProjects();
+    const found = items.find(x => x.id === sel.value);
+    if (!found) {
+        setStatus('请先选择要删除的项目。', 'status-danger');
+        return;
+    }
+    const next = items.filter(x => x.id !== found.id);
+    saveProjects(next);
+    renderProjectSelector('');
+    document.getElementById('project_name').value = '';
+    appendLog(`[UI] 已删除项目：${found.name || '未命名'}`);
+}
+
+function createNewProject() {
+    const cur = getFormData();
+    const defaults = defaultFormData();
+    defaults.api_key = cur.api_key;
+    defaults.base_url = cur.base_url;
+    defaults.model = cur.model;
+    applyFormData(defaults);
+    document.getElementById('project_selector').value = '';
+    document.getElementById('project_name').value = '';
+    scheduleDraftSave();
+    setStatus('已切换到新项目草稿，请填写需求后保存项目。', 'status-warn');
 }
 
 function loadRecentWorkspaces() {
@@ -1101,23 +1272,7 @@ function applyPreset(kind) {
 }
 
 function resetForm() {
-    applyFormData({
-        api_key: '',
-        base_url: 'https://api.deepseek.com',
-        model: 'deepseek-reasoner',
-        auto_revert_profile: 'balanced',
-        precheck_cmd: '',
-        history_max_messages: '',
-        history_max_chars: '',
-        release_gate_threshold: '',
-        workspace: './workspace',
-        goal: '',
-        eval_cmd: 'bash scripts/run_tests.sh',
-        success_regex: '',
-        remote: 'origin',
-        remote_url: '',
-        branch: 'main',
-    });
+    applyFormData(defaultFormData());
     scheduleDraftSave();
 }
 
@@ -1152,6 +1307,11 @@ function bindEvents() {
     document.getElementById('preset_cli_btn').addEventListener('click', () => applyPreset('cli'));
     document.getElementById('preset_desktop_btn').addEventListener('click', () => applyPreset('desktop'));
     document.getElementById('reset_form_btn').addEventListener('click', resetForm);
+    document.getElementById('project_new_btn').addEventListener('click', createNewProject);
+    document.getElementById('project_save_btn').addEventListener('click', saveCurrentProject);
+    document.getElementById('project_load_btn').addEventListener('click', loadSelectedProject);
+    document.getElementById('project_delete_btn').addEventListener('click', deleteSelectedProject);
+    document.getElementById('project_selector').addEventListener('change', syncProjectNameFromSelection);
 }
 
 function exportLogs() {
@@ -1249,12 +1409,14 @@ async function exportReleaseReport() {
 
 async function init() {
     renderRecentWorkspaceSuggestions();
+    renderProjectSelector('');
     bindEvents();
     bindAutoSave();
     document.getElementById('stop_btn').disabled = true;
     document.getElementById('revert_btn').disabled = true;
     setRunState('idle', '空闲');
     await loadDraft();
+    selectProjectByCurrentForm();
     await loadProjectConfigForWorkspace();
     await refreshUiState();
     await refreshMetrics();
