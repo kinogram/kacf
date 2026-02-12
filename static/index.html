@@ -414,11 +414,6 @@
 </div>
 
 <script>
-const DRAFT_KEY = 'autocoding_webui_draft_v2';
-const RECENT_WORKSPACES_KEY = 'autocoding_recent_workspaces_v1';
-const PROJECTS_KEY = 'autocoding_projects_v1';
-const PROJECT_LOGS_KEY = 'autocoding_project_logs_v1';
-const PROJECT_UI_STATE_KEY = 'autocoding_project_ui_state_v1';
 let lastEventId = 0;
 let polling = false;
 let saveTimer = null;
@@ -446,6 +441,11 @@ const SSE_CONNECT_GRACE_MS = 10000;
 let activeRunLogBucket = '';
 let activeRunProjectLabel = '';
 let runSessionActive = false;
+let cachedProjects = [];
+let cacheRecentWorkspaces = [];
+let cacheProjectLogs = {};
+let cacheProjectUiState = {};
+let uiCacheSaveTimer = null;
 
 function defaultFormData() {
     return {
@@ -600,17 +600,45 @@ function currentLogBucket() {
     return activeRunLogBucket || viewLogBucket();
 }
 
-function loadProjectUiStateMap() {
+async function fetchUiCacheFromServer() {
     try {
-        const data = JSON.parse(localStorage.getItem(PROJECT_UI_STATE_KEY) || '{}');
-        return data && typeof data === 'object' ? data : {};
+        const resp = await fetch('/ui_cache');
+        if (!resp.ok) return false;
+        const data = await resp.json();
+        cacheRecentWorkspaces = Array.isArray(data.recent_workspaces) ? data.recent_workspaces : [];
+        cacheProjectLogs = (data.project_logs && typeof data.project_logs === 'object') ? data.project_logs : {};
+        cacheProjectUiState = (data.project_ui_state && typeof data.project_ui_state === 'object') ? data.project_ui_state : {};
+        return true;
     } catch (_e) {
-        return {};
+        return false;
     }
 }
 
+function scheduleUiCacheSave() {
+    if (uiCacheSaveTimer) clearTimeout(uiCacheSaveTimer);
+    uiCacheSaveTimer = setTimeout(async () => {
+        const payload = {
+            recent_workspaces: cacheRecentWorkspaces,
+            project_logs: cacheProjectLogs,
+            project_ui_state: cacheProjectUiState,
+        };
+        try {
+            await fetch('/ui_cache', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+        } catch (_e) {}
+    }, 250);
+}
+
+function loadProjectUiStateMap() {
+    return cacheProjectUiState || {};
+}
+
 function saveProjectUiStateMap(obj) {
-    localStorage.setItem(PROJECT_UI_STATE_KEY, JSON.stringify(obj || {}));
+    cacheProjectUiState = (obj && typeof obj === 'object') ? obj : {};
+    scheduleUiCacheSave();
 }
 
 function defaultBucketUiState() {
@@ -712,16 +740,12 @@ function renderUiForViewBucket() {
 }
 
 function loadProjectLogs() {
-    try {
-        const data = JSON.parse(localStorage.getItem(PROJECT_LOGS_KEY) || '{}');
-        return data && typeof data === 'object' ? data : {};
-    } catch (_e) {
-        return {};
-    }
+    return cacheProjectLogs || {};
 }
 
 function saveProjectLogs(obj) {
-    localStorage.setItem(PROJECT_LOGS_KEY, JSON.stringify(obj || {}));
+    cacheProjectLogs = (obj && typeof obj === 'object') ? obj : {};
+    scheduleUiCacheSave();
 }
 
 function readLogForBucket(bucket) {
@@ -732,7 +756,7 @@ function readLogForBucket(bucket) {
 
 function writeLogForBucket(bucket, content) {
     const all = loadProjectLogs();
-    // Hard cap to avoid unbounded localStorage growth.
+    // Hard cap to avoid unbounded browser/server cache growth.
     all[bucket] = (content || '').slice(-300000);
     saveProjectLogs(all);
 }
@@ -874,16 +898,11 @@ function setAutoSaveState(text) {
 }
 
 function loadProjects() {
-    try {
-        const data = JSON.parse(localStorage.getItem(PROJECTS_KEY) || '[]');
-        return Array.isArray(data) ? data : [];
-    } catch (_e) {
-        return [];
-    }
+    return Array.isArray(cachedProjects) ? cachedProjects : [];
 }
 
 function saveProjects(items) {
-    localStorage.setItem(PROJECTS_KEY, JSON.stringify(items || []));
+    cachedProjects = Array.isArray(items) ? items : [];
 }
 
 async function fetchProjectsFromServer() {
@@ -1007,7 +1026,7 @@ async function saveCurrentProject() {
     }
     renderProjectSelector(project.id);
     document.getElementById('project_name').value = project.name;
-    appendLog(`[UI] 项目已保存：${project.name}${serverOk ? '' : '（仅本地）'}`);
+    appendLog(`[UI] 项目已保存：${project.name}${serverOk ? '' : '（后端未同步）'}`);
 }
 
 function loadSelectedProject() {
@@ -1053,7 +1072,7 @@ async function deleteSelectedProject() {
     saveProjectUiStateMap(uiMap);
     renderCurrentLogView();
     renderUiForViewBucket();
-    appendLog(`[UI] 已删除项目：${found.name || '未命名'}${serverOk ? '' : '（仅本地）'}`);
+    appendLog(`[UI] 已删除项目：${found.name || '未命名'}${serverOk ? '' : '（后端未同步）'}`);
 }
 
 function createNewProject() {
@@ -1074,11 +1093,7 @@ function createNewProject() {
 }
 
 function loadRecentWorkspaces() {
-    try {
-        return JSON.parse(localStorage.getItem(RECENT_WORKSPACES_KEY) || '[]');
-    } catch (_e) {
-        return [];
-    }
+    return Array.isArray(cacheRecentWorkspaces) ? cacheRecentWorkspaces : [];
 }
 
 function saveRecentWorkspace(path) {
@@ -1086,8 +1101,8 @@ function saveRecentWorkspace(path) {
     if (!p) return;
     const items = loadRecentWorkspaces().filter(x => x !== p);
     items.unshift(p);
-    const sliced = items.slice(0, 12);
-    localStorage.setItem(RECENT_WORKSPACES_KEY, JSON.stringify(sliced));
+    cacheRecentWorkspaces = items.slice(0, 12);
+    scheduleUiCacheSave();
     renderRecentWorkspaceSuggestions();
 }
 
@@ -1102,11 +1117,6 @@ function renderRecentWorkspaceSuggestions() {
     });
 }
 
-function saveDraftLocal() {
-    const body = getFormData();
-    localStorage.setItem(DRAFT_KEY, JSON.stringify(body));
-}
-
 async function saveDraftRemote() {
     const body = getFormData();
     try {
@@ -1119,7 +1129,7 @@ async function saveDraftRemote() {
         saveRecentWorkspace(body.workspace);
         setAutoSaveState(`草稿状态：已保存 (${nowText()})`);
     } catch (_e) {
-        setAutoSaveState(`草稿状态：仅本地保存 (${nowText()})`);
+        setAutoSaveState(`草稿状态：保存失败 (${nowText()})`);
     }
 }
 
@@ -1129,7 +1139,6 @@ function draftQueryByWorkspace() {
 }
 
 function scheduleDraftSave() {
-    saveDraftLocal();
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
         saveDraftRemote();
@@ -1137,24 +1146,16 @@ function scheduleDraftSave() {
 }
 
 async function loadDraft() {
-    const localRaw = localStorage.getItem(DRAFT_KEY);
-    if (localRaw) {
-        try {
-            applyFormData(JSON.parse(localRaw));
-        } catch (_e) {}
-    }
     try {
         const resp = await fetch(`/draft${draftQueryByWorkspace()}`);
         if (resp.ok) {
             const data = await resp.json();
             applyFormData(data);
-            saveDraftLocal();
             setAutoSaveState('草稿状态：已从服务器恢复');
             return;
         }
-    } catch (_e) {}
-    if (localRaw) {
-        setAutoSaveState('草稿状态：已从本地恢复');
+    } catch (_e) {
+        setAutoSaveState('草稿状态：读取失败');
     }
 }
 
@@ -1806,6 +1807,7 @@ async function exportReleaseReport() {
 }
 
 async function init() {
+    await fetchUiCacheFromServer();
     renderRecentWorkspaceSuggestions();
     await refreshProjectsFromServer();
     renderProjectSelector('');

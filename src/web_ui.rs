@@ -24,6 +24,7 @@ const DRAFT_FILENAME: &str = ".autocoding_webui_draft.json";
 const SESSION_STATE_FILENAME: &str = ".autocoding_state.json";
 const PROJECT_CONFIG_FILENAME: &str = ".autocoding_project.json";
 const PROJECTS_FILENAME: &str = ".autocoding_projects.json";
+const UI_CACHE_FILENAME: &str = ".autocoding_webui_cache.json";
 const MAX_EVENT_BUFFER: usize = 5000;
 
 #[derive(Clone)]
@@ -280,6 +281,16 @@ struct WebProject {
     snapshot: DraftPayload,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct UiCachePayload {
+    #[serde(default)]
+    recent_workspaces: Vec<String>,
+    #[serde(default)]
+    project_logs: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    project_ui_state: std::collections::BTreeMap<String, serde_json::Value>,
+}
+
 fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -367,6 +378,30 @@ fn read_projects_registry() -> Vec<WebProject> {
 fn write_projects_registry(items: &[WebProject]) -> std::io::Result<()> {
     let path = projects_registry_path();
     let json = serde_json::to_string_pretty(items)?;
+    let tmp = path.with_extension("tmp");
+    fs::write(&tmp, json)?;
+    fs::rename(tmp, path)?;
+    Ok(())
+}
+
+fn ui_cache_path() -> PathBuf {
+    std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join(UI_CACHE_FILENAME)
+}
+
+fn read_ui_cache() -> UiCachePayload {
+    let path = ui_cache_path();
+    let content = match fs::read_to_string(path) {
+        Ok(v) => v,
+        Err(_) => return UiCachePayload::default(),
+    };
+    serde_json::from_str::<UiCachePayload>(&content).unwrap_or_default()
+}
+
+fn write_ui_cache(payload: &UiCachePayload) -> std::io::Result<()> {
+    let path = ui_cache_path();
+    let json = serde_json::to_string_pretty(payload)?;
     let tmp = path.with_extension("tmp");
     fs::write(&tmp, json)?;
     fs::rename(tmp, path)?;
@@ -572,6 +607,23 @@ async fn delete_project(data: web::Data<AppState>, path: web::Path<String>) -> i
         return HttpResponse::InternalServerError().body(format!("write projects failed: {}", e));
     }
     HttpResponse::Ok().body("deleted")
+}
+
+async fn get_ui_cache(data: web::Data<AppState>) -> impl Responder {
+    let _guard = data.projects_lock.lock().unwrap();
+    HttpResponse::Ok().json(read_ui_cache())
+}
+
+async fn put_ui_cache(
+    data: web::Data<AppState>,
+    body: web::Json<UiCachePayload>,
+) -> impl Responder {
+    let _guard = data.projects_lock.lock().unwrap();
+    let payload = body.into_inner();
+    match write_ui_cache(&payload) {
+        Ok(_) => HttpResponse::Ok().body("saved"),
+        Err(e) => HttpResponse::InternalServerError().body(format!("write ui cache failed: {}", e)),
+    }
 }
 
 async fn resume_session(
@@ -1223,6 +1275,8 @@ pub async fn run_web_server(
             .route("/projects", web::get().to(list_projects))
             .route("/projects", web::post().to(upsert_project))
             .route("/projects/{id}", web::delete().to(delete_project))
+            .route("/ui_cache", web::get().to(get_ui_cache))
+            .route("/ui_cache", web::put().to(put_ui_cache))
             .route("/ui_state", web::get().to(get_ui_state))
             .route("/health", web::get().to(health))
             .route("/metrics", web::get().to(metrics))
