@@ -23,7 +23,6 @@ const INDEX_HTML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/stat
 const DRAFT_FILENAME: &str = ".autocoding_webui_draft.json";
 const SESSION_STATE_FILENAME: &str = ".autocoding_state.json";
 const PROJECT_CONFIG_FILENAME: &str = ".autocoding_project.json";
-const PROJECTS_FILENAME: &str = ".autocoding_projects.json";
 const UI_CACHE_FILENAME: &str = ".autocoding_webui_cache.json";
 const MAX_EVENT_BUFFER: usize = 5000;
 
@@ -284,11 +283,25 @@ struct WebProject {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct UiCachePayload {
     #[serde(default)]
+    projects: Vec<WebProject>,
+    #[serde(default)]
     recent_workspaces: Vec<String>,
     #[serde(default)]
     project_logs: std::collections::BTreeMap<String, String>,
     #[serde(default)]
     project_ui_state: std::collections::BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct UiCachePatch {
+    #[serde(default)]
+    projects: Option<Vec<WebProject>>,
+    #[serde(default)]
+    recent_workspaces: Option<Vec<String>>,
+    #[serde(default)]
+    project_logs: Option<std::collections::BTreeMap<String, String>>,
+    #[serde(default)]
+    project_ui_state: Option<std::collections::BTreeMap<String, serde_json::Value>>,
 }
 
 fn now_unix() -> u64 {
@@ -358,30 +371,6 @@ fn read_project_config(workspace: &str) -> Option<ProjectConfig> {
     let path = Path::new(workspace).join(PROJECT_CONFIG_FILENAME);
     let content = fs::read_to_string(path).ok()?;
     serde_json::from_str::<ProjectConfig>(&content).ok()
-}
-
-fn projects_registry_path() -> PathBuf {
-    std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join(PROJECTS_FILENAME)
-}
-
-fn read_projects_registry() -> Vec<WebProject> {
-    let path = projects_registry_path();
-    let content = match fs::read_to_string(path) {
-        Ok(v) => v,
-        Err(_) => return Vec::new(),
-    };
-    serde_json::from_str::<Vec<WebProject>>(&content).unwrap_or_default()
-}
-
-fn write_projects_registry(items: &[WebProject]) -> std::io::Result<()> {
-    let path = projects_registry_path();
-    let json = serde_json::to_string_pretty(items)?;
-    let tmp = path.with_extension("tmp");
-    fs::write(&tmp, json)?;
-    fs::rename(tmp, path)?;
-    Ok(())
 }
 
 fn ui_cache_path() -> PathBuf {
@@ -564,7 +553,7 @@ async fn get_project_config(query: web::Query<ProjectConfigQuery>) -> impl Respo
 
 async fn list_projects(data: web::Data<AppState>) -> impl Responder {
     let _guard = data.projects_lock.lock().unwrap();
-    let mut items = read_projects_registry();
+    let mut items = read_ui_cache().projects;
     items.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
     HttpResponse::Ok().json(items)
 }
@@ -579,13 +568,13 @@ async fn upsert_project(data: web::Data<AppState>, body: web::Json<WebProject>) 
         item.name = item.workspace.clone();
     }
     item.updated_at = now_unix();
-    let mut items = read_projects_registry();
-    if let Some(idx) = items.iter().position(|p| p.id == item.id) {
-        items[idx] = item.clone();
+    let mut cache = read_ui_cache();
+    if let Some(idx) = cache.projects.iter().position(|p| p.id == item.id) {
+        cache.projects[idx] = item.clone();
     } else {
-        items.push(item.clone());
+        cache.projects.push(item.clone());
     }
-    if let Err(e) = write_projects_registry(&items) {
+    if let Err(e) = write_ui_cache(&cache) {
         return HttpResponse::InternalServerError().body(format!("write projects failed: {}", e));
     }
     HttpResponse::Ok().json(item)
@@ -597,13 +586,13 @@ async fn delete_project(data: web::Data<AppState>, path: web::Path<String>) -> i
     if id.trim().is_empty() {
         return HttpResponse::BadRequest().body("project id is empty");
     }
-    let mut items = read_projects_registry();
-    let before = items.len();
-    items.retain(|p| p.id != id);
-    if items.len() == before {
+    let mut cache = read_ui_cache();
+    let before = cache.projects.len();
+    cache.projects.retain(|p| p.id != id);
+    if cache.projects.len() == before {
         return HttpResponse::NotFound().body("project not found");
     }
-    if let Err(e) = write_projects_registry(&items) {
+    if let Err(e) = write_ui_cache(&cache) {
         return HttpResponse::InternalServerError().body(format!("write projects failed: {}", e));
     }
     HttpResponse::Ok().body("deleted")
@@ -616,10 +605,23 @@ async fn get_ui_cache(data: web::Data<AppState>) -> impl Responder {
 
 async fn put_ui_cache(
     data: web::Data<AppState>,
-    body: web::Json<UiCachePayload>,
+    body: web::Json<UiCachePatch>,
 ) -> impl Responder {
     let _guard = data.projects_lock.lock().unwrap();
-    let payload = body.into_inner();
+    let patch = body.into_inner();
+    let mut payload = read_ui_cache();
+    if let Some(v) = patch.projects {
+        payload.projects = v;
+    }
+    if let Some(v) = patch.recent_workspaces {
+        payload.recent_workspaces = v;
+    }
+    if let Some(v) = patch.project_logs {
+        payload.project_logs = v;
+    }
+    if let Some(v) = patch.project_ui_state {
+        payload.project_ui_state = v;
+    }
     match write_ui_cache(&payload) {
         Ok(_) => HttpResponse::Ok().body("saved"),
         Err(e) => HttpResponse::InternalServerError().body(format!("write ui cache failed: {}", e)),
