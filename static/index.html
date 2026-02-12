@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <title>KACF - Kevin AutoCoding Framework</title>
@@ -446,6 +446,10 @@
             <label for="base_url">Base URL</label>
             <input id="base_url" type="text" value="https://api.deepseek.com">
         </div>
+        <div>
+            <label for="language_select">Language</label>
+            <select id="language_select"></select>
+        </div>
         <div class="buttons">
             <button id="save_global_config_btn">保存全局配置</button>
             <button class="btn-ghost" id="close_global_config_btn">关闭</button>
@@ -486,22 +490,114 @@ let cacheProjectLogs = {};
 let cacheProjectUiState = {};
 let uiCacheSaveTimer = null;
 const WORKSPACE_ROOT = './autocoding_data/workspaces';
+let availableLanguages = [];
+let currentLanguage = '';
 let sharedConfig = {
     api_key: '',
     base_url: 'https://api.deepseek.com',
     model: 'deepseek-reasoner',
+    language: '',
 };
 let COPY = {};
 
-async function loadCopyFile() {
+function normalizeLanguageCode(raw) {
+    const v = (raw || '').trim();
+    if (!v) return '';
+    if (!/^[A-Za-z0-9_-]{1,32}$/.test(v)) return '';
+    return v;
+}
+
+function languageLabel(code) {
+    const norm = normalizeLanguageCode(code);
+    if (!norm) return 'Unknown';
+    if (norm === 'zh-CN') return '中文 (简体)';
+    if (norm === 'en') return 'English';
+    return norm;
+}
+
+function choosePreferredLanguage(langs, savedLanguage) {
+    const items = Array.isArray(langs) ? langs.map(normalizeLanguageCode).filter(Boolean) : [];
+    if (!items.length) return '';
+    if (items.length === 1) return items[0];
+    const saved = normalizeLanguageCode(savedLanguage);
+    if (saved && items.includes(saved)) return saved;
+    const navList = Array.isArray(navigator.languages) && navigator.languages.length
+        ? navigator.languages
+        : [navigator.language || ''];
+    const isZh = navList.some(x => (x || '').toLowerCase().startsWith('zh'));
+    if (isZh) {
+        if (items.includes('zh-CN')) return 'zh-CN';
+        const anyZh = items.find(x => x.toLowerCase().startsWith('zh'));
+        if (anyZh) return anyZh;
+    }
+    if (items.includes('en')) return 'en';
+    return items[0];
+}
+
+async function fetchLanguagesFromServer() {
+    const resp = await fetch('/assets/i18n/list');
+    if (!resp.ok) throw new Error(`language list failed: ${resp.status}`);
+    const data = await resp.json();
+    const languages = Array.isArray(data.languages) ? data.languages : [];
+    return languages.map(normalizeLanguageCode).filter(Boolean);
+}
+
+async function loadCopyForLanguage(code) {
+    const lang = normalizeLanguageCode(code);
+    if (!lang) return false;
     try {
-        const resp = await fetch('/assets/copy.zh-CN.json');
-        if (!resp.ok) return;
+        const resp = await fetch(`/assets/i18n/${encodeURIComponent(lang)}.json`);
+        if (!resp.ok) return false;
         const data = await resp.json();
-        if (data && typeof data === 'object') {
-            COPY = data;
-        }
-    } catch (_e) {}
+        if (!data || typeof data !== 'object') return false;
+        COPY = data;
+        currentLanguage = lang;
+        document.documentElement.lang = lang;
+        return true;
+    } catch (_e) {
+        return false;
+    }
+}
+
+function renderLanguageOptions() {
+    const select = document.getElementById('language_select');
+    if (!select) return;
+    const items = Array.isArray(availableLanguages) ? availableLanguages : [];
+    select.innerHTML = '';
+    items.forEach(code => {
+        const opt = document.createElement('option');
+        opt.value = code;
+        opt.textContent = languageLabel(code);
+        select.appendChild(opt);
+    });
+    const selected = normalizeLanguageCode(sharedConfig.language) || currentLanguage || items[0] || '';
+    if (selected) {
+        select.value = selected;
+    }
+}
+
+async function switchLanguage(code, persist) {
+    const lang = normalizeLanguageCode(code);
+    if (!lang) return false;
+    const ok = await loadCopyForLanguage(lang);
+    if (!ok) return false;
+    sharedConfig.language = lang;
+    renderLanguageOptions();
+    applyStaticCopyToDom();
+    if (persist) scheduleUiCacheSave();
+    return true;
+}
+
+async function initLanguagePack() {
+    availableLanguages = await fetchLanguagesFromServer();
+    if (!availableLanguages.length) {
+        throw new Error('no language packs from backend');
+    }
+    const picked = choosePreferredLanguage(availableLanguages, sharedConfig.language);
+    const loaded = await switchLanguage(picked, false);
+    if (!loaded) {
+        throw new Error(`failed to load language pack: ${picked}`);
+    }
 }
 
 function txt(key, fallback) {
@@ -578,6 +674,7 @@ function updateSharedConfigFromInputs() {
         api_key: document.getElementById('api_key').value.trim(),
         base_url: document.getElementById('base_url').value.trim(),
         model: document.getElementById('model').value.trim(),
+        language: normalizeLanguageCode(document.getElementById('language_select')?.value || currentLanguage),
     };
 }
 
@@ -585,6 +682,7 @@ function applySharedConfigToInputs() {
     document.getElementById('api_key').value = sharedConfig.api_key || '';
     document.getElementById('base_url').value = sharedConfig.base_url || 'https://api.deepseek.com';
     document.getElementById('model').value = sharedConfig.model || 'deepseek-reasoner';
+    renderLanguageOptions();
 }
 
 function nowText() {
@@ -618,7 +716,7 @@ function setConfigInputsDisabled(disabled) {
         'precheck_cmd', 'history_max_messages', 'history_max_chars', 'release_gate_threshold',
         'goal', 'eval_cmd', 'success_regex', 'remote', 'remote_url', 'branch',
         'preset_webapp_btn', 'preset_cli_btn', 'preset_desktop_btn', 'reset_form_btn',
-        'open_global_config_btn',
+        'open_global_config_btn', 'language_select',
     ];
     ids.forEach(id => {
         const el = document.getElementById(id);
@@ -733,6 +831,7 @@ async function fetchUiCacheFromServer() {
                 api_key: data.shared_config.api_key || '',
                 base_url: data.shared_config.base_url || 'https://api.deepseek.com',
                 model: data.shared_config.model || 'deepseek-reasoner',
+                language: normalizeLanguageCode(data.shared_config.language || ''),
             };
         }
         return true;
@@ -1054,6 +1153,10 @@ function closeGlobalConfigModal() {
 }
 
 async function saveGlobalConfig() {
+    const wantedLanguage = normalizeLanguageCode(document.getElementById('language_select')?.value || currentLanguage);
+    if (wantedLanguage && wantedLanguage !== currentLanguage) {
+        await switchLanguage(wantedLanguage, false);
+    }
     updateSharedConfigFromInputs();
     scheduleUiCacheSave();
     closeGlobalConfigModal();
@@ -1971,6 +2074,15 @@ function bindEvents() {
     document.getElementById('open_global_config_btn').addEventListener('click', openGlobalConfigModal);
     document.getElementById('save_global_config_btn').addEventListener('click', saveGlobalConfig);
     document.getElementById('close_global_config_btn').addEventListener('click', closeGlobalConfigModal);
+    document.getElementById('language_select').addEventListener('change', async () => {
+        const next = normalizeLanguageCode(document.getElementById('language_select').value);
+        if (!next || next === currentLanguage) return;
+        const ok = await switchLanguage(next, true);
+        if (!ok) {
+            setStatus(`语言切换失败：${next}`, 'status-danger');
+            renderLanguageOptions();
+        }
+    });
     document.getElementById('global_config_modal').addEventListener('click', (e) => {
         if (e.target && e.target.id === 'global_config_modal') closeGlobalConfigModal();
     });
@@ -2070,9 +2182,9 @@ async function exportReleaseReport() {
 }
 
 async function init() {
-    await loadCopyFile();
-    applyStaticCopyToDom();
     await fetchUiCacheFromServer();
+    await initLanguagePack();
+    applyStaticCopyToDom();
     applySharedConfigToInputs();
     await refreshProjectsFromServer();
     renderProjectSelector('');

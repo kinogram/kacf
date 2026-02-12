@@ -20,8 +20,6 @@ use crate::protocol::{AgentEvent, AgentRequest, ClarifyAnswer, ClarifyQuestion};
 
 /// Index HTML page embedded at compile time.
 const INDEX_HTML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/index.html"));
-const COPY_ZH_CN_JSON: &str =
-    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/copy.zh-CN.json"));
 
 const DRAFT_FILENAME: &str = ".autocoding_webui_draft.json";
 const SESSION_STATE_FILENAME: &str = ".autocoding_state.json";
@@ -29,6 +27,7 @@ const PROJECT_CONFIG_FILENAME: &str = ".autocoding_project.json";
 const UI_CACHE_FILENAME: &str = ".autocoding_webui_cache.json";
 const MANAGED_ROOT_DIR: &str = "autocoding_data";
 const MANAGED_WORKSPACES_DIR: &str = "workspaces";
+const I18N_DIR: &str = "static/i18n";
 const MAX_EVENT_BUFFER: usize = 5000;
 
 #[derive(Clone)]
@@ -242,6 +241,11 @@ struct UiStateResponse {
 }
 
 #[derive(Debug, Serialize)]
+struct LanguageListResponse {
+    languages: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
 struct HealthResponse {
     ok: bool,
     service: &'static str,
@@ -335,6 +339,8 @@ struct SharedConfig {
     base_url: String,
     #[serde(default)]
     model: String,
+    #[serde(default)]
+    language: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -467,6 +473,56 @@ fn read_project_config(workspace: &str) -> Option<ProjectConfig> {
 
 fn ui_cache_path() -> PathBuf {
     managed_root_path().join(UI_CACHE_FILENAME)
+}
+
+fn i18n_dir_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(I18N_DIR)
+}
+
+fn sanitize_language_code(raw: &str) -> Option<String> {
+    let code = raw.trim();
+    if code.is_empty() || code.len() > 32 {
+        return None;
+    }
+    if code
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+    {
+        Some(code.to_string())
+    } else {
+        None
+    }
+}
+
+fn list_language_packs() -> Vec<String> {
+    let mut items = Vec::new();
+    let Ok(entries) = fs::read_dir(i18n_dir_path()) else {
+        return items;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|x| x.to_str()) else {
+            continue;
+        };
+        let Some(code) = name.strip_suffix(".json") else {
+            continue;
+        };
+        if let Some(ok_code) = sanitize_language_code(code) {
+            items.push(ok_code);
+        }
+    }
+    items.sort();
+    items.dedup();
+    items
+}
+
+fn read_language_pack(code: &str) -> Option<String> {
+    let clean = sanitize_language_code(code)?;
+    let path = i18n_dir_path().join(format!("{}.json", clean));
+    fs::read_to_string(path).ok()
 }
 
 fn read_ui_cache() -> UiCachePayload {
@@ -1066,10 +1122,23 @@ async fn index_page() -> impl Responder {
         .body(INDEX_HTML)
 }
 
-async fn copy_zh_cn() -> impl Responder {
-    HttpResponse::Ok()
-        .content_type("application/json; charset=utf-8")
-        .body(COPY_ZH_CN_JSON)
+async fn list_i18n_languages() -> impl Responder {
+    HttpResponse::Ok().json(LanguageListResponse {
+        languages: list_language_packs(),
+    })
+}
+
+async fn get_i18n_language(path: web::Path<String>) -> impl Responder {
+    let code = path.into_inner();
+    if sanitize_language_code(&code).is_none() {
+        return HttpResponse::BadRequest().body("invalid language code");
+    }
+    match read_language_pack(&code) {
+        Some(content) => HttpResponse::Ok()
+            .content_type("application/json; charset=utf-8")
+            .body(content),
+        None => HttpResponse::NotFound().body("language not found"),
+    }
 }
 
 fn spawn_event_collector(state: AppState) {
@@ -1438,6 +1507,13 @@ pub async fn run_web_server(
 ) -> std::io::Result<()> {
     fs::create_dir_all(managed_root_path())?;
     fs::create_dir_all(managed_workspaces_path())?;
+    let languages = list_language_packs();
+    if languages.is_empty() {
+        let dir = i18n_dir_path();
+        let msg = format!("no language packs found in {}", dir.display());
+        eprintln!("[KACF] ERROR: {}", msg);
+        return Err(std::io::Error::new(std::io::ErrorKind::NotFound, msg));
+    }
     let port = std::env::var("AUTOCODING_PORT")
         .ok()
         .and_then(|v| v.parse::<u16>().ok())
@@ -1456,7 +1532,8 @@ pub async fn run_web_server(
         App::new()
             .app_data(web::Data::new(state.clone()))
             .route("/", web::get().to(index_page))
-            .route("/assets/copy.zh-CN.json", web::get().to(copy_zh_cn))
+            .route("/assets/i18n/list", web::get().to(list_i18n_languages))
+            .route("/assets/i18n/{code}.json", web::get().to(get_i18n_language))
             .route("/start", web::post().to(start_session))
             .route("/stop", web::post().to(stop_session))
             .route("/resume", web::post().to(resume_session))
