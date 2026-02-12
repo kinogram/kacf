@@ -225,6 +225,41 @@
         .diff-line-add { color: #0b7a2f; }
         .diff-line-del { color: #b3261e; }
         .diff-line-other { color: #2e3f5f; }
+        .modal-mask {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(10, 20, 40, 0.42);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+        }
+        .modal-card {
+            width: min(760px, 96vw);
+            background: #fff;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.22);
+            padding: 14px;
+        }
+        .project-list details {
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 8px 10px;
+            margin-top: 8px;
+            background: #fbfdff;
+        }
+        .project-list summary {
+            cursor: pointer;
+            font-weight: 700;
+        }
+        .project-list .meta {
+            font-size: 12px;
+            color: var(--subtle);
+            margin-top: 6px;
+            line-height: 1.5;
+        }
         @media (min-width: 900px) {
             .grid { grid-template-columns: 1.15fr 1fr; }
             .row.two { grid-template-columns: 1fr 1fr; }
@@ -247,46 +282,25 @@
 
             <div class="row two">
                 <div>
-                    <label for="project_selector">项目管理</label>
-                    <select id="project_selector"></select>
-                </div>
-                <div>
                     <label for="project_name">项目名称</label>
                     <input id="project_name" type="text" placeholder="例如：桌面贪吃蛇优化">
+                </div>
+                <div>
+                    <label>全局配置</label>
+                    <div class="buttons" style="margin-top:0;">
+                        <button class="btn-ghost" id="open_global_config_btn">打开全局配置</button>
+                    </div>
                 </div>
             </div>
             <div class="buttons">
                 <button class="btn-ghost" id="project_new_btn">新建项目</button>
                 <button class="btn-ghost" id="project_save_btn">保存当前项目</button>
-                <button class="btn-ghost" id="project_load_btn">载入所选项目</button>
-                <button class="btn-ghost" id="project_delete_btn">删除所选项目</button>
+                <button class="btn-ghost" id="project_load_btn">载入当前项目</button>
+                <button class="btn-ghost" id="project_delete_btn">删除当前项目</button>
             </div>
-
-            <div class="row two">
-                <div>
-                    <label for="api_key">API Key</label>
-                    <input id="api_key" type="text" placeholder="输入你的 API Key">
-                </div>
-                <div>
-                    <label for="model">Model</label>
-                    <select id="model">
-                        <option value="deepseek-reasoner">deepseek-reasoner</option>
-                        <option value="deepseek-chat">deepseek-chat</option>
-                    </select>
-                </div>
-            </div>
-
-            <div class="row two">
-                <div>
-                    <label for="base_url">Base URL</label>
-                    <input id="base_url" type="text" value="https://api.deepseek.com">
-                </div>
-                <div>
-                    <label for="workspace">Workspace</label>
-                    <input id="workspace" type="text" value="./workspace" list="workspace_suggestions">
-                    <datalist id="workspace_suggestions"></datalist>
-                </div>
-            </div>
+            <input id="workspace" type="hidden" value="">
+            <select id="project_selector" style="display:none;"></select>
+            <div id="project_accordion" class="project-list"></div>
 
             <div class="row two">
                 <div>
@@ -412,6 +426,32 @@
         <div id="diff" style="white-space:pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;"></div>
     </section>
 </div>
+<div class="modal-mask" id="global_config_modal">
+    <div class="modal-card">
+        <h3 class="title" style="font-size:16px;">全局配置（所有项目共用）</h3>
+        <div class="row two">
+            <div>
+                <label for="api_key">API Key</label>
+                <input id="api_key" type="text" placeholder="输入你的 API Key">
+            </div>
+            <div>
+                <label for="model">Model</label>
+                <select id="model">
+                    <option value="deepseek-reasoner">deepseek-reasoner</option>
+                    <option value="deepseek-chat">deepseek-chat</option>
+                </select>
+            </div>
+        </div>
+        <div>
+            <label for="base_url">Base URL</label>
+            <input id="base_url" type="text" value="https://api.deepseek.com">
+        </div>
+        <div class="buttons">
+            <button id="save_global_config_btn">保存全局配置</button>
+            <button class="btn-ghost" id="close_global_config_btn">关闭</button>
+        </div>
+    </div>
+</div>
 
 <script>
 let lastEventId = 0;
@@ -446,18 +486,23 @@ let cacheRecentWorkspaces = [];
 let cacheProjectLogs = {};
 let cacheProjectUiState = {};
 let uiCacheSaveTimer = null;
+let sharedConfig = {
+    api_key: '',
+    base_url: 'https://api.deepseek.com',
+    model: 'deepseek-reasoner',
+};
 
 function defaultFormData() {
     return {
-        api_key: '',
-        base_url: 'https://api.deepseek.com',
-        model: 'deepseek-reasoner',
+        api_key: sharedConfig.api_key || '',
+        base_url: sharedConfig.base_url || 'https://api.deepseek.com',
+        model: sharedConfig.model || 'deepseek-reasoner',
         auto_revert_profile: 'balanced',
         precheck_cmd: '',
         history_max_messages: '',
         history_max_chars: '',
         release_gate_threshold: '',
-        workspace: './workspace',
+        workspace: '',
         goal: '',
         eval_cmd: 'bash scripts/run_tests.sh',
         success_regex: '',
@@ -465,6 +510,20 @@ function defaultFormData() {
         remote_url: '',
         branch: 'main',
     };
+}
+
+function updateSharedConfigFromInputs() {
+    sharedConfig = {
+        api_key: document.getElementById('api_key').value.trim(),
+        base_url: document.getElementById('base_url').value.trim(),
+        model: document.getElementById('model').value.trim(),
+    };
+}
+
+function applySharedConfigToInputs() {
+    document.getElementById('api_key').value = sharedConfig.api_key || '';
+    document.getElementById('base_url').value = sharedConfig.base_url || 'https://api.deepseek.com';
+    document.getElementById('model').value = sharedConfig.model || 'deepseek-reasoner';
 }
 
 function nowText() {
@@ -498,6 +557,7 @@ function setConfigInputsDisabled(disabled) {
         'precheck_cmd', 'history_max_messages', 'history_max_chars', 'release_gate_threshold',
         'goal', 'eval_cmd', 'success_regex', 'remote', 'remote_url', 'branch',
         'preset_webapp_btn', 'preset_cli_btn', 'preset_desktop_btn', 'reset_form_btn',
+        'open_global_config_btn',
     ];
     ids.forEach(id => {
         const el = document.getElementById(id);
@@ -608,6 +668,13 @@ async function fetchUiCacheFromServer() {
         cacheRecentWorkspaces = Array.isArray(data.recent_workspaces) ? data.recent_workspaces : [];
         cacheProjectLogs = (data.project_logs && typeof data.project_logs === 'object') ? data.project_logs : {};
         cacheProjectUiState = (data.project_ui_state && typeof data.project_ui_state === 'object') ? data.project_ui_state : {};
+        if (data.shared_config && typeof data.shared_config === 'object') {
+            sharedConfig = {
+                api_key: data.shared_config.api_key || '',
+                base_url: data.shared_config.base_url || 'https://api.deepseek.com',
+                model: data.shared_config.model || 'deepseek-reasoner',
+            };
+        }
         return true;
     } catch (_e) {
         return false;
@@ -618,6 +685,7 @@ function scheduleUiCacheSave() {
     if (uiCacheSaveTimer) clearTimeout(uiCacheSaveTimer);
     uiCacheSaveTimer = setTimeout(async () => {
         const payload = {
+            shared_config: sharedConfig,
             recent_workspaces: cacheRecentWorkspaces,
             project_logs: cacheProjectLogs,
             project_ui_state: cacheProjectUiState,
@@ -893,6 +961,21 @@ function applyFormData(d) {
     });
 }
 
+function openGlobalConfigModal() {
+    document.getElementById('global_config_modal').style.display = 'flex';
+}
+
+function closeGlobalConfigModal() {
+    document.getElementById('global_config_modal').style.display = 'none';
+}
+
+async function saveGlobalConfig() {
+    updateSharedConfigFromInputs();
+    scheduleUiCacheSave();
+    closeGlobalConfigModal();
+    setStatus('全局配置已保存。', 'status-warn');
+}
+
 function setAutoSaveState(text) {
     document.getElementById('auto_save_state').textContent = text;
 }
@@ -903,6 +986,63 @@ function loadProjects() {
 
 function saveProjects(items) {
     cachedProjects = Array.isArray(items) ? items : [];
+}
+
+function projectWorkspaceById(id) {
+    return `./workspace_projects/${id}`;
+}
+
+function ensureWorkspaceForCurrentProject() {
+    const sel = document.getElementById('project_selector');
+    const id = sel?.value || '';
+    document.getElementById('workspace').value = id ? projectWorkspaceById(id) : '';
+}
+
+function renderProjectAccordion() {
+    const container = document.getElementById('project_accordion');
+    if (!container) return;
+    const items = loadProjects();
+    const selectedId = document.getElementById('project_selector')?.value || '';
+    if (!items.length) {
+        container.innerHTML = '<div class="hint">暂无项目，先输入项目名称后点击“保存当前项目”。</div>';
+        return;
+    }
+    container.innerHTML = items
+        .map(p => {
+            const active = p.id === selectedId;
+            const dt = p.updated_at ? new Date(p.updated_at * 1000).toLocaleString() : '-';
+            const snap = p.snapshot || {};
+            return `
+<details ${active ? 'open' : ''}>
+  <summary>${active ? '● ' : ''}${escapeHtml(p.name || '未命名项目')}</summary>
+  <div class="meta">
+    workspace: ${escapeHtml(p.workspace || '-')}<br>
+    更新: ${escapeHtml(dt)}<br>
+    eval: ${escapeHtml(snap.eval_cmd || '-')}<br>
+    回滚: ${escapeHtml(snap.auto_revert_profile || '-')}
+  </div>
+  <div class="buttons">
+    <button class="btn-ghost" onclick="selectProject('${p.id}')">切换到此项目</button>
+    <button class="btn-ghost" onclick="deleteProjectById('${p.id}')">删除此项目</button>
+  </div>
+</details>`;
+        })
+        .join('');
+}
+
+function selectProject(id) {
+    const sel = document.getElementById('project_selector');
+    if (!sel) return;
+    sel.value = id;
+    syncProjectNameFromSelection();
+    loadSelectedProject();
+}
+
+function deleteProjectById(id) {
+    const sel = document.getElementById('project_selector');
+    if (!sel) return;
+    sel.value = id;
+    deleteSelectedProject();
 }
 
 async function fetchProjectsFromServer() {
@@ -971,6 +1111,8 @@ function renderProjectSelector(selectedId) {
     } else {
         sel.value = '';
     }
+    ensureWorkspaceForCurrentProject();
+    renderProjectAccordion();
 }
 
 function selectProjectByCurrentForm() {
@@ -999,6 +1141,7 @@ function syncProjectNameFromSelection() {
 }
 
 async function saveCurrentProject() {
+    updateSharedConfigFromInputs();
     const body = getFormData();
     const sel = document.getElementById('project_selector');
     const items = loadProjects();
@@ -1006,13 +1149,22 @@ async function saveCurrentProject() {
     const idx = items.findIndex(x => x.id === selectedId);
     const inputName = document.getElementById('project_name').value.trim();
     const fallbackName = body.workspace.trim() || `项目 ${items.length + 1}`;
+    const projectId = idx >= 0 ? items[idx].id : randomProjectId();
+    const projectWorkspace = projectWorkspaceById(projectId);
+    const snapshot = {
+        ...body,
+        api_key: '',
+        base_url: '',
+        model: '',
+        workspace: projectWorkspace,
+    };
     const project = {
-        id: idx >= 0 ? items[idx].id : randomProjectId(),
+        id: projectId,
         name: inputName || fallbackName,
-        workspace: body.workspace,
+        workspace: projectWorkspace,
         goal: body.goal,
         updated_at: Date.now(),
-        snapshot: body,
+        snapshot,
     };
     if (idx >= 0) {
         items[idx] = project;
@@ -1026,10 +1178,12 @@ async function saveCurrentProject() {
     }
     renderProjectSelector(project.id);
     document.getElementById('project_name').value = project.name;
+    document.getElementById('workspace').value = projectWorkspace;
     appendLog(`[UI] 项目已保存：${project.name}${serverOk ? '' : '（后端未同步）'}`);
 }
 
 function loadSelectedProject() {
+    updateSharedConfigFromInputs();
     const sel = document.getElementById('project_selector');
     const items = loadProjects();
     const found = items.find(x => x.id === sel.value);
@@ -1037,8 +1191,16 @@ function loadSelectedProject() {
         setStatus('请先选择一个可加载的项目。', 'status-danger');
         return;
     }
-    applyFormData(found.snapshot);
+    const merged = {
+        ...found.snapshot,
+        api_key: sharedConfig.api_key,
+        base_url: sharedConfig.base_url,
+        model: sharedConfig.model,
+        workspace: found.workspace || projectWorkspaceById(found.id),
+    };
+    applyFormData(merged);
     document.getElementById('project_name').value = found.name || '';
+    ensureWorkspaceForCurrentProject();
     scheduleDraftSave();
     saveRecentWorkspace(found.workspace || '');
     setStatus(`已载入项目：${found.name || '未命名'}`, 'status-warn');
@@ -1084,6 +1246,7 @@ function createNewProject() {
     applyFormData(defaults);
     document.getElementById('project_selector').value = '';
     document.getElementById('project_name').value = '';
+    document.getElementById('workspace').value = '';
     activeRunLogBucket = '';
     scheduleDraftSave();
     renderCurrentLogView();
@@ -1118,7 +1281,9 @@ function renderRecentWorkspaceSuggestions() {
 }
 
 async function saveDraftRemote() {
+    ensureWorkspaceForCurrentProject();
     const body = getFormData();
+    if (!body.workspace) return;
     try {
         const resp = await fetch('/draft', {
             method: 'POST',
@@ -1434,6 +1599,7 @@ function showClarify(questions) {
 }
 
 async function startSession() {
+    ensureWorkspaceForCurrentProject();
     const body = getFormData();
     if (isReadOnlyView()) {
         setStatus('当前是只读视图，请切回正在运行的项目。', 'status-danger');
@@ -1480,6 +1646,7 @@ async function startSession() {
 
 async function resumeSession() {
     try {
+        ensureWorkspaceForCurrentProject();
         if (isReadOnlyView()) {
             setStatus('当前是只读视图，请切回正在运行的项目。', 'status-danger');
             return;
@@ -1674,16 +1841,12 @@ function resetForm() {
 }
 
 function bindAutoSave() {
-    const ids = ['api_key', 'base_url', 'model', 'auto_revert_profile', 'precheck_cmd', 'history_max_messages', 'history_max_chars', 'release_gate_threshold', 'workspace', 'goal', 'eval_cmd', 'success_regex', 'remote', 'remote_url', 'branch'];
+    const ids = ['auto_revert_profile', 'precheck_cmd', 'history_max_messages', 'history_max_chars', 'release_gate_threshold', 'goal', 'eval_cmd', 'success_regex', 'remote', 'remote_url', 'branch'];
     ids.forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
         el.addEventListener('input', scheduleDraftSave);
         el.addEventListener('change', scheduleDraftSave);
-    });
-    document.getElementById('workspace').addEventListener('change', async () => {
-        await loadProjectConfigForWorkspace();
-        scheduleDraftSave();
     });
 }
 
@@ -1715,6 +1878,12 @@ function bindEvents() {
     document.getElementById('project_load_btn').addEventListener('click', loadSelectedProject);
     document.getElementById('project_delete_btn').addEventListener('click', () => { deleteSelectedProject(); });
     document.getElementById('project_selector').addEventListener('change', syncProjectNameFromSelection);
+    document.getElementById('open_global_config_btn').addEventListener('click', openGlobalConfigModal);
+    document.getElementById('save_global_config_btn').addEventListener('click', saveGlobalConfig);
+    document.getElementById('close_global_config_btn').addEventListener('click', closeGlobalConfigModal);
+    document.getElementById('global_config_modal').addEventListener('click', (e) => {
+        if (e.target && e.target.id === 'global_config_modal') closeGlobalConfigModal();
+    });
 }
 
 function exportLogs() {
@@ -1812,6 +1981,7 @@ async function exportReleaseReport() {
 
 async function init() {
     await fetchUiCacheFromServer();
+    applySharedConfigToInputs();
     renderRecentWorkspaceSuggestions();
     await refreshProjectsFromServer();
     renderProjectSelector('');
@@ -1825,6 +1995,7 @@ async function init() {
     document.getElementById('revert_btn').disabled = true;
     setRunState('idle', '空闲');
     await loadDraft();
+    applySharedConfigToInputs();
     selectProjectByCurrentForm();
     renderCurrentLogView();
     renderUiForViewBucket();
