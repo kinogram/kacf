@@ -527,6 +527,11 @@ async function saveDraftRemote() {
     }
 }
 
+function draftQueryByWorkspace() {
+    const ws = document.getElementById('workspace').value.trim();
+    return ws ? `?workspace=${encodeURIComponent(ws)}` : '';
+}
+
 function scheduleDraftSave() {
     saveDraftLocal();
     if (saveTimer) clearTimeout(saveTimer);
@@ -543,7 +548,7 @@ async function loadDraft() {
         } catch (_e) {}
     }
     try {
-        const resp = await fetch('/draft');
+        const resp = await fetch(`/draft${draftQueryByWorkspace()}`);
         if (resp.ok) {
             const data = await resp.json();
             applyFormData(data);
@@ -756,7 +761,12 @@ async function startSession() {
 
 async function resumeSession() {
     try {
-        const resp = await fetch('/resume', { method: 'POST' });
+        const body = getFormData();
+        const resp = await fetch('/resume', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ workspace: body.workspace }),
+        });
         if (!resp.ok) {
             const msg = await resp.text();
             throw new Error(`${resp.status} ${msg}`);

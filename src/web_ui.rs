@@ -31,7 +31,6 @@ pub struct AppState {
     events: Arc<Mutex<Vec<(usize, SerializableEvent)>>>,
     next_event_id: Arc<Mutex<usize>>,
     runtime: Arc<Mutex<RuntimeStatus>>,
-    draft_path: Arc<PathBuf>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -101,6 +100,18 @@ struct DraftPayload {
 
 #[derive(Debug, Deserialize)]
 struct ProjectConfigQuery {
+    workspace: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct DraftQuery {
+    #[serde(default)]
+    workspace: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ResumePayload {
+    #[serde(default)]
     workspace: String,
 }
 
@@ -268,6 +279,14 @@ fn read_draft(path: &Path) -> Option<DraftPayload> {
     serde_json::from_str(&content).ok()
 }
 
+fn draft_path_for_workspace(workspace: &str) -> Option<PathBuf> {
+    let ws = workspace.trim();
+    if ws.is_empty() {
+        return None;
+    }
+    Some(Path::new(ws).join(DRAFT_FILENAME))
+}
+
 fn save_draft(path: &Path, draft: &DraftPayload) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -424,11 +443,14 @@ async fn start_session(data: web::Data<AppState>, body: web::Json<StartPayload>)
 }
 
 async fn save_draft_config(
-    data: web::Data<AppState>,
+    _data: web::Data<AppState>,
     body: web::Json<DraftPayload>,
 ) -> impl Responder {
     let payload = body.into_inner();
-    match save_draft(data.draft_path.as_ref(), &payload) {
+    let Some(draft_path) = draft_path_for_workspace(&payload.workspace) else {
+        return HttpResponse::BadRequest().body("workspace is empty");
+    };
+    match save_draft(&draft_path, &payload) {
         Ok(_) => {
             if let Err(e) = save_project_config(
                 &payload.workspace,
@@ -446,8 +468,11 @@ async fn save_draft_config(
     }
 }
 
-async fn get_draft_config(data: web::Data<AppState>) -> impl Responder {
-    match read_draft(data.draft_path.as_ref()) {
+async fn get_draft_config(_data: web::Data<AppState>, query: web::Query<DraftQuery>) -> impl Responder {
+    let Some(ws_path) = draft_path_for_workspace(&query.workspace) else {
+        return HttpResponse::BadRequest().body("workspace is empty");
+    };
+    match read_draft(&ws_path) {
         Some(draft) => HttpResponse::Ok().json(draft),
         None => HttpResponse::NotFound().body("draft not found"),
     }
@@ -460,8 +485,14 @@ async fn get_project_config(query: web::Query<ProjectConfigQuery>) -> impl Respo
     }
 }
 
-async fn resume_session(data: web::Data<AppState>) -> impl Responder {
-    let Some(draft) = read_draft(data.draft_path.as_ref()) else {
+async fn resume_session(
+    data: web::Data<AppState>,
+    body: web::Json<ResumePayload>,
+) -> impl Responder {
+    let Some(draft_path) = draft_path_for_workspace(&body.workspace) else {
+        return HttpResponse::BadRequest().body("workspace is empty");
+    };
+    let Some(draft) = read_draft(&draft_path) else {
         return HttpResponse::NotFound().body("draft not found");
     };
     if draft.api_key.trim().is_empty() {
@@ -486,7 +517,7 @@ async fn resume_session(data: web::Data<AppState>) -> impl Responder {
 
 async fn get_ui_state(data: web::Data<AppState>) -> impl Responder {
     let runtime = data.runtime.lock().unwrap().clone();
-    let draft = read_draft(data.draft_path.as_ref());
+    let draft = draft_path_for_workspace(&runtime.last_workspace).and_then(|p| read_draft(&p));
     let resume = draft
         .as_ref()
         .and_then(|d| read_resume_info(&d.workspace, &d.goal));
@@ -999,17 +1030,12 @@ pub async fn run_web_server(
         .ok()
         .and_then(|v| v.parse::<u16>().ok())
         .unwrap_or(8080);
-    let draft_path = std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join(DRAFT_FILENAME);
-
     let state = AppState {
         tx_req,
         rx_evt,
         events: Arc::new(Mutex::new(Vec::new())),
         next_event_id: Arc::new(Mutex::new(0)),
         runtime: Arc::new(Mutex::new(RuntimeStatus::default())),
-        draft_path: Arc::new(draft_path),
     };
     spawn_event_collector(state.clone());
 
