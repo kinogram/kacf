@@ -414,6 +414,7 @@
 const DRAFT_KEY = 'autocoding_webui_draft_v2';
 const RECENT_WORKSPACES_KEY = 'autocoding_recent_workspaces_v1';
 const PROJECTS_KEY = 'autocoding_projects_v1';
+const PROJECT_LOGS_KEY = 'autocoding_project_logs_v1';
 let lastEventId = 0;
 let polling = false;
 let saveTimer = null;
@@ -438,6 +439,7 @@ const FALLBACK_LOG_DEDUP_MS = 30000;
 const BACKEND_FAILURE_THRESHOLD = 3;
 const SSE_ERROR_LIMIT = 6;
 const SSE_CONNECT_GRACE_MS = 10000;
+let activeRunLogBucket = '';
 
 function defaultFormData() {
     return {
@@ -463,9 +465,58 @@ function nowText() {
     return new Date().toLocaleString();
 }
 
-function appendLog(text) {
+function adHocLogBucketFromForm() {
+    const body = getFormData();
+    const ws = (body.workspace || '').trim() || './workspace';
+    const goal = (body.goal || '').trim() || '(empty-goal)';
+    return `adhoc:${ws}::${goal}`;
+}
+
+function currentLogBucket() {
+    if (activeRunLogBucket) return activeRunLogBucket;
+    const selectedProjectId = document.getElementById('project_selector')?.value || '';
+    if (selectedProjectId) return `project:${selectedProjectId}`;
+    return adHocLogBucketFromForm();
+}
+
+function loadProjectLogs() {
+    try {
+        const data = JSON.parse(localStorage.getItem(PROJECT_LOGS_KEY) || '{}');
+        return data && typeof data === 'object' ? data : {};
+    } catch (_e) {
+        return {};
+    }
+}
+
+function saveProjectLogs(obj) {
+    localStorage.setItem(PROJECT_LOGS_KEY, JSON.stringify(obj || {}));
+}
+
+function readLogForBucket(bucket) {
+    const all = loadProjectLogs();
+    const raw = all[bucket];
+    return typeof raw === 'string' ? raw : '';
+}
+
+function writeLogForBucket(bucket, content) {
+    const all = loadProjectLogs();
+    // Hard cap to avoid unbounded localStorage growth.
+    all[bucket] = (content || '').slice(-300000);
+    saveProjectLogs(all);
+}
+
+function renderCurrentLogView() {
     const log = document.getElementById('log');
-    log.textContent += text + "\n";
+    log.textContent = readLogForBucket(currentLogBucket());
+    log.scrollTop = log.scrollHeight;
+}
+
+function appendLog(text) {
+    const bucket = currentLogBucket();
+    const existing = readLogForBucket(bucket);
+    writeLogForBucket(bucket, existing + text + "\n");
+    const log = document.getElementById('log');
+    log.textContent = readLogForBucket(bucket);
     log.scrollTop = log.scrollHeight;
 }
 
@@ -521,6 +572,7 @@ function syncStoppedStateIfNeeded(reason) {
     if (state !== 'running' && state !== 'stopping') return;
     clearStopAckTimer();
     stopRequested = false;
+    activeRunLogBucket = '';
     setRunState('idle', '空闲');
     document.getElementById('start_btn').disabled = false;
     document.getElementById('stop_btn').disabled = true;
@@ -677,6 +729,7 @@ function syncProjectNameFromSelection() {
     const items = loadProjects();
     const found = items.find(x => x.id === sel.value);
     document.getElementById('project_name').value = found ? (found.name || '') : '';
+    renderCurrentLogView();
 }
 
 async function saveCurrentProject() {
@@ -724,6 +777,7 @@ function loadSelectedProject() {
     saveRecentWorkspace(found.workspace || '');
     setStatus(`已载入项目：${found.name || '未命名'}`, 'status-warn');
     appendLog(`[UI] 已载入项目：${found.name || '未命名'}`);
+    renderCurrentLogView();
 }
 
 async function deleteSelectedProject() {
@@ -742,6 +796,10 @@ async function deleteSelectedProject() {
     }
     renderProjectSelector('');
     document.getElementById('project_name').value = '';
+    const logs = loadProjectLogs();
+    delete logs[`project:${found.id}`];
+    saveProjectLogs(logs);
+    renderCurrentLogView();
     appendLog(`[UI] 已删除项目：${found.name || '未命名'}${serverOk ? '' : '（仅本地）'}`);
 }
 
@@ -754,7 +812,9 @@ function createNewProject() {
     applyFormData(defaults);
     document.getElementById('project_selector').value = '';
     document.getElementById('project_name').value = '';
+    activeRunLogBucket = '';
     scheduleDraftSave();
+    renderCurrentLogView();
     setStatus('已切换到新项目草稿，请填写需求后保存项目。', 'status-warn');
 }
 
@@ -1065,6 +1125,7 @@ function handleEvent(evt) {
             break;
         case 'done':
             clearStopAckTimer();
+            activeRunLogBucket = '';
             if (evt.success) {
                 setRunState('success', '已完成（成功）');
                 setStatus(`完成：成功 - ${evt.message}`, 'status-ok');
@@ -1145,6 +1206,7 @@ async function startSession() {
         return;
     }
     try {
+        activeRunLogBucket = currentLogBucket();
         const resp = await fetch('/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1163,6 +1225,7 @@ async function startSession() {
         document.getElementById('stop_btn').disabled = false;
         document.getElementById('revert_btn').disabled = false;
     } catch (e) {
+        activeRunLogBucket = '';
         setStatus('启动失败: ' + e, 'status-danger');
     }
 }
@@ -1170,6 +1233,7 @@ async function startSession() {
 async function resumeSession() {
     try {
         const body = getFormData();
+        activeRunLogBucket = currentLogBucket();
         const resp = await fetch('/resume', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1186,6 +1250,7 @@ async function resumeSession() {
         document.getElementById('start_btn').disabled = true;
         document.getElementById('stop_btn').disabled = false;
     } catch (e) {
+        activeRunLogBucket = '';
         setStatus('恢复失败：请先保存并确保当前目标与历史断点一致。' + e, 'status-danger');
     }
 }
@@ -1347,7 +1412,8 @@ function bindEvents() {
     document.getElementById('push_btn').addEventListener('click', pushRemote);
     document.getElementById('clarify_submit_btn').addEventListener('click', submitClarify);
     document.getElementById('clear_log_btn').addEventListener('click', () => {
-        document.getElementById('log').textContent = '';
+        writeLogForBucket(currentLogBucket(), '');
+        renderCurrentLogView();
     });
     document.getElementById('export_log_btn').addEventListener('click', exportLogs);
     document.getElementById('export_snapshot_btn').addEventListener('click', exportSnapshot);
@@ -1467,6 +1533,7 @@ async function init() {
     setRunState('idle', '空闲');
     await loadDraft();
     selectProjectByCurrentForm();
+    renderCurrentLogView();
     await loadProjectConfigForWorkspace();
     await refreshUiState();
     await refreshMetrics();
