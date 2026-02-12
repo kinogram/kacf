@@ -289,8 +289,6 @@ struct UiCachePayload {
     #[serde(default)]
     shared_config: Option<SharedConfig>,
     #[serde(default)]
-    recent_workspaces: Vec<String>,
-    #[serde(default)]
     project_logs: std::collections::BTreeMap<String, String>,
     #[serde(default)]
     project_ui_state: std::collections::BTreeMap<String, serde_json::Value>,
@@ -312,8 +310,6 @@ struct UiCachePatch {
     projects: Option<Vec<WebProject>>,
     #[serde(default)]
     shared_config: Option<SharedConfig>,
-    #[serde(default)]
-    recent_workspaces: Option<Vec<String>>,
     #[serde(default)]
     project_logs: Option<std::collections::BTreeMap<String, String>>,
     #[serde(default)]
@@ -631,9 +627,6 @@ async fn put_ui_cache(
     }
     if let Some(v) = patch.shared_config {
         payload.shared_config = Some(v);
-    }
-    if let Some(v) = patch.recent_workspaces {
-        payload.recent_workspaces = v;
     }
     if let Some(v) = patch.project_logs {
         payload.project_logs = v;

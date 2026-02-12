@@ -482,7 +482,6 @@ let activeRunLogBucket = '';
 let activeRunProjectLabel = '';
 let runSessionActive = false;
 let cachedProjects = [];
-let cacheRecentWorkspaces = [];
 let cacheProjectLogs = {};
 let cacheProjectUiState = {};
 let uiCacheSaveTimer = null;
@@ -665,7 +664,6 @@ async function fetchUiCacheFromServer() {
         const resp = await fetch('/ui_cache');
         if (!resp.ok) return false;
         const data = await resp.json();
-        cacheRecentWorkspaces = Array.isArray(data.recent_workspaces) ? data.recent_workspaces : [];
         cacheProjectLogs = (data.project_logs && typeof data.project_logs === 'object') ? data.project_logs : {};
         cacheProjectUiState = (data.project_ui_state && typeof data.project_ui_state === 'object') ? data.project_ui_state : {};
         if (data.shared_config && typeof data.shared_config === 'object') {
@@ -686,7 +684,6 @@ function scheduleUiCacheSave() {
     uiCacheSaveTimer = setTimeout(async () => {
         const payload = {
             shared_config: sharedConfig,
-            recent_workspaces: cacheRecentWorkspaces,
             project_logs: cacheProjectLogs,
             project_ui_state: cacheProjectUiState,
         };
@@ -1202,7 +1199,6 @@ function loadSelectedProject() {
     document.getElementById('project_name').value = found.name || '';
     ensureWorkspaceForCurrentProject();
     scheduleDraftSave();
-    saveRecentWorkspace(found.workspace || '');
     setStatus(`已载入项目：${found.name || '未命名'}`, 'status-warn');
     appendLog(`[UI] 已载入项目：${found.name || '未命名'}`);
     renderCurrentLogView();
@@ -1255,31 +1251,6 @@ function createNewProject() {
     setStatus('已切换到新项目草稿，请填写需求后保存项目。', 'status-warn');
 }
 
-function loadRecentWorkspaces() {
-    return Array.isArray(cacheRecentWorkspaces) ? cacheRecentWorkspaces : [];
-}
-
-function saveRecentWorkspace(path) {
-    const p = (path || '').trim();
-    if (!p) return;
-    const items = loadRecentWorkspaces().filter(x => x !== p);
-    items.unshift(p);
-    cacheRecentWorkspaces = items.slice(0, 12);
-    scheduleUiCacheSave();
-    renderRecentWorkspaceSuggestions();
-}
-
-function renderRecentWorkspaceSuggestions() {
-    const list = document.getElementById('workspace_suggestions');
-    if (!list) return;
-    list.innerHTML = '';
-    loadRecentWorkspaces().forEach(p => {
-        const opt = document.createElement('option');
-        opt.value = p;
-        list.appendChild(opt);
-    });
-}
-
 async function saveDraftRemote() {
     ensureWorkspaceForCurrentProject();
     const body = getFormData();
@@ -1291,7 +1262,6 @@ async function saveDraftRemote() {
             body: JSON.stringify(body),
         });
         if (!resp.ok) throw new Error('save failed');
-        saveRecentWorkspace(body.workspace);
         setAutoSaveState(`草稿状态：已保存 (${nowText()})`);
     } catch (_e) {
         setAutoSaveState(`草稿状态：保存失败 (${nowText()})`);
@@ -1815,20 +1785,16 @@ function escapeHtml(text) {
 }
 
 function applyPreset(kind) {
-    const workspace = document.getElementById('workspace');
     const goal = document.getElementById('goal');
     const evalCmd = document.getElementById('eval_cmd');
 
     if (kind === 'webapp') {
-        workspace.value = './workspace_webapp';
         goal.value = '做一个企业级 Web 应用：包含用户登录、权限管理、数据看板、可导出报表，并提供完整自动化测试脚本。';
         evalCmd.value = 'bash scripts/run_tests.sh';
     } else if (kind === 'cli') {
-        workspace.value = './workspace_cli';
         goal.value = '做一个稳定的命令行工具：支持配置文件、日志、子命令和错误恢复，并附带自动化测试。';
         evalCmd.value = 'bash scripts/run_tests.sh';
     } else if (kind === 'desktop') {
-        workspace.value = './workspace_desktop';
         goal.value = '做一个桌面程序：包含可视化界面、文件导入导出、设置页、完整自动化评测脚本。';
         evalCmd.value = 'bash scripts/run_tests.sh';
     }
@@ -1982,7 +1948,6 @@ async function exportReleaseReport() {
 async function init() {
     await fetchUiCacheFromServer();
     applySharedConfigToInputs();
-    renderRecentWorkspaceSuggestions();
     await refreshProjectsFromServer();
     renderProjectSelector('');
     bindEvents();
