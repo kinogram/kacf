@@ -820,14 +820,20 @@ async function resumeSession() {
 async function stopSession() {
     try {
         const resp = await fetch('/stop', { method: 'POST' });
+        const ack = (await resp.text()).trim();
         if (!resp.ok) throw new Error(`stop error ${resp.status}`);
         stopRequested = true;
         setRunState('stopping', '正在中断，等待任务确认停止');
-        setStatus('已发送停止请求，等待任务中断。', 'status-warn');
+        if (ack.includes('channel unavailable')) {
+            setStatus('后端会话已结束，已按停止处理。', 'status-warn');
+        } else {
+            setStatus('已发送停止请求，等待任务中断。', 'status-warn');
+        }
         document.getElementById('start_btn').disabled = false;
         document.getElementById('stop_btn').disabled = true;
     } catch (e) {
-        setStatus('停止失败: ' + e, 'status-danger');
+        setRunState('interrupted', '停止请求失败');
+        setStatus('停止请求失败：请检查服务连接后重试。' + e, 'status-danger');
     }
 }
 
