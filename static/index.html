@@ -379,6 +379,7 @@
             <div class="runbar" id="runbar" data-state="idle"><div class="runbar-fill"></div></div>
             <div class="hint" id="runbar_text">运行状态：空闲</div>
             <div class="hint" id="running_project_text">当前运行项目：无</div>
+            <div class="hint" id="readonly_mode_text">只读模式：关闭</div>
             <div class="hint" id="auto_save_state">草稿状态：未保存</div>
             <div class="hint" id="diagnostics">诊断：暂无</div>
             <div class="hint" id="metrics_text">运行指标：暂无</div>
@@ -443,6 +444,7 @@ const SSE_ERROR_LIMIT = 6;
 const SSE_CONNECT_GRACE_MS = 10000;
 let activeRunLogBucket = '';
 let activeRunProjectLabel = '';
+let runSessionActive = false;
 
 function defaultFormData() {
     return {
@@ -476,7 +478,6 @@ function setRunningProjectIndicator(label) {
 
 function setProjectControlsDisabled(disabled) {
     const ids = [
-        'project_selector',
         'project_name',
         'project_new_btn',
         'project_save_btn',
@@ -488,6 +489,43 @@ function setProjectControlsDisabled(disabled) {
         if (!el) return;
         el.disabled = !!disabled;
     });
+}
+
+function setConfigInputsDisabled(disabled) {
+    const ids = [
+        'api_key', 'model', 'base_url', 'workspace', 'auto_revert_profile',
+        'precheck_cmd', 'history_max_messages', 'history_max_chars', 'release_gate_threshold',
+        'goal', 'eval_cmd', 'success_regex', 'remote', 'remote_url', 'branch',
+        'preset_webapp_btn', 'preset_cli_btn', 'preset_desktop_btn', 'reset_form_btn',
+    ];
+    ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.disabled = !!disabled;
+    });
+}
+
+function isReadOnlyView() {
+    if (!runSessionActive) return false;
+    if (!activeRunLogBucket) return false;
+    return viewLogBucket() !== activeRunLogBucket;
+}
+
+function applyReadOnlyMode() {
+    const readonly = isReadOnlyView();
+    const hint = document.getElementById('readonly_mode_text');
+    if (hint) {
+        hint.textContent = readonly
+            ? '只读模式：当前正在运行其他项目。你可以查看本项目，但不能编辑或执行会影响运行任务的操作。'
+            : '只读模式：关闭';
+    }
+    setConfigInputsDisabled(readonly || runSessionActive);
+    document.getElementById('start_btn').disabled = readonly || runSessionActive;
+    document.getElementById('resume_btn').disabled = readonly || runSessionActive;
+    document.getElementById('stop_btn').disabled = readonly || !runSessionActive;
+    document.getElementById('revert_btn').disabled = readonly || !runSessionActive;
+    document.getElementById('push_btn').disabled = readonly;
+    document.getElementById('clarify_submit_btn').disabled = readonly;
 }
 
 function currentProjectLabel() {
@@ -738,8 +776,10 @@ function syncStoppedStateIfNeeded(reason) {
     stopRequested = false;
     activeRunLogBucket = '';
     activeRunProjectLabel = '';
+    runSessionActive = false;
     setRunningProjectIndicator('无');
     setProjectControlsDisabled(false);
+    applyReadOnlyMode();
     setRunState('idle', '空闲');
     document.getElementById('start_btn').disabled = false;
     document.getElementById('stop_btn').disabled = true;
@@ -898,6 +938,7 @@ function syncProjectNameFromSelection() {
     document.getElementById('project_name').value = found ? (found.name || '') : '';
     renderCurrentLogView();
     renderUiForViewBucket();
+    applyReadOnlyMode();
 }
 
 async function saveCurrentProject() {
@@ -947,6 +988,7 @@ function loadSelectedProject() {
     appendLog(`[UI] 已载入项目：${found.name || '未命名'}`);
     renderCurrentLogView();
     renderUiForViewBucket();
+    applyReadOnlyMode();
 }
 
 async function deleteSelectedProject() {
@@ -989,6 +1031,7 @@ function createNewProject() {
     scheduleDraftSave();
     renderCurrentLogView();
     renderUiForViewBucket();
+    applyReadOnlyMode();
     setStatus('已切换到新项目草稿，请填写需求后保存项目。', 'status-warn');
 }
 
@@ -1125,8 +1168,13 @@ async function refreshUiState() {
         renderResumeBanner(data);
         if (data.runtime && data.runtime.running) {
             const label = (data.runtime.last_workspace || '').trim() || '后端任务运行中';
+            if (!activeRunLogBucket) {
+                activeRunLogBucket = `runtime:${label}`;
+            }
+            runSessionActive = true;
             setRunningProjectIndicator(label);
             setProjectControlsDisabled(true);
+            applyReadOnlyMode();
             document.getElementById('start_btn').disabled = true;
             document.getElementById('stop_btn').disabled = false;
             document.getElementById('revert_btn').disabled = false;
@@ -1136,6 +1184,8 @@ async function refreshUiState() {
             syncStoppedStateIfNeeded('后端已停止运行');
             setProjectControlsDisabled(false);
             setRunningProjectIndicator('无');
+            runSessionActive = false;
+            applyReadOnlyMode();
         }
     } catch (_e) {
         markBackendFailure('ui_state');
@@ -1305,8 +1355,10 @@ function handleEvent(evt) {
             clearStopAckTimer();
             activeRunLogBucket = '';
             activeRunProjectLabel = '';
+            runSessionActive = false;
             setRunningProjectIndicator('无');
             setProjectControlsDisabled(false);
+            applyReadOnlyMode();
             if (evt.success) {
                 setRunState('success', '已完成（成功）');
                 setStatus(`完成：成功 - ${evt.message}`, 'status-ok');
@@ -1344,6 +1396,10 @@ function showClarify(questions) {
 
 async function startSession() {
     const body = getFormData();
+    if (isReadOnlyView()) {
+        setStatus('当前是只读视图，请切回正在运行的项目。', 'status-danger');
+        return;
+    }
     if (!body.api_key) {
         setStatus('启动失败：API Key 为空，请先填写。', 'status-danger');
         return;
@@ -1364,6 +1420,8 @@ async function startSession() {
         setStatus('已启动新任务。系统将自动写代码并执行评测。', 'status-warn');
         setRunningProjectIndicator(activeRunProjectLabel);
         setProjectControlsDisabled(true);
+        runSessionActive = true;
+        applyReadOnlyMode();
         setRunState('running', '运行中，可点击停止中断');
         stopRequested = false;
         completionAlertShown = false;
@@ -1373,14 +1431,20 @@ async function startSession() {
     } catch (e) {
         activeRunLogBucket = '';
         activeRunProjectLabel = '';
+        runSessionActive = false;
         setRunningProjectIndicator('无');
         setProjectControlsDisabled(false);
+        applyReadOnlyMode();
         setStatus('启动失败: ' + e, 'status-danger');
     }
 }
 
 async function resumeSession() {
     try {
+        if (isReadOnlyView()) {
+            setStatus('当前是只读视图，请切回正在运行的项目。', 'status-danger');
+            return;
+        }
         const body = getFormData();
         activeRunLogBucket = currentLogBucket();
         activeRunProjectLabel = currentProjectLabel();
@@ -1396,6 +1460,8 @@ async function resumeSession() {
         setStatus('已从断点恢复运行。', 'status-warn');
         setRunningProjectIndicator(activeRunProjectLabel);
         setProjectControlsDisabled(true);
+        runSessionActive = true;
+        applyReadOnlyMode();
         setRunState('running', '运行中，可点击停止中断');
         stopRequested = false;
         completionAlertShown = false;
@@ -1404,8 +1470,10 @@ async function resumeSession() {
     } catch (e) {
         activeRunLogBucket = '';
         activeRunProjectLabel = '';
+        runSessionActive = false;
         setRunningProjectIndicator('无');
         setProjectControlsDisabled(false);
+        applyReadOnlyMode();
         setStatus('恢复失败：请先保存并确保当前目标与历史断点一致。' + e, 'status-danger');
     }
 }
@@ -1437,6 +1505,10 @@ async function stopSession() {
 }
 
 async function revertLast() {
+    if (isReadOnlyView()) {
+        setStatus('只读模式下不可回滚。请切回正在运行的项目。', 'status-danger');
+        return;
+    }
     try {
         const resp = await fetch('/revert', { method: 'POST' });
         if (!resp.ok) throw new Error(`revert error ${resp.status}`);
@@ -1447,6 +1519,10 @@ async function revertLast() {
 }
 
 async function pushRemote() {
+    if (isReadOnlyView()) {
+        setStatus('只读模式下不可推送。请切回正在运行的项目。', 'status-danger');
+        return;
+    }
     const body = getFormData();
     if (!body.remote || !body.remote_url || !body.branch) {
         setStatus('请填写远程名称、URL 和分支。', 'status-danger');
@@ -1472,6 +1548,10 @@ async function pushRemote() {
 
 async function submitClarify(e) {
     if (e) e.preventDefault();
+    if (isReadOnlyView()) {
+        setStatus('只读模式下不可提交澄清。请切回正在运行的项目。', 'status-danger');
+        return;
+    }
     const formData = new FormData(document.getElementById('clarify_form'));
     const answers = {};
     formData.forEach((value, key) => {
@@ -1572,6 +1652,10 @@ function bindEvents() {
     document.getElementById('push_btn').addEventListener('click', pushRemote);
     document.getElementById('clarify_submit_btn').addEventListener('click', submitClarify);
     document.getElementById('clear_log_btn').addEventListener('click', () => {
+        if (isReadOnlyView()) {
+            setStatus('只读模式下不可清空日志。', 'status-danger');
+            return;
+        }
         writeLogForBucket(viewLogBucket(), '');
         renderCurrentLogView();
     });
@@ -1690,6 +1774,7 @@ async function init() {
     bindAutoSave();
     setRunningProjectIndicator('无');
     setProjectControlsDisabled(false);
+    applyReadOnlyMode();
     document.getElementById('stop_btn').disabled = true;
     document.getElementById('revert_btn').disabled = true;
     setRunState('idle', '空闲');
