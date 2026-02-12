@@ -402,6 +402,8 @@ let saveTimer = null;
 let stopRequested = false;
 let eventSource = null;
 let sseRetryTimer = null;
+let sseErrorCount = 0;
+let pollingStarted = false;
 const POLL_MS_ACTIVE = 1000;
 const POLL_MS_IDLE = 3000;
 
@@ -641,6 +643,7 @@ async function refreshMetrics() {
 }
 
 async function pollEvents() {
+    pollingStarted = true;
     if (polling) return;
     polling = true;
     try {
@@ -669,13 +672,22 @@ function closeEventStream() {
     }
 }
 
+function ensurePollingFallback(reason) {
+    if (pollingStarted) return;
+    appendLog(`[UI] 实时流不可用，已切换轮询模式：${reason}`);
+    pollEvents();
+}
+
 function startEventStream() {
     if (!window.EventSource) {
-        pollEvents();
+        ensurePollingFallback('浏览器不支持 EventSource');
         return;
     }
     closeEventStream();
     eventSource = new EventSource(`/events/stream?from=${lastEventId}`);
+    eventSource.onopen = () => {
+        sseErrorCount = 0;
+    };
     eventSource.onmessage = (event) => {
         try {
             const data = JSON.parse(event.data || '{}');
@@ -687,7 +699,13 @@ function startEventStream() {
         } catch (_e) {}
     };
     eventSource.onerror = () => {
+        sseErrorCount += 1;
         closeEventStream();
+        if (sseErrorCount >= 3) {
+            ensurePollingFallback('SSE 连接连续失败');
+            sseRetryTimer = setTimeout(startEventStream, 4000);
+            return;
+        }
         sseRetryTimer = setTimeout(startEventStream, 1200);
     };
 }
