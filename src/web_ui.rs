@@ -6,7 +6,7 @@
 //! desktop environment (e.g. Termux) and interacting through a
 //! browser. The server listens on 0.0.0.0:8080 by default.
 
-use actix_web::{web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer, Responder};
 use async_stream::stream;
 use crossbeam_channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
@@ -691,10 +691,19 @@ async fn get_events(
 }
 
 async fn stream_events(
+    req: HttpRequest,
     data: web::Data<AppState>,
     query: web::Query<std::collections::HashMap<String, String>>,
 ) -> impl Responder {
-    let from_id: usize = query.get("from").and_then(|v| v.parse().ok()).unwrap_or(0);
+    let from_query = query.get("from").and_then(|v| v.parse().ok()).unwrap_or(0);
+    let from_header = req
+        .headers()
+        .get("Last-Event-ID")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<usize>().ok())
+        .map(|id| id.saturating_add(1))
+        .unwrap_or(0);
+    let from_id: usize = from_query.max(from_header);
     let mut next_id = from_id;
     let s = stream! {
         yield Ok::<_, actix_web::Error>(web::Bytes::from_static(b"retry: 1200\n\n"));
@@ -723,7 +732,7 @@ async fn stream_events(
     };
     HttpResponse::Ok()
         .insert_header(("Content-Type", "text/event-stream"))
-        .insert_header(("Cache-Control", "no-cache"))
+        .insert_header(("Cache-Control", "no-cache, no-transform"))
         .insert_header(("Connection", "keep-alive"))
         .insert_header(("X-Accel-Buffering", "no"))
         .streaming(s)

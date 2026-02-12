@@ -402,16 +402,24 @@ let saveTimer = null;
 let stopRequested = false;
 let stopAckTimer = null;
 let eventSource = null;
-let sseRetryTimer = null;
 let sseErrorCount = 0;
+let sseConnectStartedAt = 0;
 let pollingStarted = false;
 let pollTimer = null;
 let lastSseMessageAt = 0;
 let completionAlertShown = false;
+let lastRealtimeFallbackReason = '';
+let lastRealtimeFallbackAt = 0;
+let backendFailureCount = 0;
+let backendOfflineNotified = false;
 const POLL_MS_ACTIVE = 1000;
 const POLL_MS_IDLE = 3000;
 const UI_STATE_SYNC_MS = 3000;
 const SSE_STALE_MS = 8000;
+const FALLBACK_LOG_DEDUP_MS = 30000;
+const BACKEND_FAILURE_THRESHOLD = 3;
+const SSE_ERROR_LIMIT = 6;
+const SSE_CONNECT_GRACE_MS = 10000;
 
 function nowText() {
     return new Date().toLocaleString();
@@ -446,6 +454,28 @@ function setRunState(state, text) {
 
 function currentRunState() {
     return document.getElementById('runbar').dataset.state || 'idle';
+}
+
+function markBackendAlive() {
+    backendFailureCount = 0;
+    backendOfflineNotified = false;
+}
+
+function markBackendFailure(source) {
+    backendFailureCount += 1;
+    if (backendFailureCount < BACKEND_FAILURE_THRESHOLD) return;
+    if (backendOfflineNotified) return;
+    backendOfflineNotified = true;
+    const state = currentRunState();
+    if (state === 'running' || state === 'stopping') {
+        syncStoppedStateIfNeeded(`后端连接中断（${source}）`);
+        setRunState('interrupted', '后端连接中断');
+        setStatus('运行已中断：无法连接后端服务，请确认服务进程是否仍在运行。', 'status-danger');
+        if (!completionAlertShown) {
+            completionAlertShown = true;
+            alert('任务已中断：无法连接后端服务。');
+        }
+    }
 }
 
 function syncStoppedStateIfNeeded(reason) {
@@ -636,6 +666,7 @@ async function refreshUiState() {
     try {
         const resp = await fetch('/ui_state');
         if (!resp.ok) return;
+        markBackendAlive();
         const data = await resp.json();
         renderResumeBanner(data);
         if (data.runtime && data.runtime.running) {
@@ -647,13 +678,16 @@ async function refreshUiState() {
         } else {
             syncStoppedStateIfNeeded('后端已停止运行');
         }
-    } catch (_e) {}
+    } catch (_e) {
+        markBackendFailure('ui_state');
+    }
 }
 
 async function refreshMetrics() {
     try {
         const resp = await fetch('/metrics');
         if (!resp.ok) return;
+        markBackendAlive();
         const m = await resp.json();
         const success5 = m.done_5m_success_rate == null ? '-' : `${m.done_5m_success_rate.toFixed(1)}%`;
         const trend = (m.success_rate_series_5m || []).map(p => `-${p.minute_ago}m:${p.success_rate == null ? '-' : p.success_rate.toFixed(0) + '%'}`).join(' ');
@@ -671,7 +705,9 @@ async function refreshMetrics() {
         const level = (m.readiness || 'idle').toLowerCase();
         chip.className = `readiness ${level}`;
         chip.textContent = `发布就绪：${level.toUpperCase()}`;
-    } catch (_e) {}
+    } catch (_e) {
+        markBackendFailure('metrics');
+    }
 }
 
 async function pollEvents() {
@@ -681,12 +717,14 @@ async function pollEvents() {
     try {
         const resp = await fetch(`/events?from=${lastEventId}`);
         if (!resp.ok) throw new Error(`events error ${resp.status}`);
+        markBackendAlive();
         const events = await resp.json();
         events.forEach(([id, evt]) => {
             lastEventId = Math.max(lastEventId, id + 1);
             handleEvent(evt);
         });
     } catch (_e) {
+        markBackendFailure('events');
     } finally {
         polling = false;
     }
@@ -698,15 +736,12 @@ async function pollEvents() {
 }
 
 function closeEventStream() {
-    if (sseRetryTimer) {
-        clearTimeout(sseRetryTimer);
-        sseRetryTimer = null;
-    }
     if (eventSource) {
         eventSource.close();
         eventSource = null;
     }
     lastSseMessageAt = 0;
+    sseConnectStartedAt = 0;
 }
 
 function clearStopAckTimer() {
@@ -719,18 +754,29 @@ function clearStopAckTimer() {
 function ensurePollingFallback(reason) {
     if (pollingStarted) return;
     pollingStarted = true;
-    appendLog(`[UI] 实时流不可用，已切换轮询模式：${reason}`);
+    const now = Date.now();
+    if (reason !== lastRealtimeFallbackReason || (now - lastRealtimeFallbackAt) > FALLBACK_LOG_DEDUP_MS) {
+        appendLog(`[UI] 实时流不可用，已切换轮询模式：${reason}`);
+        lastRealtimeFallbackReason = reason;
+        lastRealtimeFallbackAt = now;
+    }
     pollEvents();
 }
 
-function startEventStream() {
+function startEventStream(force) {
+    const restart = !!force;
     if (!window.EventSource) {
         ensurePollingFallback('浏览器不支持 EventSource');
         return;
     }
+    if (!restart && eventSource && (eventSource.readyState === EventSource.OPEN || eventSource.readyState === EventSource.CONNECTING)) {
+        return;
+    }
     closeEventStream();
     eventSource = new EventSource(`/events/stream?from=${lastEventId}`);
+    sseConnectStartedAt = Date.now();
     eventSource.onopen = () => {
+        markBackendAlive();
         sseErrorCount = 0;
         lastSseMessageAt = Date.now();
         if (pollingStarted) {
@@ -744,6 +790,7 @@ function startEventStream() {
         appendLog('[UI] 已连接实时流通道');
     };
     eventSource.onmessage = (event) => {
+        markBackendAlive();
         lastSseMessageAt = Date.now();
         try {
             const data = JSON.parse(event.data || '{}');
@@ -758,22 +805,29 @@ function startEventStream() {
         }
     };
     eventSource.onerror = () => {
+        markBackendFailure('SSE');
         sseErrorCount += 1;
-        closeEventStream();
-        if (sseErrorCount >= 3) {
+        const waitMs = sseConnectStartedAt ? Date.now() - sseConnectStartedAt : 0;
+        if (!pollingStarted && sseErrorCount >= SSE_ERROR_LIMIT && waitMs >= SSE_CONNECT_GRACE_MS) {
             ensurePollingFallback('SSE 连接连续失败');
-            sseRetryTimer = setTimeout(startEventStream, 4000);
-            return;
         }
-        sseRetryTimer = setTimeout(startEventStream, 1200);
     };
 }
 
 function monitorRealtimeChannel() {
-    if (!eventSource || !lastSseMessageAt) return;
+    if (!eventSource) {
+        startEventStream();
+        return;
+    }
+    if (eventSource.readyState === EventSource.CLOSED) {
+        appendLog('[UI] 实时流连接已关闭，正在重连');
+        startEventStream(true);
+        return;
+    }
+    if (!lastSseMessageAt) return;
     if (Date.now() - lastSseMessageAt <= SSE_STALE_MS) return;
     appendLog('[UI] 实时流超时无消息，正在重连');
-    startEventStream();
+    startEventStream(true);
 }
 
 function handleEvent(evt) {
