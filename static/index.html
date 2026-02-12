@@ -142,6 +142,60 @@
             white-space: pre-wrap;
             font-size: 14px;
         }
+        .runbar {
+            margin-top: 10px;
+            width: 100%;
+            height: 10px;
+            border-radius: 999px;
+            border: 1px solid var(--line);
+            background: #edf2fb;
+            overflow: hidden;
+            position: relative;
+        }
+        .runbar-fill {
+            position: absolute;
+            top: 0;
+            left: -36%;
+            width: 36%;
+            height: 100%;
+            border-radius: 999px;
+            opacity: 0;
+        }
+        .runbar[data-state="running"] .runbar-fill {
+            opacity: 1;
+            background: linear-gradient(90deg, #93baf6, #1b67d8, #93baf6);
+            animation: runbar-slide 1.2s linear infinite;
+        }
+        .runbar[data-state="stopping"] .runbar-fill {
+            opacity: 1;
+            background: linear-gradient(90deg, #ffd698, #dc7a13, #ffd698);
+            animation: runbar-slide 1.5s linear infinite;
+        }
+        .runbar[data-state="success"] .runbar-fill {
+            left: 0;
+            width: 100%;
+            opacity: 1;
+            background: #26a657;
+            animation: none;
+        }
+        .runbar[data-state="failed"] .runbar-fill {
+            left: 0;
+            width: 100%;
+            opacity: 1;
+            background: #d83a34;
+            animation: none;
+        }
+        .runbar[data-state="interrupted"] .runbar-fill {
+            left: 0;
+            width: 100%;
+            opacity: 1;
+            background: #dc7a13;
+            animation: none;
+        }
+        @keyframes runbar-slide {
+            0% { left: -36%; }
+            100% { left: 100%; }
+        }
         .status-ok { border-left-color: var(--ok); }
         .status-warn { border-left-color: var(--warn); }
         .status-danger { border-left-color: var(--danger); }
@@ -305,6 +359,8 @@
         <section class="card">
             <h2 class="title">状态</h2>
             <div class="status-box" id="status">等待启动</div>
+            <div class="runbar" id="runbar" data-state="idle"><div class="runbar-fill"></div></div>
+            <div class="hint" id="runbar_text">运行状态：空闲</div>
             <div class="hint" id="auto_save_state">草稿状态：未保存</div>
             <div class="hint" id="diagnostics">诊断：暂无</div>
             <div class="hint" id="metrics_text">运行指标：暂无</div>
@@ -343,6 +399,7 @@ const RECENT_WORKSPACES_KEY = 'autocoding_recent_workspaces_v1';
 let lastEventId = 0;
 let polling = false;
 let saveTimer = null;
+let stopRequested = false;
 const POLL_MS_ACTIVE = 1000;
 const POLL_MS_IDLE = 3000;
 
@@ -368,6 +425,22 @@ function setStatus(msg, cls) {
     const el = document.getElementById('status');
     el.textContent = msg;
     el.className = 'status-box ' + (cls || '');
+}
+
+function setRunState(state, text) {
+    const bar = document.getElementById('runbar');
+    const tip = document.getElementById('runbar_text');
+    bar.dataset.state = state || 'idle';
+    tip.textContent = `运行状态：${text}`;
+}
+
+function isInterruptedMessage(msg) {
+    const text = (msg || '').toLowerCase();
+    return text.includes('stopped by user')
+        || text.includes('interrupted')
+        || text.includes('stop requested')
+        || text.includes('中断')
+        || text.includes('停止');
 }
 
 function getFormData() {
@@ -534,6 +607,7 @@ async function refreshUiState() {
             document.getElementById('stop_btn').disabled = false;
             document.getElementById('revert_btn').disabled = false;
             setStatus('检测到任务正在运行中', 'status-warn');
+            setRunState('running', '运行中，可点击停止中断');
         }
     } catch (_e) {}
 }
@@ -591,7 +665,17 @@ function handleEvent(evt) {
             showClarify(evt.questions);
             break;
         case 'done':
-            setStatus(`完成：${evt.success ? '成功' : '失败'} - ${evt.message}`, evt.success ? 'status-ok' : 'status-danger');
+            if (evt.success) {
+                setRunState('success', '已完成（成功）');
+                setStatus(`完成：成功 - ${evt.message}`, 'status-ok');
+            } else if (stopRequested || isInterruptedMessage(evt.message)) {
+                setRunState('interrupted', '已中断');
+                setStatus(`完成：已中断 - ${evt.message}`, 'status-warn');
+            } else {
+                setRunState('failed', '已完成（失败）');
+                setStatus(`完成：失败 - ${evt.message}`, 'status-danger');
+            }
+            stopRequested = false;
             document.getElementById('start_btn').disabled = false;
             document.getElementById('stop_btn').disabled = true;
             break;
@@ -660,6 +744,8 @@ async function startSession() {
         }
         await saveDraftRemote();
         setStatus('已启动。系统将自动写代码并执行评测。', 'status-warn');
+        setRunState('running', '运行中，可点击停止中断');
+        stopRequested = false;
         document.getElementById('start_btn').disabled = true;
         document.getElementById('stop_btn').disabled = false;
         document.getElementById('revert_btn').disabled = false;
@@ -676,6 +762,8 @@ async function resumeSession() {
             throw new Error(`${resp.status} ${msg}`);
         }
         setStatus('已从断点恢复运行。', 'status-warn');
+        setRunState('running', '运行中，可点击停止中断');
+        stopRequested = false;
         document.getElementById('start_btn').disabled = true;
         document.getElementById('stop_btn').disabled = false;
     } catch (e) {
@@ -687,7 +775,9 @@ async function stopSession() {
     try {
         const resp = await fetch('/stop', { method: 'POST' });
         if (!resp.ok) throw new Error(`stop error ${resp.status}`);
-        setStatus('已停止。可修改需求后继续。', 'status-warn');
+        stopRequested = true;
+        setRunState('stopping', '正在中断，等待任务确认停止');
+        setStatus('已发送停止请求，等待任务中断。', 'status-warn');
         document.getElementById('start_btn').disabled = false;
         document.getElementById('stop_btn').disabled = true;
     } catch (e) {
@@ -952,6 +1042,7 @@ async function init() {
     bindAutoSave();
     document.getElementById('stop_btn').disabled = true;
     document.getElementById('revert_btn').disabled = true;
+    setRunState('idle', '空闲');
     await loadDraft();
     await loadProjectConfigForWorkspace();
     await refreshUiState();

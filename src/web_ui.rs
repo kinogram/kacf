@@ -429,7 +429,19 @@ async fn save_draft_config(
 ) -> impl Responder {
     let payload = body.into_inner();
     match save_draft(data.draft_path.as_ref(), &payload) {
-        Ok(_) => HttpResponse::Ok().body("saved"),
+        Ok(_) => {
+            if let Err(e) = save_project_config(
+                &payload.workspace,
+                &payload.auto_revert_profile,
+                &payload.precheck_cmd,
+                &payload.history_max_messages,
+                &payload.history_max_chars,
+                &payload.release_gate_threshold,
+            ) {
+                eprintln!("save project config during draft save failed: {}", e);
+            }
+            HttpResponse::Ok().body("saved")
+        }
         Err(e) => HttpResponse::InternalServerError().body(format!("save draft failed: {}", e)),
     }
 }

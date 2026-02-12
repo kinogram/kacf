@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -93,8 +93,29 @@ pub async fn chat_complete(
                 let status = resp.status();
                 let body = resp.text().await.unwrap_or_default();
                 if status.is_success() {
-                    let parsed = serde_json::from_str::<ChatCompletionResp>(&body)
-                        .context("parse json response")?;
+                    if body.trim().is_empty() {
+                        let err = anyhow!(
+                            "empty response body with success status {} for url {}",
+                            status,
+                            url
+                        );
+                        if attempt < max_attempts {
+                            tokio::time::sleep(retry_delay(attempt)).await;
+                            last_err = Some(err);
+                            continue;
+                        }
+                        return Err(err);
+                    }
+                    let parsed = serde_json::from_str::<ChatCompletionResp>(&body).map_err(|e| {
+                        let body_short = truncate_for_log(&body, 400);
+                        anyhow!(
+                            "parse json response failed: {}. status={} url={} response={}",
+                            e,
+                            status,
+                            url,
+                            body_short
+                        )
+                    })?;
                     let content = parsed
                         .choices
                         .first()
