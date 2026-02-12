@@ -695,6 +695,7 @@ function startEventStream() {
     eventSource = new EventSource(`/events/stream?from=${lastEventId}`);
     eventSource.onopen = () => {
         sseErrorCount = 0;
+        appendLog('[UI] 已连接实时流通道');
     };
     eventSource.onmessage = (event) => {
         try {
@@ -704,7 +705,9 @@ function startEventStream() {
             if (!evt || Number.isNaN(id)) return;
             lastEventId = Math.max(lastEventId, id + 1);
             handleEvent(evt);
-        } catch (_e) {}
+        } catch (_e) {
+            // Keep polling alive to avoid losing progress updates on malformed chunks.
+        }
     };
     eventSource.onerror = () => {
         sseErrorCount += 1;
@@ -1133,6 +1136,8 @@ async function init() {
     await refreshUiState();
     await refreshMetrics();
     setInterval(refreshMetrics, 5000);
+    // Keep long-polling always on for reliability; SSE acts as low-latency acceleration.
+    pollEvents();
     startEventStream();
     window.addEventListener('beforeunload', closeEventStream);
 }
