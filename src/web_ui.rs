@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::deepseek_api;
 use crate::protocol::{AgentEvent, AgentRequest, ClarifyAnswer, ClarifyQuestion};
 
 /// Index HTML page embedded at compile time.
@@ -153,6 +154,34 @@ struct PushPayload {
     remote: String,
     url: String,
     branch: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SlugSuggestPayload {
+    #[serde(default)]
+    project_name: String,
+    #[serde(default)]
+    goal: String,
+    #[serde(default)]
+    api_key: String,
+    #[serde(default = "default_base_url")]
+    base_url: String,
+    #[serde(default = "default_model_name")]
+    model: String,
+}
+
+fn default_base_url() -> String {
+    "https://api.deepseek.com".to_string()
+}
+
+fn default_model_name() -> String {
+    "deepseek-reasoner".to_string()
+}
+
+#[derive(Debug, Serialize)]
+struct SlugSuggestResponse {
+    slug: String,
+    source: String,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -638,6 +667,84 @@ async fn put_ui_cache(
         Ok(_) => HttpResponse::Ok().body("saved"),
         Err(e) => HttpResponse::InternalServerError().body(format!("write ui cache failed: {}", e)),
     }
+}
+
+fn normalize_slug(raw: &str) -> String {
+    let mut out = String::new();
+    let mut prev_dash = false;
+    for ch in raw.chars() {
+        let c = ch.to_ascii_lowercase();
+        if c.is_ascii_alphanumeric() {
+            out.push(c);
+            prev_dash = false;
+        } else if matches!(c, '-' | '_' | ' ' | '\t' | '\n' | '\r') {
+            if !prev_dash && !out.is_empty() {
+                out.push('-');
+                prev_dash = true;
+            }
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    if out.len() > 36 {
+        out.truncate(36);
+        while out.ends_with('-') {
+            out.pop();
+        }
+    }
+    out
+}
+
+fn fallback_slug(name: &str, goal: &str) -> String {
+    let joined = format!("{} {}", name, goal);
+    let s = normalize_slug(&joined);
+    if s.is_empty() {
+        format!("project-{}", now_unix())
+    } else {
+        s
+    }
+}
+
+async fn suggest_project_slug(body: web::Json<SlugSuggestPayload>) -> impl Responder {
+    let payload = body.into_inner();
+    let fallback = fallback_slug(&payload.project_name, &payload.goal);
+    if payload.api_key.trim().is_empty() {
+        return HttpResponse::Ok().json(SlugSuggestResponse {
+            slug: fallback,
+            source: "fallback".to_string(),
+        });
+    }
+    let messages = vec![
+        deepseek_api::ChatMessage::system(
+            "You output a single English kebab-case project slug only. lowercase letters, numbers and hyphen only. max 36 chars."
+                .to_string(),
+        ),
+        deepseek_api::ChatMessage::user(format!(
+            "Project name: {}\nProject goal: {}\nOutput slug only.",
+            payload.project_name, payload.goal
+        )),
+    ];
+    let mut sink = |_delta: &str| {};
+    let slug = match deepseek_api::chat_complete_streaming(
+        &payload.base_url,
+        &payload.api_key,
+        &payload.model,
+        &messages,
+        &mut sink,
+    )
+    .await
+    {
+        Ok(text) => {
+            let s = normalize_slug(text.trim());
+            if s.is_empty() { fallback.clone() } else { s }
+        }
+        Err(_) => fallback.clone(),
+    };
+    HttpResponse::Ok().json(SlugSuggestResponse {
+        slug,
+        source: "ai".to_string(),
+    })
 }
 
 async fn resume_session(
@@ -1300,6 +1407,7 @@ pub async fn run_web_server(
             .route("/projects", web::get().to(list_projects))
             .route("/projects", web::post().to(upsert_project))
             .route("/projects/{id}", web::delete().to(delete_project))
+            .route("/projects/suggest_slug", web::post().to(suggest_project_slug))
             .route("/ui_cache", web::get().to(get_ui_cache))
             .route("/ui_cache", web::put().to(put_ui_cache))
             .route("/ui_state", web::get().to(get_ui_state))

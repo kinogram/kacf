@@ -485,11 +485,57 @@ let cachedProjects = [];
 let cacheProjectLogs = {};
 let cacheProjectUiState = {};
 let uiCacheSaveTimer = null;
+const WORKSPACE_ROOT = './workspace_projects';
 let sharedConfig = {
     api_key: '',
     base_url: 'https://api.deepseek.com',
     model: 'deepseek-reasoner',
 };
+
+async function suggestProjectSlug(projectName, goal) {
+    try {
+        const resp = await fetch('/projects/suggest_slug', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                project_name: projectName || '',
+                goal: goal || '',
+                api_key: sharedConfig.api_key || '',
+                base_url: sharedConfig.base_url || 'https://api.deepseek.com',
+                model: sharedConfig.model || 'deepseek-reasoner',
+            }),
+        });
+        if (!resp.ok) return `project-${Date.now()}`;
+        const data = await resp.json();
+        const slug = (data.slug || '').trim();
+        if (!slug) return `project-${Date.now()}`;
+        return slug;
+    } catch (_e) {
+        return `project-${Date.now()}`;
+    }
+}
+
+function workspaceLeaf(path) {
+    const p = (path || '').trim();
+    if (!p) return '-';
+    const segs = p.split('/');
+    return segs[segs.length - 1] || p;
+}
+
+function ensureUniqueWorkspace(basePath, items, selfId) {
+    const used = new Set(
+        (items || [])
+            .filter(x => x && x.id !== selfId)
+            .map(x => (x.workspace || '').trim())
+            .filter(Boolean)
+    );
+    if (!used.has(basePath)) return basePath;
+    for (let i = 2; i < 1000; i++) {
+        const next = `${basePath}-${i}`;
+        if (!used.has(next)) return next;
+    }
+    return `${basePath}-${Date.now()}`;
+}
 
 function defaultFormData() {
     return {
@@ -985,14 +1031,15 @@ function saveProjects(items) {
     cachedProjects = Array.isArray(items) ? items : [];
 }
 
-function projectWorkspaceById(id) {
-    return `./workspace_projects/${id}`;
-}
-
 function ensureWorkspaceForCurrentProject() {
     const sel = document.getElementById('project_selector');
     const id = sel?.value || '';
-    document.getElementById('workspace').value = id ? projectWorkspaceById(id) : '';
+    if (!id) {
+        document.getElementById('workspace').value = '';
+        return;
+    }
+    const item = loadProjects().find(x => x.id === id);
+    document.getElementById('workspace').value = item?.workspace || '';
 }
 
 function renderProjectAccordion() {
@@ -1009,9 +1056,10 @@ function renderProjectAccordion() {
             const active = p.id === selectedId;
             const dt = p.updated_at ? new Date(p.updated_at * 1000).toLocaleString() : '-';
             const snap = p.snapshot || {};
+            const leaf = workspaceLeaf(p.workspace || '-');
             return `
 <details ${active ? 'open' : ''}>
-  <summary>${active ? '● ' : ''}${escapeHtml(p.name || '未命名项目')}</summary>
+  <summary>${active ? '● ' : ''}${escapeHtml(p.name || '未命名项目')} <span style="color:#5c6f8f">[${escapeHtml(leaf)}]</span></summary>
   <div class="meta">
     workspace: ${escapeHtml(p.workspace || '-')}<br>
     更新: ${escapeHtml(dt)}<br>
@@ -1139,15 +1187,23 @@ function syncProjectNameFromSelection() {
 
 async function saveCurrentProject() {
     updateSharedConfigFromInputs();
-    const body = getFormData();
+    const body = { ...getFormData() };
     const sel = document.getElementById('project_selector');
     const items = loadProjects();
     const selectedId = sel.value;
     const idx = items.findIndex(x => x.id === selectedId);
     const inputName = document.getElementById('project_name').value.trim();
-    const fallbackName = body.workspace.trim() || `项目 ${items.length + 1}`;
+    const fallbackName = inputName || `项目 ${items.length + 1}`;
     const projectId = idx >= 0 ? items[idx].id : randomProjectId();
-    const projectWorkspace = projectWorkspaceById(projectId);
+    let projectWorkspace = '';
+    if (idx >= 0 && items[idx].workspace) {
+        projectWorkspace = items[idx].workspace;
+    } else {
+        const slug = await suggestProjectSlug(inputName || fallbackName, body.goal || '');
+        const basePath = `${WORKSPACE_ROOT}/${slug}`;
+        projectWorkspace = ensureUniqueWorkspace(basePath, items, projectId);
+    }
+    body.workspace = projectWorkspace;
     const snapshot = {
         ...body,
         api_key: '',
@@ -1177,6 +1233,7 @@ async function saveCurrentProject() {
     document.getElementById('project_name').value = project.name;
     document.getElementById('workspace').value = projectWorkspace;
     appendLog(`[UI] 项目已保存：${project.name}${serverOk ? '' : '（后端未同步）'}`);
+    return true;
 }
 
 function loadSelectedProject() {
@@ -1193,7 +1250,7 @@ function loadSelectedProject() {
         api_key: sharedConfig.api_key,
         base_url: sharedConfig.base_url,
         model: sharedConfig.model,
-        workspace: found.workspace || projectWorkspaceById(found.id),
+        workspace: found.workspace || '',
     };
     applyFormData(merged);
     document.getElementById('project_name').value = found.name || '';
@@ -1570,10 +1627,19 @@ function showClarify(questions) {
 
 async function startSession() {
     ensureWorkspaceForCurrentProject();
-    const body = getFormData();
+    let body = getFormData();
     if (isReadOnlyView()) {
         setStatus('当前是只读视图，请切回正在运行的项目。', 'status-danger');
         return;
+    }
+    if (!body.workspace) {
+        const ok = await saveCurrentProject();
+        ensureWorkspaceForCurrentProject();
+        body = getFormData();
+        if (!ok || !body.workspace) {
+            setStatus('启动失败：无法为项目分配目录，请先保存项目。', 'status-danger');
+            return;
+        }
     }
     if (!body.api_key) {
         setStatus('启动失败：API Key 为空，请先填写。', 'status-danger');
@@ -1621,7 +1687,16 @@ async function resumeSession() {
             setStatus('当前是只读视图，请切回正在运行的项目。', 'status-danger');
             return;
         }
-        const body = getFormData();
+        let body = getFormData();
+        if (!body.workspace) {
+            const ok = await saveCurrentProject();
+            ensureWorkspaceForCurrentProject();
+            body = getFormData();
+            if (!ok || !body.workspace) {
+                setStatus('恢复失败：无法为项目分配目录，请先保存项目。', 'status-danger');
+                return;
+            }
+        }
         activeRunLogBucket = currentLogBucket();
         activeRunProjectLabel = currentProjectLabel();
         const selectedProjectId = document.getElementById('project_selector')?.value || '';
