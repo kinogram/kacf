@@ -589,6 +589,47 @@ function saveProjects(items) {
     localStorage.setItem(PROJECTS_KEY, JSON.stringify(items || []));
 }
 
+async function fetchProjectsFromServer() {
+    try {
+        const resp = await fetch('/projects');
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        if (!Array.isArray(data)) return null;
+        return data;
+    } catch (_e) {
+        return null;
+    }
+}
+
+async function refreshProjectsFromServer() {
+    const data = await fetchProjectsFromServer();
+    if (!data) return false;
+    saveProjects(data);
+    return true;
+}
+
+async function upsertProjectToServer(project) {
+    try {
+        const resp = await fetch('/projects', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(project),
+        });
+        return resp.ok;
+    } catch (_e) {
+        return false;
+    }
+}
+
+async function deleteProjectOnServer(id) {
+    try {
+        const resp = await fetch(`/projects/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        return resp.ok;
+    } catch (_e) {
+        return false;
+    }
+}
+
 function randomProjectId() {
     return `p_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -638,7 +679,7 @@ function syncProjectNameFromSelection() {
     document.getElementById('project_name').value = found ? (found.name || '') : '';
 }
 
-function saveCurrentProject() {
+async function saveCurrentProject() {
     const body = getFormData();
     const sel = document.getElementById('project_selector');
     const items = loadProjects();
@@ -660,9 +701,13 @@ function saveCurrentProject() {
         items.unshift(project);
     }
     saveProjects(items);
+    const serverOk = await upsertProjectToServer(project);
+    if (serverOk) {
+        await refreshProjectsFromServer();
+    }
     renderProjectSelector(project.id);
     document.getElementById('project_name').value = project.name;
-    appendLog(`[UI] 项目已保存：${project.name}`);
+    appendLog(`[UI] 项目已保存：${project.name}${serverOk ? '' : '（仅本地）'}`);
 }
 
 function loadSelectedProject() {
@@ -681,7 +726,7 @@ function loadSelectedProject() {
     appendLog(`[UI] 已载入项目：${found.name || '未命名'}`);
 }
 
-function deleteSelectedProject() {
+async function deleteSelectedProject() {
     const sel = document.getElementById('project_selector');
     const items = loadProjects();
     const found = items.find(x => x.id === sel.value);
@@ -691,9 +736,13 @@ function deleteSelectedProject() {
     }
     const next = items.filter(x => x.id !== found.id);
     saveProjects(next);
+    const serverOk = await deleteProjectOnServer(found.id);
+    if (serverOk) {
+        await refreshProjectsFromServer();
+    }
     renderProjectSelector('');
     document.getElementById('project_name').value = '';
-    appendLog(`[UI] 已删除项目：${found.name || '未命名'}`);
+    appendLog(`[UI] 已删除项目：${found.name || '未命名'}${serverOk ? '' : '（仅本地）'}`);
 }
 
 function createNewProject() {
@@ -1308,9 +1357,9 @@ function bindEvents() {
     document.getElementById('preset_desktop_btn').addEventListener('click', () => applyPreset('desktop'));
     document.getElementById('reset_form_btn').addEventListener('click', resetForm);
     document.getElementById('project_new_btn').addEventListener('click', createNewProject);
-    document.getElementById('project_save_btn').addEventListener('click', saveCurrentProject);
+    document.getElementById('project_save_btn').addEventListener('click', () => { saveCurrentProject(); });
     document.getElementById('project_load_btn').addEventListener('click', loadSelectedProject);
-    document.getElementById('project_delete_btn').addEventListener('click', deleteSelectedProject);
+    document.getElementById('project_delete_btn').addEventListener('click', () => { deleteSelectedProject(); });
     document.getElementById('project_selector').addEventListener('change', syncProjectNameFromSelection);
 }
 
@@ -1409,6 +1458,7 @@ async function exportReleaseReport() {
 
 async function init() {
     renderRecentWorkspaceSuggestions();
+    await refreshProjectsFromServer();
     renderProjectSelector('');
     bindEvents();
     bindAutoSave();

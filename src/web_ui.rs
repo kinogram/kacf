@@ -23,6 +23,7 @@ const INDEX_HTML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/stat
 const DRAFT_FILENAME: &str = ".autocoding_webui_draft.json";
 const SESSION_STATE_FILENAME: &str = ".autocoding_state.json";
 const PROJECT_CONFIG_FILENAME: &str = ".autocoding_project.json";
+const PROJECTS_FILENAME: &str = ".autocoding_projects.json";
 const MAX_EVENT_BUFFER: usize = 5000;
 
 #[derive(Clone)]
@@ -32,6 +33,7 @@ pub struct AppState {
     events: Arc<Mutex<Vec<(usize, SerializableEvent)>>>,
     next_event_id: Arc<Mutex<usize>>,
     runtime: Arc<Mutex<RuntimeStatus>>,
+    projects_lock: Arc<Mutex<()>>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -268,6 +270,16 @@ struct ProjectConfig {
     updated_at_unix: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct WebProject {
+    id: String,
+    name: String,
+    workspace: String,
+    goal: String,
+    updated_at: u64,
+    snapshot: DraftPayload,
+}
+
 fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -335,6 +347,30 @@ fn read_project_config(workspace: &str) -> Option<ProjectConfig> {
     let path = Path::new(workspace).join(PROJECT_CONFIG_FILENAME);
     let content = fs::read_to_string(path).ok()?;
     serde_json::from_str::<ProjectConfig>(&content).ok()
+}
+
+fn projects_registry_path() -> PathBuf {
+    std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join(PROJECTS_FILENAME)
+}
+
+fn read_projects_registry() -> Vec<WebProject> {
+    let path = projects_registry_path();
+    let content = match fs::read_to_string(path) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    serde_json::from_str::<Vec<WebProject>>(&content).unwrap_or_default()
+}
+
+fn write_projects_registry(items: &[WebProject]) -> std::io::Result<()> {
+    let path = projects_registry_path();
+    let json = serde_json::to_string_pretty(items)?;
+    let tmp = path.with_extension("tmp");
+    fs::write(&tmp, json)?;
+    fs::rename(tmp, path)?;
+    Ok(())
 }
 
 fn apply_runtime_config_envs(payload: &StartPayload) {
@@ -489,6 +525,53 @@ async fn get_project_config(query: web::Query<ProjectConfigQuery>) -> impl Respo
         Some(cfg) => HttpResponse::Ok().json(cfg),
         None => HttpResponse::NotFound().body("project config not found"),
     }
+}
+
+async fn list_projects(data: web::Data<AppState>) -> impl Responder {
+    let _guard = data.projects_lock.lock().unwrap();
+    let mut items = read_projects_registry();
+    items.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    HttpResponse::Ok().json(items)
+}
+
+async fn upsert_project(data: web::Data<AppState>, body: web::Json<WebProject>) -> impl Responder {
+    let _guard = data.projects_lock.lock().unwrap();
+    let mut item = body.into_inner();
+    if item.id.trim().is_empty() {
+        return HttpResponse::BadRequest().body("project id is empty");
+    }
+    if item.name.trim().is_empty() {
+        item.name = item.workspace.clone();
+    }
+    item.updated_at = now_unix();
+    let mut items = read_projects_registry();
+    if let Some(idx) = items.iter().position(|p| p.id == item.id) {
+        items[idx] = item.clone();
+    } else {
+        items.push(item.clone());
+    }
+    if let Err(e) = write_projects_registry(&items) {
+        return HttpResponse::InternalServerError().body(format!("write projects failed: {}", e));
+    }
+    HttpResponse::Ok().json(item)
+}
+
+async fn delete_project(data: web::Data<AppState>, path: web::Path<String>) -> impl Responder {
+    let _guard = data.projects_lock.lock().unwrap();
+    let id = path.into_inner();
+    if id.trim().is_empty() {
+        return HttpResponse::BadRequest().body("project id is empty");
+    }
+    let mut items = read_projects_registry();
+    let before = items.len();
+    items.retain(|p| p.id != id);
+    if items.len() == before {
+        return HttpResponse::NotFound().body("project not found");
+    }
+    if let Err(e) = write_projects_registry(&items) {
+        return HttpResponse::InternalServerError().body(format!("write projects failed: {}", e));
+    }
+    HttpResponse::Ok().body("deleted")
 }
 
 async fn resume_session(
@@ -1123,6 +1206,7 @@ pub async fn run_web_server(
         events: Arc::new(Mutex::new(Vec::new())),
         next_event_id: Arc::new(Mutex::new(0)),
         runtime: Arc::new(Mutex::new(RuntimeStatus::default())),
+        projects_lock: Arc::new(Mutex::new(())),
     };
     spawn_event_collector(state.clone());
 
@@ -1136,6 +1220,9 @@ pub async fn run_web_server(
             .route("/draft", web::post().to(save_draft_config))
             .route("/draft", web::get().to(get_draft_config))
             .route("/project_config", web::get().to(get_project_config))
+            .route("/projects", web::get().to(list_projects))
+            .route("/projects", web::post().to(upsert_project))
+            .route("/projects/{id}", web::delete().to(delete_project))
             .route("/ui_state", web::get().to(get_ui_state))
             .route("/health", web::get().to(health))
             .route("/metrics", web::get().to(metrics))
