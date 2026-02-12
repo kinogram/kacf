@@ -665,12 +665,15 @@ async fn revert_last(data: web::Data<AppState>) -> impl Responder {
 }
 
 async fn stop_session(data: web::Data<AppState>) -> impl Responder {
-    if let Err(e) = data.tx_req.send(AgentRequest::Stop) {
-        return HttpResponse::InternalServerError().body(format!("send stop failed: {}", e));
-    }
     let mut runtime = data.runtime.lock().unwrap();
     runtime.running = false;
-    HttpResponse::Ok().body("stop sent")
+    match data.tx_req.send(AgentRequest::Stop) {
+        Ok(_) => HttpResponse::Ok().body("stop sent"),
+        Err(e) => {
+            runtime.last_error = format!("stop channel unavailable: {}", e);
+            HttpResponse::Ok().body("stop acknowledged (channel unavailable)")
+        }
+    }
 }
 
 async fn get_events(
