@@ -23,6 +23,7 @@ pub enum AgentRequest {
         base_url: String,
         model: String,
         auto_revert_profile: String,
+        resume_from_checkpoint: bool,
         workspace: PathBuf,
         goal: String,
         eval_cmd: String,
@@ -138,6 +139,7 @@ pub async fn agent_loop(rx_req: Receiver<AgentRequest>, tx_evt: Sender<AgentEven
                 base_url,
                 model,
                 auto_revert_profile,
+                resume_from_checkpoint,
                 workspace,
                 goal,
                 eval_cmd,
@@ -149,6 +151,7 @@ pub async fn agent_loop(rx_req: Receiver<AgentRequest>, tx_evt: Sender<AgentEven
                     base_url,
                     model,
                     auto_revert_profile,
+                    resume_from_checkpoint,
                     workspace,
                     goal,
                     eval_cmd,
@@ -236,6 +239,7 @@ struct SessionCfg {
     base_url: String,
     model: String,
     auto_revert_profile: String,
+    resume_from_checkpoint: bool,
     workspace: PathBuf,
     goal: String,
     eval_cmd: String,
@@ -315,17 +319,24 @@ async fn run_session(
 
     // 尝试从工作目录加载先前保存的会话状态。如果存在且与当前目标一致，则继续该对话；否则开始新对话。
     let mut messages: Vec<deepseek_api::ChatMessage>;
-    if let Some(state) = load_session_state(&cfg.workspace) {
-        if state.goal == cfg.goal {
-            messages = state.messages.clone();
-            let _ = tx_evt.send(AgentEvent::Log(
-                "[Agent] 已加载之前的会话状态，继续从断点开始...".into(),
-            ));
+    if cfg.resume_from_checkpoint {
+        if let Some(state) = load_session_state(&cfg.workspace) {
+            if state.goal == cfg.goal {
+                messages = state.messages.clone();
+                let _ = tx_evt.send(AgentEvent::Log(
+                    "[Agent] 已加载之前的会话状态，继续从断点开始...".into(),
+                ));
+            } else {
+                messages = Vec::new();
+            }
         } else {
             messages = Vec::new();
         }
     } else {
         messages = Vec::new();
+        let _ = tx_evt.send(AgentEvent::Log(
+            "[Agent] 本次按新任务启动，已忽略历史会话状态".into(),
+        ));
     }
     // 如果没有历史消息，则初始化系统 prompt 和首条用户消息。
     if messages.is_empty() {

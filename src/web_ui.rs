@@ -383,7 +383,11 @@ fn read_resume_info(workspace: &str, goal: &str) -> Option<ResumeInfo> {
     })
 }
 
-fn start_from_payload(data: &web::Data<AppState>, payload: StartPayload) -> Result<(), String> {
+fn start_from_payload(
+    data: &web::Data<AppState>,
+    payload: StartPayload,
+    resume_from_checkpoint: bool,
+) -> Result<(), String> {
     if payload.api_key.trim().is_empty() {
         return Err("api_key is empty".to_string());
     }
@@ -400,6 +404,7 @@ fn start_from_payload(data: &web::Data<AppState>, payload: StartPayload) -> Resu
         base_url: payload.base_url,
         model: payload.model,
         auto_revert_profile: auto_revert_profile.clone(),
+        resume_from_checkpoint,
         workspace: payload.workspace.clone().into(),
         goal: payload.goal.clone(),
         eval_cmd: payload.eval_cmd,
@@ -429,7 +434,7 @@ fn start_from_payload(data: &web::Data<AppState>, payload: StartPayload) -> Resu
 
 async fn start_session(data: web::Data<AppState>, body: web::Json<StartPayload>) -> impl Responder {
     let payload = body.into_inner();
-    match start_from_payload(&data, payload) {
+    match start_from_payload(&data, payload, false) {
         Ok(_) => HttpResponse::Ok().body("started"),
         Err(e) => {
             if e.contains("api_key is empty") {
@@ -501,7 +506,7 @@ async fn resume_session(
     }
     let resume = read_resume_info(&draft.workspace, &draft.goal);
     if resume.as_ref().map(|x| x.resumable).unwrap_or(false) {
-        match start_from_payload(&data, draft.into_start()) {
+        match start_from_payload(&data, draft.into_start(), true) {
             Ok(_) => HttpResponse::Ok().body("resumed"),
             Err(e) => {
                 if e.contains("already running") {

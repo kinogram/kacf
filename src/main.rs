@@ -308,6 +308,7 @@ impl eframe::App for App {
                         base_url: self.base_url.clone(),
                         model: self.model.clone(),
                         auto_revert_profile: self.auto_revert_profile.clone(),
+                        resume_from_checkpoint: true,
                         workspace: PathBuf::from(self.workspace_dir.clone()),
                         goal: self.goal.clone(),
                         eval_cmd: self.eval_cmd.clone(),

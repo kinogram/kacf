@@ -347,13 +347,13 @@
             </div>
 
             <div class="buttons">
-                <button id="start_btn">开始 / 继续</button>
+                <button id="start_btn">开始新任务</button>
                 <button class="btn-warn" id="resume_btn">从断点恢复</button>
                 <button class="btn-danger" id="stop_btn">停止</button>
                 <button class="btn-ghost" id="revert_btn">回滚上次提交</button>
                 <button class="btn-ghost" id="push_btn">推送到远程</button>
             </div>
-            <p class="hint">不会操作代码也可以直接使用：先写清需求，再点“开始/继续”。系统会自动迭代并展示过程。</p>
+            <p class="hint">“开始新任务”会忽略旧会话；如需接着上次做，请点“从断点恢复”。</p>
         </section>
 
         <section class="card">
@@ -935,7 +935,7 @@ async function startSession() {
             throw new Error(`${resp.status} ${msg}`);
         }
         await saveDraftRemote();
-        setStatus('已启动。系统将自动写代码并执行评测。', 'status-warn');
+        setStatus('已启动新任务。系统将自动写代码并执行评测。', 'status-warn');
         setRunState('running', '运行中，可点击停止中断');
         stopRequested = false;
         completionAlertShown = false;
