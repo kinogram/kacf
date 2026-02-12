@@ -542,11 +542,19 @@ async fn run_session(
                     truncate(&result.stderr, 2000)
                 )));
                 let ok = result.exit_code == 0
+                    && !eval_has_fatal_runtime_marker(&result.stdout, &result.stderr)
                     && (cfg.success_regex.trim().is_empty()
                         || runner::regex_match(
                             &cfg.success_regex,
                             &(result.stdout.clone() + "\n" + &result.stderr),
                         ));
+                if result.exit_code == 0
+                    && eval_has_fatal_runtime_marker(&result.stdout, &result.stderr)
+                {
+                    let _ = tx_evt.send(AgentEvent::Log(
+                        "[Eval-Guard] exit=0 但检测到致命运行错误标记（如 panic/X11/display），按失败处理".to_string(),
+                    ));
+                }
                 if ok {
                     repair.consecutive_eval_failures = 0;
                     repair.consecutive_same_failure = 0;
@@ -561,11 +569,19 @@ async fn run_session(
                         verify_t0.elapsed().as_millis()
                     )));
                     let verify_ok = verify.exit_code == 0
+                        && !eval_has_fatal_runtime_marker(&verify.stdout, &verify.stderr)
                         && (cfg.success_regex.trim().is_empty()
                             || runner::regex_match(
                                 &cfg.success_regex,
                                 &(verify.stdout.clone() + "\n" + &verify.stderr),
                             ));
+                    if verify.exit_code == 0
+                        && eval_has_fatal_runtime_marker(&verify.stdout, &verify.stderr)
+                    {
+                        let _ = tx_evt.send(AgentEvent::Log(
+                            "[Eval-Guard] verify exit=0 但检测到致命运行错误标记（如 panic/X11/display），按失败处理".to_string(),
+                        ));
+                    }
                     let _ = tx_evt.send(AgentEvent::Log(format!(
                         "[Eval-Verify] exit={} \nstdout:\n{}\nstderr:\n{}",
                         verify.exit_code,
@@ -1284,6 +1300,16 @@ fn digest_eval_failure(exit_code: i32, stdout: &str, stderr: &str) -> FailureDig
         signature,
         key_lines,
     }
+}
+
+fn eval_has_fatal_runtime_marker(stdout: &str, stderr: &str) -> bool {
+    let lowered = format!("{stdout}\n{stderr}").to_lowercase();
+    lowered.contains("thread 'main' panicked")
+        || lowered.contains(" panicked at ")
+        || lowered.contains("xopendisplay() failed")
+        || lowered.contains("segmentation fault")
+        || lowered.contains("stack backtrace:")
+        || lowered.contains("fatal runtime error")
 }
 
 fn collect_key_lines(stdout: &str, stderr: &str, limit: usize) -> Vec<String> {
