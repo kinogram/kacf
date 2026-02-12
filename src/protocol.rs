@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use crate::{deepseek_api, git_utils, runner, workspace};
 use std::fs;
@@ -358,8 +359,9 @@ async fn run_session(
         );
         let _ = tx_evt.send(AgentEvent::Log(format!("\n[Loop] Iteration {}", iter)));
         let api_start = std::time::Instant::now();
-        // Send the chat completion request to DeepSeek.
-        let resp = deepseek_api::chat_complete(&cfg.base_url, &cfg.api_key, &cfg.model, &messages)
+        // Send the chat completion request to DeepSeek and keep emitting
+        // progress logs so UI users can distinguish "still generating" from "stuck".
+        let resp = chat_complete_with_progress(cfg, &messages, tx_evt)
             .await
             .context("deepseek chat_complete")?;
         let api_ms = api_start.elapsed().as_millis();
@@ -949,6 +951,10 @@ fn compact_patch_history(summary: &str, files: &[FileWrite], raw_patch_json: &st
 
 fn run_eval_pipeline(cfg: &SessionCfg, tx_evt: &Sender<AgentEvent>) -> Result<EvalPipelineReport> {
     if let Some(precheck_cmd) = read_precheck_cmd() {
+        let _ = tx_evt.send(AgentEvent::Log(format!(
+            "[Eval-Precheck] 开始执行: {}",
+            precheck_cmd
+        )));
         let t0 = std::time::Instant::now();
         let pre = runner::run_eval(&cfg.workspace, &precheck_cmd)?;
         let _ = tx_evt.send(AgentEvent::Log(format!(
@@ -966,6 +972,10 @@ fn run_eval_pipeline(cfg: &SessionCfg, tx_evt: &Sender<AgentEvent>) -> Result<Ev
             });
         }
     }
+    let _ = tx_evt.send(AgentEvent::Log(format!(
+        "[Eval-Main] 开始执行: {}",
+        cfg.eval_cmd
+    )));
     let t1 = std::time::Instant::now();
     let main = runner::run_eval(&cfg.workspace, &cfg.eval_cmd)?;
     let _ = tx_evt.send(AgentEvent::Log(format!(
@@ -976,6 +986,83 @@ fn run_eval_pipeline(cfg: &SessionCfg, tx_evt: &Sender<AgentEvent>) -> Result<Ev
         result: main,
         stage: "main".to_string(),
     })
+}
+
+async fn chat_complete_with_progress(
+    cfg: &SessionCfg,
+    messages: &[deepseek_api::ChatMessage],
+    tx_evt: &Sender<AgentEvent>,
+) -> Result<String> {
+    let _ = tx_evt.send(AgentEvent::Log("[Model] 正在请求模型响应...".to_string()));
+    let started_at = std::time::Instant::now();
+    #[derive(Default)]
+    struct PreviewState {
+        buf: String,
+        chars: usize,
+        events: usize,
+    }
+    let preview = RefCell::new(PreviewState::default());
+    let mut on_delta = |delta: &str| {
+        if delta.is_empty() {
+            return;
+        }
+        let mut st = preview.borrow_mut();
+        st.chars += delta.chars().count();
+        st.events += 1;
+        st.buf.push_str(delta);
+        let should_flush = st.buf.len() >= 120
+            || delta.contains('\n')
+            || delta.contains('}')
+            || delta.contains(']');
+        if should_flush {
+            let out = st.buf.replace('\n', "\\n");
+            st.buf.clear();
+            let _ = tx_evt.send(AgentEvent::Log(format!(
+                "[Model-Stream] {}",
+                truncate(&out, 600)
+            )));
+        }
+    };
+    let req = deepseek_api::chat_complete_streaming(
+        &cfg.base_url,
+        &cfg.api_key,
+        &cfg.model,
+        messages,
+        &mut on_delta,
+    );
+    tokio::pin!(req);
+    let mut ticker = tokio::time::interval(Duration::from_secs(5));
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut first_tick = true;
+    loop {
+        tokio::select! {
+            out = &mut req => {
+                let st = preview.borrow();
+                if !st.buf.is_empty() {
+                    let out_tail = st.buf.replace('\n', "\\n");
+                    let _ = tx_evt.send(AgentEvent::Log(format!(
+                        "[Model-Stream] {}",
+                        truncate(&out_tail, 600)
+                    )));
+                }
+                let _ = tx_evt.send(AgentEvent::Log(format!(
+                    "[Model] 流式完成: chunks={} chars={}",
+                    st.events, st.chars
+                )));
+                return out;
+            },
+            _ = ticker.tick() => {
+                if first_tick {
+                    first_tick = false;
+                    continue;
+                }
+                let _ = tx_evt.send(AgentEvent::Log(format!(
+                    "[Model] 仍在生成中... {}s",
+                    started_at.elapsed().as_secs()
+                )));
+            }
+        }
+    }
 }
 
 fn read_precheck_cmd() -> Option<String> {

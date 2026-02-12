@@ -33,21 +33,6 @@ impl ChatMessage {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct ChatCompletionResp {
-    choices: Vec<Choice>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Choice {
-    message: ChoiceMessage,
-}
-
-#[derive(Debug, Deserialize)]
-struct ChoiceMessage {
-    content: Option<String>,
-}
-
 #[derive(Debug, Serialize)]
 struct ChatCompletionReq<'a> {
     model: &'a str,
@@ -56,15 +41,30 @@ struct ChatCompletionReq<'a> {
     // Additional optional fields (temperature, top_p, etc.) could be added here.
 }
 
-/// Call the DeepSeek chat completion API. This function performs an HTTP
-/// POST to the configured base URL and returns the content of the first
-/// returned message. Errors during the request or JSON parsing are
-/// propagated. The API key is sent via the Authorization header.
-pub async fn chat_complete(
+#[derive(Debug, Deserialize)]
+struct StreamChunkResp {
+    choices: Option<Vec<StreamChoice>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamChoice {
+    delta: Option<StreamDelta>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamDelta {
+    content: Option<String>,
+}
+
+/// Call DeepSeek chat completion in streaming mode (`stream=true`) and feed
+/// each content delta into `on_delta`. The final merged assistant content is
+/// returned as a single String.
+pub async fn chat_complete_streaming(
     base_url: &str,
     api_key: &str,
     model: &str,
     messages: &[ChatMessage],
+    on_delta: &mut dyn FnMut(&str),
 ) -> Result<String> {
     if api_key.trim().is_empty() {
         return Err(anyhow!(
@@ -76,7 +76,7 @@ pub async fn chat_complete(
     let req = ChatCompletionReq {
         model,
         messages,
-        stream: false,
+        stream: true,
     };
     let max_attempts = 3u32;
     let mut last_err: Option<anyhow::Error> = None;
@@ -87,57 +87,38 @@ pub async fn chat_complete(
             .json(&req)
             .send()
             .await;
-
         match send_result {
             Ok(resp) => {
                 let status = resp.status();
-                let body = resp.text().await.unwrap_or_default();
-                if status.is_success() {
-                    if body.trim().is_empty() {
-                        let err = anyhow!(
-                            "empty response body with success status {} for url {}",
-                            status,
-                            url
-                        );
+                if !status.is_success() {
+                    let body = resp.text().await.unwrap_or_default();
+                    let hint = status_hint(status.as_u16());
+                    let body_short = truncate_for_log(&body, 400);
+                    let err = anyhow!(
+                        "HTTP status not success: {} for url ({}). {} response={}",
+                        status,
+                        url,
+                        hint,
+                        body_short
+                    );
+                    if is_retryable_status(status.as_u16()) && attempt < max_attempts {
+                        tokio::time::sleep(retry_delay(attempt)).await;
+                        last_err = Some(err);
+                        continue;
+                    }
+                    return Err(err);
+                }
+                match parse_streaming_response(resp, on_delta).await {
+                    Ok(text) => return Ok(text),
+                    Err(e) => {
                         if attempt < max_attempts {
                             tokio::time::sleep(retry_delay(attempt)).await;
-                            last_err = Some(err);
+                            last_err = Some(e);
                             continue;
                         }
-                        return Err(err);
+                        return Err(e);
                     }
-                    let parsed = serde_json::from_str::<ChatCompletionResp>(&body).map_err(|e| {
-                        let body_short = truncate_for_log(&body, 400);
-                        anyhow!(
-                            "parse json response failed: {}. status={} url={} response={}",
-                            e,
-                            status,
-                            url,
-                            body_short
-                        )
-                    })?;
-                    let content = parsed
-                        .choices
-                        .first()
-                        .and_then(|c| c.message.content.clone())
-                        .unwrap_or_default();
-                    return Ok(content);
                 }
-                let hint = status_hint(status.as_u16());
-                let body_short = truncate_for_log(&body, 400);
-                let err = anyhow!(
-                    "HTTP status not success: {} for url ({}). {} response={}",
-                    status,
-                    url,
-                    hint,
-                    body_short
-                );
-                if is_retryable_status(status.as_u16()) && attempt < max_attempts {
-                    tokio::time::sleep(retry_delay(attempt)).await;
-                    last_err = Some(err);
-                    continue;
-                }
-                return Err(err);
             }
             Err(e) => {
                 let err = anyhow!(e).context(format!("POST {}", url));
@@ -150,7 +131,73 @@ pub async fn chat_complete(
             }
         }
     }
-    Err(last_err.unwrap_or_else(|| anyhow!("chat completion failed")))
+    Err(last_err.unwrap_or_else(|| anyhow!("chat completion streaming failed")))
+}
+
+async fn parse_streaming_response(
+    mut resp: reqwest::Response,
+    on_delta: &mut dyn FnMut(&str),
+) -> Result<String> {
+    let mut line_buf = String::new();
+    let mut merged = String::new();
+    while let Some(chunk) = resp
+        .chunk()
+        .await
+        .map_err(|e| anyhow!(e).context("read streaming chunk"))?
+    {
+        let text = std::str::from_utf8(&chunk).map_err(|e| anyhow!(e).context("utf8 chunk"))?;
+        line_buf.push_str(text);
+        while let Some(idx) = line_buf.find('\n') {
+            let mut line = line_buf[..idx].to_string();
+            line_buf.drain(..=idx);
+            if line.ends_with('\r') {
+                line.pop();
+            }
+            handle_sse_line(&line, &mut merged, on_delta)?;
+        }
+    }
+    if !line_buf.trim().is_empty() {
+        handle_sse_line(line_buf.trim(), &mut merged, on_delta)?;
+    }
+    if merged.trim().is_empty() {
+        return Err(anyhow!("streaming response completed with empty content"));
+    }
+    Ok(merged)
+}
+
+fn handle_sse_line(
+    line: &str,
+    merged: &mut String,
+    on_delta: &mut dyn FnMut(&str),
+) -> Result<()> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.starts_with(':') {
+        return Ok(());
+    }
+    if !trimmed.starts_with("data:") {
+        return Ok(());
+    }
+    let payload = trimmed.trim_start_matches("data:").trim();
+    if payload.is_empty() || payload == "[DONE]" {
+        return Ok(());
+    }
+    let parsed: StreamChunkResp = serde_json::from_str(payload).map_err(|e| {
+        let short = truncate_for_log(payload, 300);
+        anyhow!("parse streaming chunk failed: {} payload={}", e, short)
+    })?;
+    if let Some(choices) = parsed.choices {
+        for choice in choices {
+            if let Some(delta) = choice.delta {
+                if let Some(content) = delta.content {
+                    if !content.is_empty() {
+                        merged.push_str(&content);
+                        on_delta(&content);
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn truncate_for_log(s: &str, max: usize) -> String {
