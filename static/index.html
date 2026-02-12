@@ -535,7 +535,7 @@ function choosePreferredLanguage(langs, savedLanguage) {
 }
 
 async function fetchLanguagesFromServer() {
-    const resp = await fetch('/assets/i18n/list');
+    const resp = await fetch('/assets/languages/list');
     if (!resp.ok) throw new Error(`language list failed: ${resp.status}`);
     const data = await resp.json();
     const languages = Array.isArray(data.languages) ? data.languages : [];
@@ -546,7 +546,7 @@ async function loadCopyForLanguage(code) {
     const lang = normalizeLanguageCode(code);
     if (!lang) return false;
     try {
-        const resp = await fetch(`/assets/i18n/${encodeURIComponent(lang)}.json`);
+        const resp = await fetch(`/assets/languages/${encodeURIComponent(lang)}.json`);
         if (!resp.ok) return false;
         const data = await resp.json();
         if (!data || typeof data !== 'object') return false;
