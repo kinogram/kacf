@@ -400,6 +400,7 @@ let lastEventId = 0;
 let polling = false;
 let saveTimer = null;
 let stopRequested = false;
+let stopAckTimer = null;
 let eventSource = null;
 let sseRetryTimer = null;
 let sseErrorCount = 0;
@@ -672,6 +673,13 @@ function closeEventStream() {
     }
 }
 
+function clearStopAckTimer() {
+    if (stopAckTimer) {
+        clearTimeout(stopAckTimer);
+        stopAckTimer = null;
+    }
+}
+
 function ensurePollingFallback(reason) {
     if (pollingStarted) return;
     appendLog(`[UI] 实时流不可用，已切换轮询模式：${reason}`);
@@ -724,6 +732,7 @@ function handleEvent(evt) {
             showClarify(evt.questions);
             break;
         case 'done':
+            clearStopAckTimer();
             if (evt.success) {
                 setRunState('success', '已完成（成功）');
                 setStatus(`完成：成功 - ${evt.message}`, 'status-ok');
@@ -841,6 +850,12 @@ async function stopSession() {
         const ack = (await resp.text()).trim();
         if (!resp.ok) throw new Error(`stop error ${resp.status}`);
         stopRequested = true;
+        clearStopAckTimer();
+        stopAckTimer = setTimeout(() => {
+            if (!stopRequested) return;
+            setRunState('interrupted', '已中断（等待确认超时）');
+            setStatus('停止已受理，但未收到结束回执；已按中断处理。', 'status-warn');
+        }, 6000);
         setRunState('stopping', '正在中断，等待任务确认停止');
         if (ack.includes('channel unavailable')) {
             setStatus('后端会话已结束，已按停止处理。', 'status-warn');
