@@ -339,3 +339,16 @@ function showClarify(questions) {
     if (viewLogBucket() === bucket) renderUiForViewBucket();
 }
 
+// Explicitly expose runtime-sync capabilities to reduce implicit cross-file coupling.
+window.KACF = window.KACF || {};
+window.KACF.runtimeSync = {
+    syncSharedConfigForRun,
+    prepareFormDataWithWorkspace,
+    primeRunRequestContext,
+    refreshUiState,
+    refreshMetrics,
+    bootstrapEventCursor,
+    monitorRealtimeChannel,
+    startEventStream,
+    closeEventStream,
+};

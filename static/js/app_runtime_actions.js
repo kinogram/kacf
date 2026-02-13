@@ -1,13 +1,27 @@
+function runtimeSyncApi() {
+    return (window.KACF && window.KACF.runtimeSync) || {};
+}
+
+function runtimeSyncCall(name, fallback, ...args) {
+    const api = runtimeSyncApi();
+    const fn = typeof api[name] === 'function' ? api[name] : fallback;
+    return fn(...args);
+}
+
 async function startSession() {
     ensureWorkspaceForCurrentProject();
     if (isReadOnlyView()) {
         setStatus(txt('status_readonly_view', ''), 'status-danger');
         return;
     }
-    if (!(await syncSharedConfigForRun('status_start_shared_config_sync_failed'))) {
+    if (!(await runtimeSyncCall('syncSharedConfigForRun', syncSharedConfigForRun, 'status_start_shared_config_sync_failed'))) {
         return;
     }
-    const body = await prepareFormDataWithWorkspace('status_start_alloc_workspace_failed');
+    const body = await runtimeSyncCall(
+        'prepareFormDataWithWorkspace',
+        prepareFormDataWithWorkspace,
+        'status_start_alloc_workspace_failed'
+    );
     if (!body) {
         return;
     }
@@ -20,7 +34,7 @@ async function startSession() {
         if (!proceed) return;
     }
     try {
-        primeRunRequestContext();
+        runtimeSyncCall('primeRunRequestContext', primeRunRequestContext);
         const resp = await fetch('/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -61,14 +75,18 @@ async function resumeSession(opts) {
             setStatus(txt('status_need_select_project', ''), 'status-danger');
             return;
         }
-        if (!(await syncSharedConfigForRun('status_shared_config_sync_failed'))) {
+        if (!(await runtimeSyncCall('syncSharedConfigForRun', syncSharedConfigForRun, 'status_shared_config_sync_failed'))) {
             return;
         }
-        const body = await prepareFormDataWithWorkspace('status_resume_alloc_workspace_failed');
+        const body = await runtimeSyncCall(
+            'prepareFormDataWithWorkspace',
+            prepareFormDataWithWorkspace,
+            'status_resume_alloc_workspace_failed'
+        );
         if (!body) {
             return;
         }
-        primeRunRequestContext();
+        runtimeSyncCall('primeRunRequestContext', primeRunRequestContext);
         const resp = await fetch('/resume', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -115,7 +133,7 @@ async function stopSession() {
         const ack = (await resp.text()).trim();
         if (!resp.ok) throw new Error(`stop error ${resp.status}`);
         stopRequested = true;
-        clearStopAckTimer();
+        runtimeSyncCall('clearStopAckTimer', clearStopAckTimer);
         stopAckTimer = setTimeout(() => {
             if (!stopRequested) return;
             applyInterruptedTerminalState({
@@ -501,18 +519,20 @@ async function init() {
     renderCurrentLogView();
     renderUiForViewBucket();
     await loadProjectConfigForWorkspace();
-    await refreshUiState();
-    await refreshMetrics();
-    await bootstrapEventCursor();
+    await runtimeSyncCall('refreshUiState', refreshUiState);
+    await runtimeSyncCall('refreshMetrics', refreshMetrics);
+    await runtimeSyncCall('bootstrapEventCursor', bootstrapEventCursor);
     renderUnattendedState();
     renderUiForViewBucket();
-    setInterval(refreshUiState, UI_STATE_SYNC_MS);
-    setInterval(refreshMetrics, 5000);
+    setInterval(() => runtimeSyncCall('refreshUiState', refreshUiState), UI_STATE_SYNC_MS);
+    setInterval(() => runtimeSyncCall('refreshMetrics', refreshMetrics), 5000);
     setInterval(renderUnattendedState, 1000);
-    setInterval(monitorRealtimeChannel, 2000);
+    setInterval(() => runtimeSyncCall('monitorRealtimeChannel', monitorRealtimeChannel), 2000);
     // Prefer SSE for low-latency updates, fallback to long-polling only on failure.
-    startEventStream();
-    window.addEventListener('beforeunload', closeEventStream);
+    runtimeSyncCall('startEventStream', startEventStream);
+    window.addEventListener('beforeunload', () =>
+        runtimeSyncCall('closeEventStream', closeEventStream)
+    );
 }
 
 init();

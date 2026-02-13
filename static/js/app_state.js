@@ -82,6 +82,7 @@ let sharedConfig = {
     language: '',
 };
 let COPY = {};
+window.KACF = window.KACF || {};
 const BACKEND_COMM_BUTTON_IDS = [
     'start_btn',
     'resume_btn',
@@ -707,4 +708,3 @@ function viewLogBucket() {
 function currentLogBucket() {
     return activeRunLogBucket || viewLogBucket();
 }
-
