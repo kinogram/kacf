@@ -1101,12 +1101,17 @@ async function fetchPlainApiKeyFromServer() {
     return (data && typeof data.api_key === 'string') ? data.api_key.trim() : '';
 }
 
+function looksLikeMaskedApiKey(value) {
+    const v = (value || '').trim();
+    return !!v && v.includes('*');
+}
+
 async function beginEditApiKey() {
     if (!sharedConfig.mask_api_key) return;
     try {
         const inputEl = document.getElementById('api_key');
         const showingMasked = !!inputEl && inputEl.dataset.masked === '1';
-        if (sharedConfig.api_key_is_masked || showingMasked) {
+        if (sharedConfig.api_key_is_masked || (showingMasked && looksLikeMaskedApiKey(sharedConfig.api_key))) {
             sharedConfig.api_key = await fetchPlainApiKeyFromServer();
             sharedConfig.api_key_is_masked = false;
         }
@@ -1124,7 +1129,7 @@ async function beginEditApiKey() {
 }
 
 async function resolveApiKeyForRequest() {
-    if (!sharedConfig.api_key_is_masked) return;
+    if (!sharedConfig.api_key_is_masked && !looksLikeMaskedApiKey(sharedConfig.api_key)) return;
     try {
         sharedConfig.api_key = await fetchPlainApiKeyFromServer();
         sharedConfig.api_key_is_masked = false;
