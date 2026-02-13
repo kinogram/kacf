@@ -1255,23 +1255,6 @@ function renderProjectSelector(selectedId) {
     renderProjectAccordion();
 }
 
-function selectProjectByCurrentForm() {
-    const body = getFormData();
-    const ws = (body.workspace || '').trim();
-    const goal = (body.goal || '').trim();
-    const items = loadProjects();
-    const found = items.find(x =>
-        (x.workspace || '').trim() === ws
-        && (x.goal || '').trim() === goal
-    );
-    if (found) {
-        renderProjectSelector(found.id);
-        document.getElementById('project_name').value = found.name || '';
-        projectNameManualOverride = true;
-        lastAutoProjectName = '';
-    }
-}
-
 function syncProjectNameFromSelection() {
     const sel = document.getElementById('project_selector');
     const items = loadProjects();

@@ -593,8 +593,7 @@ async fn delete_project(data: web::Data<AppState>, path: web::Path<String>) -> i
 
 async fn get_ui_cache(data: web::Data<AppState>) -> impl Responder {
     let _guard = data.projects_lock.lock().unwrap();
-    let mut payload = read_ui_cache();
-    web_ui_cache_logic::prepare_ui_cache_for_response(&mut payload);
+    let payload = read_ui_cache();
     HttpResponse::Ok().json(payload)
 }
 
