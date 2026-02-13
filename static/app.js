@@ -37,6 +37,7 @@ let cacheProjectLogs = {};
 let cacheProjectUiState = {};
 let logRenderStateByBucket = {};
 let uiCacheSaveTimer = null;
+let uiCacheLastHeavySyncMs = 0;
 const WORKSPACE_ROOT = './autocoding_data/workspaces';
 let projectNameManualOverride = false;
 let lastAutoProjectName = '';
@@ -665,12 +666,18 @@ async function fetchUiCacheFromServer() {
 function scheduleUiCacheSave() {
     if (uiCacheSaveTimer) clearTimeout(uiCacheSaveTimer);
     uiCacheSaveTimer = setTimeout(async () => {
+        const now = Date.now();
+        const heavyIntervalMs = runSessionActive ? 5000 : 1000;
+        const includeHeavy = (now - uiCacheLastHeavySyncMs) >= heavyIntervalMs;
         const payload = {
             shared_config: sharedConfig,
             global_options: globalOptions,
-            project_logs: cacheProjectLogs,
-            project_ui_state: cacheProjectUiState,
         };
+        if (includeHeavy) {
+            payload.project_logs = cacheProjectLogs;
+            payload.project_ui_state = cacheProjectUiState;
+            uiCacheLastHeavySyncMs = now;
+        }
         try {
             await fetch('/ui_cache', {
                 method: 'PUT',
@@ -678,7 +685,7 @@ function scheduleUiCacheSave() {
                 body: JSON.stringify(payload),
             });
         } catch (_e) {}
-    }, 250);
+    }, 500);
 }
 
 async function persistSharedConfigNow() {
@@ -2204,6 +2211,8 @@ function handleEvent(evt) {
                 manualRunStopExpired = false;
                 renderUnattendedState();
             }
+            uiCacheLastHeavySyncMs = 0;
+            scheduleUiCacheSave();
             stopRequested = false;
             document.getElementById('start_btn').disabled = false;
             document.getElementById('stop_btn').disabled = true;
