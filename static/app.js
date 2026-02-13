@@ -26,6 +26,11 @@ const FALLBACK_LOG_DEDUP_MS = 30000;
 const BACKEND_FAILURE_THRESHOLD = 3;
 const SSE_ERROR_LIMIT = 6;
 const SSE_CONNECT_GRACE_MS = 10000;
+const LOG_BUCKET_MAX_CHARS = 120000;
+const LOG_BUCKET_MAX_LINES = 2500;
+const LOG_LINE_MAX_CHARS = 2000;
+const DIFF_MAX_CHARS = 120000;
+const DIFF_MAX_LINES = 2500;
 let activeRunLogBucket = '';
 let activeRunProjectLabel = '';
 let runSessionActive = false;
@@ -107,6 +112,65 @@ function parseBoundedInt(raw, min, max, fallback) {
     if (n < min) return min;
     if (n > max) return max;
     return n;
+}
+
+function truncateTailChars(raw, maxChars) {
+    const text = String(raw || '');
+    if (maxChars <= 0) return '';
+    if (text.length <= maxChars) return text;
+    return text.slice(text.length - maxChars);
+}
+
+function truncateHeadChars(raw, maxChars) {
+    const text = String(raw || '');
+    if (maxChars <= 0) return '';
+    if (text.length <= maxChars) return text;
+    return text.slice(0, maxChars);
+}
+
+function sanitizeDiffText(raw) {
+    const tail = truncateTailChars(raw, DIFF_MAX_CHARS);
+    let lines = tail.split('\n');
+    if (lines.length > DIFF_MAX_LINES) {
+        lines = lines.slice(lines.length - DIFF_MAX_LINES);
+    }
+    return lines.join('\n');
+}
+
+function sanitizeLogContent(raw) {
+    const tail = truncateTailChars(raw, LOG_BUCKET_MAX_CHARS);
+    let lines = tail.split('\n');
+    if (lines.length && lines[lines.length - 1] === '') lines.pop();
+    if (lines.length > LOG_BUCKET_MAX_LINES) {
+        lines = lines.slice(lines.length - LOG_BUCKET_MAX_LINES);
+    }
+    lines = lines.map(line => truncateHeadChars(line, LOG_LINE_MAX_CHARS));
+    return lines.length ? `${lines.join('\n')}\n` : '';
+}
+
+function sanitizeProjectLogsMap(rawMap) {
+    const out = {};
+    if (!rawMap || typeof rawMap !== 'object') return out;
+    Object.keys(rawMap).forEach(k => {
+        if (typeof rawMap[k] !== 'string') return;
+        out[String(k)] = sanitizeLogContent(rawMap[k]);
+    });
+    return out;
+}
+
+function sanitizeProjectUiStateMap(rawMap) {
+    const out = {};
+    if (!rawMap || typeof rawMap !== 'object') return out;
+    Object.keys(rawMap).forEach(k => {
+        const entry = rawMap[k];
+        if (!entry || typeof entry !== 'object') return;
+        const normalized = { ...entry };
+        if (typeof normalized.diff_text === 'string') {
+            normalized.diff_text = sanitizeDiffText(normalized.diff_text);
+        }
+        out[String(k)] = normalized;
+    });
+    return out;
 }
 
 function languageLabel(code) {
@@ -570,8 +634,12 @@ async function fetchUiCacheFromServer() {
         const resp = await fetch('/ui_cache');
         if (!resp.ok) return false;
         const data = await resp.json();
-        cacheProjectLogs = (data.project_logs && typeof data.project_logs === 'object') ? data.project_logs : {};
-        cacheProjectUiState = (data.project_ui_state && typeof data.project_ui_state === 'object') ? data.project_ui_state : {};
+        cacheProjectLogs = sanitizeProjectLogsMap(
+            (data.project_logs && typeof data.project_logs === 'object') ? data.project_logs : {}
+        );
+        cacheProjectUiState = sanitizeProjectUiStateMap(
+            (data.project_ui_state && typeof data.project_ui_state === 'object') ? data.project_ui_state : {}
+        );
         if (data.shared_config && typeof data.shared_config === 'object') {
             sharedConfig = {
                 api_key: data.shared_config.api_key || '',
@@ -665,13 +733,39 @@ function readBucketUiState(bucket) {
     const all = loadProjectUiStateMap();
     const raw = all[bucket];
     if (!raw || typeof raw !== 'object') return defaultBucketUiState();
-    return { ...defaultBucketUiState(), ...raw };
+    const merged = { ...defaultBucketUiState(), ...raw };
+    merged.diff_text = sanitizeDiffText(merged.diff_text || '');
+    return merged;
 }
 
 function writeBucketUiState(bucket, patch) {
     const all = loadProjectUiStateMap();
-    all[bucket] = { ...readBucketUiState(bucket), ...(patch || {}) };
+    const next = { ...readBucketUiState(bucket), ...(patch || {}) };
+    next.diff_text = sanitizeDiffText(next.diff_text || '');
+    all[bucket] = next;
     saveProjectUiStateMap(all);
+}
+
+function renderDiffPanel(diffText) {
+    const safe = sanitizeDiffText(diffText || '');
+    const section = document.getElementById('diff_section');
+    const diffElem = document.getElementById('diff');
+    if (!safe) {
+        section.style.display = 'none';
+        diffElem.innerHTML = '';
+        return;
+    }
+    const lines = safe.split('\n');
+    diffElem.innerHTML = lines.map(line => {
+        if (line.startsWith('+') && !line.startsWith('+++')) {
+            return `<div class="diff-line-add">${escapeHtml(line)}</div>`;
+        }
+        if (line.startsWith('-') && !line.startsWith('---')) {
+            return `<div class="diff-line-del">${escapeHtml(line)}</div>`;
+        }
+        return `<div class="diff-line-other">${escapeHtml(line)}</div>`;
+    }).join('');
+    section.style.display = 'block';
 }
 
 function normalizeClarifyQuestions(questions) {
@@ -773,23 +867,7 @@ function renderUiForViewBucket() {
     bar.dataset.state = state.run_state || 'idle';
     document.getElementById('runbar_text').textContent = fmt('runbar_line', '', { state: state.run_text || txt('run_idle', '') });
     document.getElementById('diagnostics').textContent = state.diagnostics_text || txt('diagnostics_none', '');
-    if (state.diff_text) {
-        const diffElem = document.getElementById('diff');
-        const lines = state.diff_text.split('\n');
-        diffElem.innerHTML = lines.map(line => {
-            if (line.startsWith('+') && !line.startsWith('+++')) {
-                return `<div class="diff-line-add">${escapeHtml(line)}</div>`;
-            }
-            if (line.startsWith('-') && !line.startsWith('---')) {
-                return `<div class="diff-line-del">${escapeHtml(line)}</div>`;
-            }
-            return `<div class="diff-line-other">${escapeHtml(line)}</div>`;
-        }).join('');
-        document.getElementById('diff_section').style.display = 'block';
-    } else {
-        document.getElementById('diff_section').style.display = 'none';
-        document.getElementById('diff').innerHTML = '';
-    }
+    renderDiffPanel(state.diff_text || '');
     renderClarifyQuestions(state.clarify_questions || [], bucket, false);
 }
 
@@ -798,7 +876,7 @@ function loadProjectLogs() {
 }
 
 function saveProjectLogs(obj) {
-    cacheProjectLogs = (obj && typeof obj === 'object') ? obj : {};
+    cacheProjectLogs = sanitizeProjectLogsMap((obj && typeof obj === 'object') ? obj : {});
     scheduleUiCacheSave();
 }
 
@@ -810,8 +888,7 @@ function readLogForBucket(bucket) {
 
 function writeLogForBucket(bucket, content) {
     const all = loadProjectLogs();
-    // Hard cap to avoid unbounded browser/server cache growth.
-    all[bucket] = (content || '').slice(-300000);
+    all[bucket] = sanitizeLogContent(content || '');
     saveProjectLogs(all);
 }
 
@@ -2349,20 +2426,10 @@ async function submitClarify(e) {
 
 function renderDiff(diffText) {
     const bucket = currentLogBucket();
-    writeBucketUiState(bucket, { diff_text: diffText || '' });
+    const safe = sanitizeDiffText(diffText || '');
+    writeBucketUiState(bucket, { diff_text: safe });
     if (viewLogBucket() !== bucket) return;
-    const diffElem = document.getElementById('diff');
-    const lines = diffText.split('\n');
-    diffElem.innerHTML = lines.map(line => {
-        if (line.startsWith('+') && !line.startsWith('+++')) {
-            return `<div class="diff-line-add">${escapeHtml(line)}</div>`;
-        }
-        if (line.startsWith('-') && !line.startsWith('---')) {
-            return `<div class="diff-line-del">${escapeHtml(line)}</div>`;
-        }
-        return `<div class="diff-line-other">${escapeHtml(line)}</div>`;
-    }).join('');
-    document.getElementById('diff_section').style.display = 'block';
+    renderDiffPanel(safe);
 }
 
 function escapeHtml(text) {

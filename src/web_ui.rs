@@ -37,6 +37,11 @@ const UI_CACHE_FILENAME: &str = ".autocoding_webui_cache.json";
 const MANAGED_ROOT_DIR: &str = "autocoding_data";
 const MANAGED_WORKSPACES_DIR: &str = "workspaces";
 const MAX_EVENT_BUFFER: usize = 5000;
+const MAX_EVENT_LOG_CHARS: usize = 4000;
+const MAX_EVENT_DIFF_CHARS: usize = 16000;
+const MAX_EVENT_DONE_MESSAGE_CHARS: usize = 2000;
+const MAX_EVENTS_PER_PULL: usize = 300;
+const MAX_EVENTS_PER_STREAM_BATCH: usize = 120;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -60,12 +65,29 @@ pub enum SerializableEvent {
 impl From<AgentEvent> for SerializableEvent {
     fn from(evt: AgentEvent) -> Self {
         match evt {
-            AgentEvent::Log(line) => SerializableEvent::Log { line },
+            AgentEvent::Log(line) => SerializableEvent::Log {
+                line: truncate_head_chars(&line, MAX_EVENT_LOG_CHARS),
+            },
             AgentEvent::NeedClarify { questions } => SerializableEvent::NeedClarify { questions },
-            AgentEvent::Diff { diff } => SerializableEvent::Diff { diff },
-            AgentEvent::Done { success, message } => SerializableEvent::Done { success, message },
+            AgentEvent::Diff { diff } => SerializableEvent::Diff {
+                diff: truncate_head_chars(&diff, MAX_EVENT_DIFF_CHARS),
+            },
+            AgentEvent::Done { success, message } => SerializableEvent::Done {
+                success,
+                message: truncate_head_chars(&message, MAX_EVENT_DONE_MESSAGE_CHARS),
+            },
         }
     }
+}
+
+fn truncate_head_chars(input: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    if input.chars().count() <= max_chars {
+        return input.to_string();
+    }
+    input.chars().take(max_chars).collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -825,6 +847,7 @@ async fn get_events(
     let list: Vec<_> = events
         .iter()
         .filter(|(id, _)| *id >= from_id)
+        .take(MAX_EVENTS_PER_PULL)
         .cloned()
         .collect();
     HttpResponse::Ok().json(list)
@@ -854,6 +877,7 @@ async fn stream_events(
                 events
                     .iter()
                     .filter(|(id, _)| *id >= next_id)
+                    .take(MAX_EVENTS_PER_STREAM_BATCH)
                     .cloned()
                     .collect()
             };
