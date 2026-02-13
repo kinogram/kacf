@@ -1116,7 +1116,9 @@ async function beginEditApiKey() {
     try {
         const inputEl = document.getElementById('api_key');
         const showingMasked = !!inputEl && inputEl.dataset.masked === '1';
-        if (sharedConfig.api_key_is_masked || (showingMasked && looksLikeMaskedApiKey(sharedConfig.api_key))) {
+        const sameAsDisplayed = showingMasked && !!inputEl && (sharedConfig.api_key || '').trim() === (inputEl.value || '').trim();
+        const mustFetchPlain = sharedConfig.api_key_is_masked || sameAsDisplayed || (showingMasked && looksLikeMaskedApiKey(sharedConfig.api_key));
+        if (mustFetchPlain) {
             sharedConfig.api_key = await fetchPlainApiKeyFromServer();
             sharedConfig.api_key_is_masked = false;
         }
@@ -2939,7 +2941,10 @@ function bindEvents() {
     document.getElementById('api_key').addEventListener('blur', reMaskApiKeyIfNeeded);
     document.getElementById('mask_api_key').addEventListener('change', async () => {
         updateSharedConfigFromInputs();
-        if (!sharedConfig.mask_api_key && (sharedConfig.api_key_is_masked || looksLikeMaskedApiKey(sharedConfig.api_key))) {
+        const apiKeyInput = document.getElementById('api_key');
+        const sameAsDisplayed = !!apiKeyInput && apiKeyInput.dataset.masked === '1'
+            && (sharedConfig.api_key || '').trim() === (apiKeyInput.value || '').trim();
+        if (!sharedConfig.mask_api_key && (sharedConfig.api_key_is_masked || sameAsDisplayed || looksLikeMaskedApiKey(sharedConfig.api_key))) {
             const apiReady = await resolveApiKeyForRequest();
             if (!apiReady) {
                 sharedConfig.mask_api_key = true;
