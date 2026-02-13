@@ -37,6 +37,7 @@ const UI_CACHE_FILENAME: &str = ".autocoding_webui_cache.json";
 const MANAGED_ROOT_DIR: &str = "autocoding_data";
 const MANAGED_WORKSPACES_DIR: &str = "workspaces";
 const MAX_EVENT_BUFFER: usize = 5000;
+const MAX_EVENT_BUFFER_BYTES: usize = 8 * 1024 * 1024;
 const MAX_EVENTS_PER_PULL: usize = 300;
 const MAX_EVENTS_PER_STREAM_BATCH: usize = 120;
 
@@ -45,6 +46,7 @@ pub struct AppState {
     tx_req: Sender<AgentRequest>,
     rx_evt: Receiver<AgentEvent>,
     events: Arc<Mutex<Vec<(usize, SerializableEvent)>>>,
+    event_bytes: Arc<Mutex<usize>>,
     next_event_id: Arc<Mutex<usize>>,
     runtime: Arc<Mutex<RuntimeStatus>>,
     projects_lock: Arc<Mutex<()>>,
@@ -67,6 +69,23 @@ impl From<AgentEvent> for SerializableEvent {
             AgentEvent::Diff { diff } => SerializableEvent::Diff { diff },
             AgentEvent::Done { success, message } => SerializableEvent::Done { success, message },
         }
+    }
+}
+
+fn serializable_event_size(evt: &SerializableEvent) -> usize {
+    match evt {
+        SerializableEvent::Log { line } => line.len(),
+        SerializableEvent::Diff { diff } => diff.len(),
+        SerializableEvent::Done { message, .. } => message.len(),
+        SerializableEvent::NeedClarify { questions } => questions
+            .iter()
+            .map(|q| {
+                q.id.len()
+                    + q.question.len()
+                    + q.qtype.len()
+                    + q.options.iter().map(|x| x.len()).sum::<usize>()
+            })
+            .sum(),
     }
 }
 
@@ -973,11 +992,15 @@ fn spawn_event_collector(state: AppState) {
             }
             let serial: SerializableEvent = evt.clone().into();
             let mut evts = state.events.lock().unwrap();
+            let mut bytes = state.event_bytes.lock().unwrap();
             let mut next_id = state.next_event_id.lock().unwrap();
+            *bytes += serializable_event_size(&serial);
             evts.push((*next_id, serial));
-            if evts.len() > MAX_EVENT_BUFFER {
-                let drop_n = evts.len() - MAX_EVENT_BUFFER;
-                evts.drain(0..drop_n);
+            while evts.len() > MAX_EVENT_BUFFER || *bytes > MAX_EVENT_BUFFER_BYTES {
+                if let Some((_, removed)) = evts.first() {
+                    *bytes = bytes.saturating_sub(serializable_event_size(removed));
+                }
+                evts.remove(0);
             }
             *next_id += 1;
         }
@@ -997,17 +1020,22 @@ fn spawn_event_collector(state: AppState) {
         };
         if should_emit_done {
             let mut evts = state.events.lock().unwrap();
+            let mut bytes = state.event_bytes.lock().unwrap();
             let mut next_id = state.next_event_id.lock().unwrap();
+            let done = SerializableEvent::Done {
+                success: false,
+                message: "Agent event channel closed".to_string(),
+            };
+            *bytes += serializable_event_size(&done);
             evts.push((
                 *next_id,
-                SerializableEvent::Done {
-                    success: false,
-                    message: "Agent event channel closed".to_string(),
-                },
+                done,
             ));
-            if evts.len() > MAX_EVENT_BUFFER {
-                let drop_n = evts.len() - MAX_EVENT_BUFFER;
-                evts.drain(0..drop_n);
+            while evts.len() > MAX_EVENT_BUFFER || *bytes > MAX_EVENT_BUFFER_BYTES {
+                if let Some((_, removed)) = evts.first() {
+                    *bytes = bytes.saturating_sub(serializable_event_size(removed));
+                }
+                evts.remove(0);
             }
             *next_id += 1;
         }
@@ -1086,6 +1114,7 @@ pub async fn run_web_server(
         tx_req,
         rx_evt,
         events: Arc::new(Mutex::new(Vec::new())),
+        event_bytes: Arc::new(Mutex::new(0)),
         next_event_id: Arc::new(Mutex::new(0)),
         runtime: Arc::new(Mutex::new(RuntimeStatus::default())),
         projects_lock: Arc::new(Mutex::new(())),

@@ -36,8 +36,13 @@ let cachedProjects = [];
 let cacheProjectLogs = {};
 let cacheProjectUiState = {};
 let logRenderStateByBucket = {};
+let logBucketTouchedAt = {};
+let uiStateBucketTouchedAt = {};
 let uiCacheSaveTimer = null;
 let uiCacheLastHeavySyncMs = 0;
+const LOG_BUCKET_MAX_COUNT = 40;
+const UI_STATE_BUCKET_MAX_COUNT = 60;
+const LOG_TOTAL_MAX_CHARS = 400000;
 const WORKSPACE_ROOT = './autocoding_data/workspaces';
 let projectNameManualOverride = false;
 let lastAutoProjectName = '';
@@ -172,6 +177,54 @@ function sanitizeProjectUiStateMap(rawMap) {
         out[String(k)] = normalized;
     });
     return out;
+}
+
+function touchBucket(metaMap, bucket) {
+    metaMap[String(bucket || '')] = Date.now();
+}
+
+function pruneLogBuckets() {
+    const entries = Object.entries(cacheProjectLogs || {});
+    if (!entries.length) return;
+    const score = (k) => logBucketTouchedAt[k] || 0;
+    const isProject = (k) => String(k).startsWith('project:');
+    let keys = entries.map(([k]) => k);
+    keys.sort((a, b) => score(a) - score(b));
+    while (keys.length > LOG_BUCKET_MAX_COUNT) {
+        const idx = keys.findIndex(k => !isProject(k));
+        const victim = idx >= 0 ? keys[idx] : keys[0];
+        delete cacheProjectLogs[victim];
+        delete logBucketTouchedAt[victim];
+        delete cacheProjectUiState[victim];
+        delete uiStateBucketTouchedAt[victim];
+        delete logRenderStateByBucket[victim];
+        keys = keys.filter(k => k !== victim);
+    }
+    let total = Object.values(cacheProjectLogs).reduce((acc, v) => acc + String(v || '').length, 0);
+    if (total <= LOG_TOTAL_MAX_CHARS) return;
+    const sorted = Object.keys(cacheProjectLogs).sort((a, b) => score(a) - score(b));
+    for (const k of sorted) {
+        if (total <= LOG_TOTAL_MAX_CHARS) break;
+        if (isProject(k) && k === currentLogBucket()) continue;
+        total -= String(cacheProjectLogs[k] || '').length;
+        delete cacheProjectLogs[k];
+        delete logBucketTouchedAt[k];
+        delete cacheProjectUiState[k];
+        delete uiStateBucketTouchedAt[k];
+        delete logRenderStateByBucket[k];
+    }
+}
+
+function pruneUiStateBuckets() {
+    const keys = Object.keys(cacheProjectUiState || {});
+    if (keys.length <= UI_STATE_BUCKET_MAX_COUNT) return;
+    keys.sort((a, b) => (uiStateBucketTouchedAt[a] || 0) - (uiStateBucketTouchedAt[b] || 0));
+    while (keys.length > UI_STATE_BUCKET_MAX_COUNT) {
+        const victim = keys.shift();
+        if (!victim) break;
+        delete cacheProjectUiState[victim];
+        delete uiStateBucketTouchedAt[victim];
+    }
 }
 
 function languageLabel(code) {
@@ -758,6 +811,8 @@ function writeBucketUiState(bucket, patch) {
     const next = { ...readBucketUiState(bucket), ...(patch || {}) };
     next.diff_text = sanitizeDiffText(next.diff_text || '');
     all[bucket] = next;
+    touchBucket(uiStateBucketTouchedAt, bucket);
+    pruneUiStateBuckets();
     saveProjectUiStateMap(all);
 }
 
@@ -892,6 +947,7 @@ function loadProjectLogs() {
 
 function saveProjectLogs(obj) {
     cacheProjectLogs = sanitizeProjectLogsMap((obj && typeof obj === 'object') ? obj : {});
+    pruneLogBuckets();
     scheduleUiCacheSave();
 }
 
@@ -904,6 +960,8 @@ function readLogForBucket(bucket) {
 function writeLogForBucket(bucket, content) {
     const all = loadProjectLogs();
     all[bucket] = sanitizeLogContent(content || '');
+    touchBucket(logBucketTouchedAt, bucket);
+    pruneLogBuckets();
     saveProjectLogs(all);
 }
 
@@ -1800,9 +1858,12 @@ async function deleteSelectedProject() {
     markProjectClean();
     const logs = loadProjectLogs();
     delete logs[`project:${found.id}`];
+    delete logBucketTouchedAt[`project:${found.id}`];
+    delete logRenderStateByBucket[`project:${found.id}`];
     saveProjectLogs(logs);
     const uiMap = loadProjectUiStateMap();
     delete uiMap[`project:${found.id}`];
+    delete uiStateBucketTouchedAt[`project:${found.id}`];
     saveProjectUiStateMap(uiMap);
     renderCurrentLogView();
     renderUiForViewBucket();
