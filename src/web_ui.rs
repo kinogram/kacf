@@ -103,10 +103,6 @@ struct StartPayload {
     #[serde(default)]
     precheck_cmd: String,
     #[serde(default)]
-    history_max_messages: String,
-    #[serde(default)]
-    history_max_chars: String,
-    #[serde(default)]
     release_gate_threshold: String,
     workspace: String,
     goal: String,
@@ -127,10 +123,6 @@ struct DraftPayload {
     unattended_mode: bool,
     #[serde(default)]
     precheck_cmd: String,
-    #[serde(default)]
-    history_max_messages: String,
-    #[serde(default)]
-    history_max_chars: String,
     #[serde(default)]
     release_gate_threshold: String,
     workspace: String,
@@ -165,8 +157,6 @@ impl DraftPayload {
             auto_revert_profile: self.auto_revert_profile,
             unattended_mode: self.unattended_mode,
             precheck_cmd: self.precheck_cmd,
-            history_max_messages: self.history_max_messages,
-            history_max_chars: self.history_max_chars,
             release_gate_threshold: self.release_gate_threshold,
             workspace: self.workspace,
             goal: self.goal,
@@ -323,10 +313,6 @@ pub(crate) struct ProjectConfig {
     #[serde(default)]
     precheck_cmd: String,
     #[serde(default)]
-    history_max_messages: String,
-    #[serde(default)]
-    history_max_chars: String,
-    #[serde(default)]
     release_gate_threshold: String,
     updated_at_unix: u64,
 }
@@ -443,16 +429,12 @@ fn save_project_config(
     profile: &str,
     unattended_mode: bool,
     precheck_cmd: &str,
-    history_max_messages: &str,
-    history_max_chars: &str,
     release_gate_threshold: &str,
 ) -> std::io::Result<()> {
     let cfg = ProjectConfig {
         auto_revert_profile: profile.to_string(),
         unattended_mode,
         precheck_cmd: precheck_cmd.to_string(),
-        history_max_messages: history_max_messages.to_string(),
-        history_max_chars: history_max_chars.to_string(),
         release_gate_threshold: release_gate_threshold.to_string(),
         updated_at_unix: now_unix(),
     };
@@ -540,8 +522,6 @@ fn start_from_payload(
     let workspace_full = require_managed_workspace(&payload.workspace)?;
     web_ui_runtime_env::apply_runtime_config_envs(
         &payload.precheck_cmd,
-        &payload.history_max_messages,
-        &payload.history_max_chars,
         &payload.release_gate_threshold,
     );
     let req = AgentRequest::Start {
@@ -562,8 +542,6 @@ fn start_from_payload(
         &auto_revert_profile,
         payload.unattended_mode,
         &payload.precheck_cmd,
-        &payload.history_max_messages,
-        &payload.history_max_chars,
         &payload.release_gate_threshold,
     ) {
         eprintln!("save project config failed: {}", e);

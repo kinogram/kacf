@@ -94,7 +94,7 @@ const PROJECT_CONTROL_IDS = [
 ];
 const CONFIG_EDIT_IDS = [
     'api_key', 'model', 'base_url', 'workspace', 'auto_revert_profile',
-    'precheck_cmd', 'history_max_messages', 'history_max_chars', 'release_gate_threshold',
+    'precheck_cmd', 'release_gate_threshold',
     'unattended_mode',
     'goal', 'eval_cmd', 'success_regex', 'remote', 'remote_url', 'branch',
     'open_global_config_btn', 'language_select',
@@ -463,8 +463,6 @@ function defaultFormData() {
         model: sharedConfig.model || 'deepseek-reasoner',
         auto_revert_profile: 'balanced',
         precheck_cmd: '',
-        history_max_messages: '',
-        history_max_chars: '',
         release_gate_threshold: '',
         unattended_mode: false,
         workspace: '',
@@ -1283,8 +1281,6 @@ function getFormData() {
         language: normalizeLanguageCode(sharedConfig.language || currentLanguage),
         auto_revert_profile: document.getElementById('auto_revert_profile').value.trim(),
         precheck_cmd: document.getElementById('precheck_cmd').value.trim(),
-        history_max_messages: document.getElementById('history_max_messages').value.trim(),
-        history_max_chars: document.getElementById('history_max_chars').value.trim(),
         release_gate_threshold: document.getElementById('release_gate_threshold').value.trim(),
         unattended_mode: !!document.getElementById('unattended_mode')?.checked,
         workspace: document.getElementById('workspace').value.trim(),
@@ -1299,7 +1295,7 @@ function getFormData() {
 
 function applyFormData(d) {
     if (!d) return;
-    const fields = ['api_key', 'base_url', 'model', 'auto_revert_profile', 'precheck_cmd', 'history_max_messages', 'history_max_chars', 'release_gate_threshold', 'workspace', 'goal', 'eval_cmd', 'success_regex', 'remote', 'remote_url', 'branch'];
+    const fields = ['api_key', 'base_url', 'model', 'auto_revert_profile', 'precheck_cmd', 'release_gate_threshold', 'workspace', 'goal', 'eval_cmd', 'success_regex', 'remote', 'remote_url', 'branch'];
     fields.forEach(k => {
         if (typeof d[k] === 'string' && document.getElementById(k)) {
             document.getElementById(k).value = d[k];
@@ -1333,8 +1329,6 @@ function applyStaticCopyToDom() {
         ['label_auto_revert_profile', 'label_auto_revert_profile'],
         ['label_precheck_cmd', 'label_precheck_cmd'],
         ['label_release_gate_threshold', 'label_release_gate_threshold'],
-        ['label_history_max_messages', 'label_history_max_messages'],
-        ['label_history_max_chars', 'label_history_max_chars'],
         ['label_goal', 'label_goal'],
         ['label_eval_cmd', 'label_eval_cmd'],
         ['label_success_regex', 'label_success_regex'],
@@ -1400,8 +1394,6 @@ function applyStaticCopyToDom() {
         ['project_name', 'ph_project_name'],
         ['precheck_cmd', 'ph_precheck_cmd'],
         ['release_gate_threshold', 'ph_release_gate_threshold'],
-        ['history_max_messages', 'ph_history_max_messages'],
-        ['history_max_chars', 'ph_history_max_chars'],
         ['global_auto_resume_attempts', 'ph_global_auto_resume_attempts'],
         ['global_stop_after_minutes', 'ph_global_stop_after_minutes'],
         ['global_log_max_chars', 'ph_global_log_max_chars'],
@@ -2015,12 +2007,6 @@ async function loadProjectConfigForWorkspace() {
         }
         if (cfg && typeof cfg.precheck_cmd === 'string') {
             document.getElementById('precheck_cmd').value = cfg.precheck_cmd;
-        }
-        if (cfg && typeof cfg.history_max_messages === 'string') {
-            document.getElementById('history_max_messages').value = cfg.history_max_messages;
-        }
-        if (cfg && typeof cfg.history_max_chars === 'string') {
-            document.getElementById('history_max_chars').value = cfg.history_max_chars;
         }
         if (cfg && typeof cfg.release_gate_threshold === 'string') {
             document.getElementById('release_gate_threshold').value = cfg.release_gate_threshold;
@@ -2654,7 +2640,7 @@ function escapeHtml(text) {
 }
 
 function bindAutoSave() {
-    const ids = ['auto_revert_profile', 'precheck_cmd', 'history_max_messages', 'history_max_chars', 'release_gate_threshold', 'unattended_mode', 'goal', 'eval_cmd', 'success_regex', 'remote', 'remote_url', 'branch'];
+    const ids = ['auto_revert_profile', 'precheck_cmd', 'release_gate_threshold', 'unattended_mode', 'goal', 'eval_cmd', 'success_regex', 'remote', 'remote_url', 'branch'];
     ids.forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
