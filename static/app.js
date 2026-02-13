@@ -1127,6 +1127,7 @@ function applyStaticCopyToDom() {
         ['label_branch', 'label_branch'],
         ['hint_run_new_round', 'hint_run_new_round'],
         ['section_status_title', 'section_status_title'],
+        ['unattended_state_text', 'unattended_state_default'],
         ['section_clarify_title', 'section_clarify_title'],
         ['section_log_title', 'section_log_title'],
         ['hint_log_exports', 'hint_log_exports'],
@@ -1208,6 +1209,7 @@ function applyStaticCopyToDom() {
     setProjectDraftState();
     renderProjectAccordion();
     applySidebarLayout();
+    renderUnattendedState();
 }
 
 function openGlobalConfigModal() {
@@ -1248,6 +1250,24 @@ function setAutoSaveState(text) {
     document.getElementById('auto_save_state').textContent = text;
 }
 
+function renderUnattendedState() {
+    const el = document.getElementById('unattended_state_text');
+    if (!el) return;
+    const mins = stopAfterMinutesSetting();
+    const stopText = mins <= 0
+        ? txt('unattended_stop_disabled', '')
+        : (manualRunStopExpired
+            ? txt('unattended_stop_expired', '')
+            : fmt('unattended_stop_left_minutes', '', {
+                minutes: Math.max(0, Math.ceil((manualRunStopDeadlineMs - Date.now()) / 60000)),
+            }));
+    el.textContent = fmt('unattended_state_line', '', {
+        mode: activeRunUnattendedMode ? txt('unattended_mode_on', '') : txt('unattended_mode_off', ''),
+        resume_left: String(Math.max(0, unattendedAutoResumeRemaining)),
+        stop: stopText,
+    });
+}
+
 function clearUnattendedAutoResumeTimer() {
     if (!unattendedAutoResumeTimer) return;
     clearTimeout(unattendedAutoResumeTimer);
@@ -1270,13 +1290,16 @@ function armManualRunStopTimer() {
     const mins = stopAfterMinutesSetting();
     if (mins <= 0) {
         manualRunStopDeadlineMs = 0;
+        renderUnattendedState();
         return;
     }
     manualRunStopDeadlineMs = Date.now() + mins * 60 * 1000;
+    renderUnattendedState();
     manualRunStopTimer = setTimeout(() => {
         manualRunStopExpired = true;
         appendLog(fmt('log_stop_timer_expired', '', { minutes: mins }));
         setStatus(fmt('status_stop_timer_wait_round', '', { minutes: mins }), 'status-warn');
+        renderUnattendedState();
     }, mins * 60 * 1000);
 }
 
@@ -1284,6 +1307,7 @@ async function triggerStopByTimeout() {
     if (!runSessionActive || stopRequested) return;
     manualRunStopExpired = false;
     appendLog(txt('log_stop_timer_trigger_stop', ''));
+    renderUnattendedState();
     await stopSession();
 }
 
@@ -1302,6 +1326,7 @@ function scheduleUnattendedAutoResume() {
     clearUnattendedAutoResumeTimer();
     const nextTry = unattendedAutoResumeRemaining;
     unattendedAutoResumeRemaining -= 1;
+    renderUnattendedState();
     appendLog(fmt('log_unattended_auto_resume_scheduled', '', {
         try: nextTry,
         left: unattendedAutoResumeRemaining,
@@ -2030,6 +2055,7 @@ function handleEvent(evt) {
                 clearManualRunStopTimer();
                 manualRunStopDeadlineMs = 0;
                 manualRunStopExpired = false;
+                renderUnattendedState();
             } else if (stopRequested || isInterruptedMessage(evt.message)) {
                 setRunState('interrupted', txt('run_interrupted', ''));
                 setStatus(fmt('status_done_interrupted', '', { message: evt.message }), 'status-warn');
@@ -2043,6 +2069,7 @@ function handleEvent(evt) {
                 clearManualRunStopTimer();
                 manualRunStopDeadlineMs = 0;
                 manualRunStopExpired = false;
+                renderUnattendedState();
             } else {
                 setRunState('failed', txt('run_failed', ''));
                 setStatus(fmt('status_done_failed', '', { message: evt.message }), 'status-danger');
@@ -2056,6 +2083,7 @@ function handleEvent(evt) {
                 clearManualRunStopTimer();
                 manualRunStopDeadlineMs = 0;
                 manualRunStopExpired = false;
+                renderUnattendedState();
             }
             stopRequested = false;
             document.getElementById('start_btn').disabled = false;
@@ -2125,6 +2153,7 @@ async function startSession() {
         unattendedAutoResumeRemaining = autoResumeAttemptsSetting();
         clearUnattendedAutoResumeTimer();
         armManualRunStopTimer();
+        renderUnattendedState();
         applyReadOnlyMode();
         setRunState('running', txt('run_running', ''));
         stopRequested = false;
@@ -2141,6 +2170,7 @@ async function startSession() {
         clearManualRunStopTimer();
         manualRunStopDeadlineMs = 0;
         manualRunStopExpired = false;
+        renderUnattendedState();
         applyReadOnlyMode();
         setStatus(`${txt('status_start_failed_prefix', '')}${e}`, 'status-danger');
     }
@@ -2199,6 +2229,7 @@ async function resumeSession(opts) {
         if (manualRunStopDeadlineMs > 0 && Date.now() >= manualRunStopDeadlineMs) {
             manualRunStopExpired = true;
         }
+        renderUnattendedState();
         applyReadOnlyMode();
         setRunState('running', txt('run_running', ''));
         stopRequested = false;
@@ -2216,6 +2247,7 @@ async function resumeSession(opts) {
         if (isAuto) {
             scheduleUnattendedAutoResume();
         }
+        renderUnattendedState();
     }
 }
 
@@ -2632,6 +2664,7 @@ async function init() {
     document.getElementById('revert_btn').disabled = true;
     setRunState('idle', txt('run_idle', ''));
     setAutoSaveState(fmt('autosave_project_idle', '', {}));
+    renderUnattendedState();
     autoFillProjectNameFromGoal(false);
     markProjectClean();
     applySharedConfigToInputs();
@@ -2643,6 +2676,7 @@ async function init() {
     await refreshMetrics();
     setInterval(refreshUiState, UI_STATE_SYNC_MS);
     setInterval(refreshMetrics, 5000);
+    setInterval(renderUnattendedState, 1000);
     setInterval(monitorRealtimeChannel, 2000);
     // Prefer SSE for low-latency updates, fallback to long-polling only on failure.
     startEventStream();
