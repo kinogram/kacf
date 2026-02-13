@@ -1,3 +1,181 @@
+function assertRuntimeActionDependencies() {
+    const root = window.KACF || {};
+    const required = {
+        state: [
+            'txt',
+            'fmt',
+            'isReadOnlyView',
+            'goToRunningProjectView',
+            'currentLogBucket',
+            'viewLogBucket',
+            'sanitizeDiffText',
+            'setRunActionButtons',
+            'setRunningProjectIndicator',
+            'setProjectControlsDisabled',
+            'applyReadOnlyMode',
+            'updateGoRunningProjectButton',
+            'autoFillProjectNameFromGoal',
+            'applySharedConfigToInputs',
+            'initLanguagePack',
+            'isNarrowViewport',
+            'setSidebarCollapsed',
+            'setSidebarMobileOpen',
+            'applySidebarLayout',
+            'normalizeLanguageCode',
+            'switchLanguage',
+            'renderLanguageOptions',
+            'updateSharedConfigFromInputs',
+            'maybeWarnLargeCharLimit',
+        ],
+        uiCache: [
+            'fetchUiCacheFromServer',
+            'writeBucketUiState',
+            'renderClarifyQuestions',
+            'renderUiForViewBucket',
+            'renderDiffPanel',
+            'resetBucketRuntimeUiState',
+            'bindGlobalOptionInput',
+            'applyGlobalOptionsToInputs',
+            'scheduleUiCacheSave',
+            'renderCurrentLogView',
+        ],
+        logPipeline: ['setStatus', 'setRunState', 'appendLog'],
+        runtimeState: [
+            'stopAfterMinutesSetting',
+            'markRunSessionStarted',
+            'clearUnattendedAutoResumeTimer',
+            'autoResumeAttemptsSetting',
+            'armManualRunStopTimer',
+            'renderUnattendedState',
+            'resetRunSessionUiState',
+            'resetStopTimerState',
+            'scheduleUnattendedAutoResume',
+            'applyInterruptedTerminalState',
+            'applyStopAcceptedStatus',
+            'setAutoSaveState',
+            'openGlobalConfigModal',
+            'saveGlobalConfig',
+            'closeGlobalConfigModal',
+            'getFormData',
+        ],
+        projects: [
+            'ensureWorkspaceForCurrentProject',
+            'saveCurrentProject',
+            'refreshProjectsFromServer',
+            'renderProjectSelector',
+            'loadSelectedProject',
+            'deleteSelectedProject',
+            'createNewProject',
+            'syncProjectNameFromSelection',
+            'loadProjects',
+            'loadProjectConfigForWorkspace',
+            'setProjectDraftState',
+            'markProjectClean',
+            'markProjectDirty',
+            'scheduleDraftSave',
+        ],
+        runtimeSync: [
+            'syncSharedConfigForRun',
+            'prepareFormDataWithWorkspace',
+            'primeRunRequestContext',
+            'clearStopAckTimer',
+            'refreshUiState',
+            'refreshMetrics',
+            'bootstrapEventCursor',
+            'monitorRealtimeChannel',
+            'startEventStream',
+            'closeEventStream',
+        ],
+    };
+    Object.entries(required).forEach(([scope, methods]) => {
+        const api = root[scope];
+        if (!api || typeof api !== 'object') {
+            throw new Error(`KACF.${scope} namespace missing`);
+        }
+        methods.forEach((name) => {
+            if (typeof api[name] !== 'function') {
+                throw new Error(`KACF.${scope}.${name} is not available`);
+            }
+        });
+    });
+}
+
+assertRuntimeActionDependencies();
+
+const {
+    txt,
+    fmt,
+    isReadOnlyView,
+    goToRunningProjectView,
+    currentLogBucket,
+    viewLogBucket,
+    sanitizeDiffText,
+    setRunActionButtons,
+    setRunningProjectIndicator,
+    setProjectControlsDisabled,
+    applyReadOnlyMode,
+    updateGoRunningProjectButton,
+    autoFillProjectNameFromGoal,
+    applySharedConfigToInputs,
+    initLanguagePack,
+    isNarrowViewport,
+    setSidebarCollapsed,
+    setSidebarMobileOpen,
+    applySidebarLayout,
+    normalizeLanguageCode,
+    switchLanguage,
+    renderLanguageOptions,
+    updateSharedConfigFromInputs,
+    maybeWarnLargeCharLimit,
+} = window.KACF.state;
+const {
+    fetchUiCacheFromServer,
+    writeBucketUiState,
+    renderClarifyQuestions,
+    renderUiForViewBucket,
+    renderDiffPanel,
+    resetBucketRuntimeUiState,
+    bindGlobalOptionInput,
+    applyGlobalOptionsToInputs,
+    scheduleUiCacheSave,
+    renderCurrentLogView,
+} = window.KACF.uiCache;
+const { setStatus, setRunState, appendLog } = window.KACF.logPipeline;
+const {
+    stopAfterMinutesSetting,
+    markRunSessionStarted,
+    clearUnattendedAutoResumeTimer,
+    autoResumeAttemptsSetting,
+    armManualRunStopTimer,
+    renderUnattendedState,
+    resetRunSessionUiState,
+    resetStopTimerState,
+    scheduleUnattendedAutoResume,
+    applyInterruptedTerminalState,
+    applyStopAcceptedStatus,
+    setAutoSaveState,
+    openGlobalConfigModal,
+    saveGlobalConfig,
+    closeGlobalConfigModal,
+    getFormData,
+} = window.KACF.runtimeState;
+const {
+    ensureWorkspaceForCurrentProject,
+    saveCurrentProject,
+    refreshProjectsFromServer,
+    renderProjectSelector,
+    loadSelectedProject,
+    deleteSelectedProject,
+    createNewProject,
+    syncProjectNameFromSelection,
+    loadProjects,
+    loadProjectConfigForWorkspace,
+    setProjectDraftState,
+    markProjectClean,
+    markProjectDirty,
+    scheduleDraftSave,
+} = window.KACF.projects;
+
 function runtimeSyncApi() {
     return (window.KACF && window.KACF.runtimeSync) || {};
 }

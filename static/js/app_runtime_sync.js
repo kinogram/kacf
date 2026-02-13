@@ -1,10 +1,35 @@
 function assertRuntimeSyncDependencies() {
     const root = window.KACF || {};
     const required = {
-        state: ['txt', 'fmt', 'currentLogBucket'],
-        uiCache: ['persistSharedConfigNow', 'writeBucketUiState', 'renderUiForViewBucket'],
-        logPipeline: ['appendLog', 'setStatus', 'setRunState'],
-        runtimeState: ['syncStoppedStateIfNeeded', 'markRunSessionStarted', 'checkBackendHealth'],
+        state: ['txt', 'fmt', 'currentLogBucket', 'viewLogBucket', 'currentProjectLabel'],
+        uiCache: [
+            'persistSharedConfigNow',
+            'renderClarifyQuestions',
+            'resetBucketRuntimeUiState',
+            'writeBucketUiState',
+            'renderUiForViewBucket',
+            'scheduleUiCacheSave',
+        ],
+        logPipeline: [
+            'appendLog',
+            'setStatus',
+            'setRunState',
+            'hasPendingClarify',
+            'updateDiagnosticsFromLog',
+            'markBackendAlive',
+            'markBackendFailure',
+        ],
+        runtimeState: [
+            'stopAfterMinutesSetting',
+            'markRunSessionStarted',
+            'syncStoppedStateIfNeeded',
+            'checkBackendHealth',
+            'isInterruptedMessage',
+            'finishRunSessionUi',
+            'applyDoneOutcome',
+            'resetStopTimerState',
+            'renderUnattendedState',
+        ],
         projects: ['saveCurrentProject', 'ensureWorkspaceForCurrentProject'],
     };
     Object.entries(required).forEach(([scope, methods]) => {
@@ -21,6 +46,43 @@ function assertRuntimeSyncDependencies() {
 }
 
 assertRuntimeSyncDependencies();
+
+const {
+    txt,
+    fmt,
+    currentLogBucket,
+    viewLogBucket,
+    currentProjectLabel,
+} = window.KACF.state;
+const {
+    persistSharedConfigNow,
+    renderClarifyQuestions,
+    resetBucketRuntimeUiState,
+    writeBucketUiState,
+    renderUiForViewBucket,
+    scheduleUiCacheSave,
+} = window.KACF.uiCache;
+const {
+    appendLog,
+    setStatus,
+    setRunState,
+    hasPendingClarify,
+    updateDiagnosticsFromLog,
+    markBackendAlive,
+    markBackendFailure,
+} = window.KACF.logPipeline;
+const {
+    stopAfterMinutesSetting,
+    markRunSessionStarted,
+    syncStoppedStateIfNeeded,
+    checkBackendHealth,
+    isInterruptedMessage,
+    finishRunSessionUi,
+    applyDoneOutcome,
+    resetStopTimerState,
+    renderUnattendedState,
+} = window.KACF.runtimeState;
+const { saveCurrentProject, ensureWorkspaceForCurrentProject } = window.KACF.projects;
 
 function renderResumeBanner(info) {
     const banner = document.getElementById('resume_banner');

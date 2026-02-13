@@ -172,7 +172,7 @@ KACF_<language_code>_<pack_version>.json
   - `window.KACF.logPipeline`
   - `window.KACF.runtimeState`
   - `window.KACF.projects`
-- `app_runtime_sync.js` 启动时会执行依赖断言，若任一命名空间或关键方法缺失会立即报错。
+- `app_runtime_sync.js` 与 `app_runtime_actions.js` 启动时都会执行依赖断言，若任一命名空间或关键方法缺失会立即报错。
 - 禁止回退到隐式全局 fallback 调用，以避免模块耦合失控。
 
 ## 常用脚本
