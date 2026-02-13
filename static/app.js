@@ -2099,6 +2099,43 @@ function renderResumeBanner(info) {
     banner.style.display = 'block';
 }
 
+function syncManualStopDeadlineFromRuntime(runtime) {
+    const mins = stopAfterMinutesSetting();
+    const serverStartMs = Number(runtime?.last_start_unix || 0) * 1000;
+    if (mins > 0 && serverStartMs > 0) {
+        manualRunStopDeadlineMs = serverStartMs + mins * 60 * 1000;
+        manualRunStopExpired = Date.now() >= manualRunStopDeadlineMs;
+    } else if (mins > 0 && manualRunStopDeadlineMs <= 0) {
+        manualRunStopDeadlineMs = Date.now() + mins * 60 * 1000;
+    }
+}
+
+function syncRunningUiFromRuntime(runtime) {
+    syncManualStopDeadlineFromRuntime(runtime);
+    const label = (runtime?.last_workspace || '').trim() || txt('running_backend_task', '');
+    if (!activeRunLogBucket) {
+        activeRunLogBucket = `runtime:${label}`;
+    }
+    unattendedAutoResumeRemaining = autoResumeAttemptsSetting();
+    markRunSessionStarted(label, false);
+    if (hasPendingClarify(currentLogBucket())) {
+        setStatus(txt('status_need_clarify', ''), 'status-warn');
+        setRunState('waiting_clarify', txt('run_waiting_clarify', ''));
+        return;
+    }
+    setStatus(txt('status_running_detected', ''), 'status-warn');
+    setRunState('running', txt('run_running', ''));
+}
+
+function syncStoppedUiFromRuntime() {
+    syncStoppedStateIfNeeded(txt('sync_reason_backend_stopped', ''));
+    resetBucketRuntimeUiState(currentLogBucket());
+    if (viewLogBucket() === currentLogBucket()) {
+        renderClarifyQuestions([], currentLogBucket(), true);
+    }
+    resetRunSessionUiState();
+}
+
 async function refreshUiState() {
     try {
         const resp = await fetch('/ui_state');
@@ -2107,32 +2144,9 @@ async function refreshUiState() {
         const data = await resp.json();
         renderResumeBanner(data);
         if (data.runtime && data.runtime.running) {
-            const mins = stopAfterMinutesSetting();
-            const serverStartMs = Number(data.runtime.last_start_unix || 0) * 1000;
-            if (mins > 0 && serverStartMs > 0) {
-                manualRunStopDeadlineMs = serverStartMs + mins * 60 * 1000;
-                manualRunStopExpired = Date.now() >= manualRunStopDeadlineMs;
-            } else if (mins > 0 && manualRunStopDeadlineMs <= 0) {
-                manualRunStopDeadlineMs = Date.now() + mins * 60 * 1000;
-            }
-            const label = (data.runtime.last_workspace || '').trim() || txt('running_backend_task', '');
-            if (!activeRunLogBucket) {
-                activeRunLogBucket = `runtime:${label}`;
-            }
-            unattendedAutoResumeRemaining = autoResumeAttemptsSetting();
-            markRunSessionStarted(label, false);
-            if (hasPendingClarify(currentLogBucket())) {
-                setStatus(txt('status_need_clarify', ''), 'status-warn');
-                setRunState('waiting_clarify', txt('run_waiting_clarify', ''));
-            } else {
-                setStatus(txt('status_running_detected', ''), 'status-warn');
-                setRunState('running', txt('run_running', ''));
-            }
+            syncRunningUiFromRuntime(data.runtime);
         } else {
-            syncStoppedStateIfNeeded(txt('sync_reason_backend_stopped', ''));
-            resetBucketRuntimeUiState(currentLogBucket());
-            if (viewLogBucket() === currentLogBucket()) renderClarifyQuestions([], currentLogBucket(), true);
-            resetRunSessionUiState();
+            syncStoppedUiFromRuntime();
         }
     } catch (_e) {
         markBackendFailure('ui_state');
