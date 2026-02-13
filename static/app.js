@@ -78,10 +78,6 @@ const BACKEND_COMM_BUTTON_IDS = [
     'project_delete_btn',
     'open_global_config_btn',
     'save_global_config_btn',
-    'preset_webapp_btn',
-    'preset_cli_btn',
-    'preset_desktop_btn',
-    'reset_form_btn',
 ];
 const PROJECT_CONTROL_IDS = [
     'project_name',
@@ -95,7 +91,6 @@ const CONFIG_EDIT_IDS = [
     'precheck_cmd', 'history_max_messages', 'history_max_chars', 'release_gate_threshold',
     'unattended_mode',
     'goal', 'eval_cmd', 'success_regex', 'remote', 'remote_url', 'branch',
-    'preset_webapp_btn', 'preset_cli_btn', 'preset_desktop_btn', 'reset_form_btn',
     'open_global_config_btn', 'language_select',
 ];
 
@@ -1229,10 +1224,6 @@ function applyStaticCopyToDom() {
         ['project_save_btn', 'btn_project_save'],
         ['project_load_btn', 'btn_project_load'],
         ['project_delete_btn', 'btn_project_delete'],
-        ['preset_webapp_btn', 'btn_preset_webapp'],
-        ['preset_cli_btn', 'btn_preset_cli'],
-        ['preset_desktop_btn', 'btn_preset_desktop'],
-        ['reset_form_btn', 'btn_reset_form'],
         ['clarify_submit_btn', 'btn_clarify_submit'],
         ['clear_log_btn', 'btn_clear_log'],
         ['export_log_btn', 'btn_export_log'],
@@ -2439,34 +2430,6 @@ function escapeHtml(text) {
         .replace(/>/g, '&gt;');
 }
 
-function applyPreset(kind) {
-    const goal = document.getElementById('goal');
-    const evalCmd = document.getElementById('eval_cmd');
-
-    if (kind === 'webapp') {
-        goal.value = txt('preset_goal_webapp', '');
-        evalCmd.value = 'bash scripts/run_tests.sh';
-    } else if (kind === 'cli') {
-        goal.value = txt('preset_goal_cli', '');
-        evalCmd.value = 'bash scripts/run_tests.sh';
-    } else if (kind === 'desktop') {
-        goal.value = txt('preset_goal_desktop', '');
-        evalCmd.value = 'bash scripts/run_tests.sh';
-    }
-    autoFillProjectNameFromGoal(false);
-    markProjectDirty();
-    scheduleDraftSave();
-}
-
-function resetForm() {
-    applyFormData(defaultFormData());
-    projectNameManualOverride = false;
-    lastAutoProjectName = '';
-    autoFillProjectNameFromGoal(true);
-    markProjectDirty();
-    scheduleDraftSave();
-}
-
 function bindAutoSave() {
     const ids = ['auto_revert_profile', 'precheck_cmd', 'history_max_messages', 'history_max_chars', 'release_gate_threshold', 'unattended_mode', 'goal', 'eval_cmd', 'success_regex', 'remote', 'remote_url', 'branch'];
     ids.forEach(id => {
@@ -2513,10 +2476,6 @@ function bindEvents() {
     document.getElementById('export_log_btn').addEventListener('click', exportLogs);
     document.getElementById('export_snapshot_btn').addEventListener('click', exportSnapshot);
     document.getElementById('export_report_btn').addEventListener('click', exportReleaseReport);
-    document.getElementById('preset_webapp_btn').addEventListener('click', () => applyPreset('webapp'));
-    document.getElementById('preset_cli_btn').addEventListener('click', () => applyPreset('cli'));
-    document.getElementById('preset_desktop_btn').addEventListener('click', () => applyPreset('desktop'));
-    document.getElementById('reset_form_btn').addEventListener('click', resetForm);
     document.getElementById('project_new_btn').addEventListener('click', createNewProject);
     document.getElementById('project_save_btn').addEventListener('click', () => { saveCurrentProject(); });
     document.getElementById('project_load_btn').addEventListener('click', loadSelectedProject);
