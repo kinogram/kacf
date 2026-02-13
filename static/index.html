@@ -2673,6 +2673,11 @@ async function resumeSession() {
             setStatus(txt('status_readonly_view', ''), 'status-danger');
             return;
         }
+        const selectedProjectId = document.getElementById('project_selector')?.value || '';
+        if (!selectedProjectId) {
+            setStatus(txt('status_need_select_project', ''), 'status-danger');
+            return;
+        }
         const synced = await persistSharedConfigNow();
         if (!synced) {
             setStatus(txt('status_shared_config_sync_failed', ''), 'status-danger');
@@ -2690,7 +2695,6 @@ async function resumeSession() {
         }
         activeRunLogBucket = currentLogBucket();
         activeRunProjectLabel = currentProjectLabel();
-        const selectedProjectId = document.getElementById('project_selector')?.value || '';
         const resp = await fetch('/resume', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
