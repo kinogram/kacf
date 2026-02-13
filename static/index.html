@@ -364,7 +364,7 @@
                 </div>
             </div>
             <div class="buttons">
-                <button class="btn-ghost" id="project_new_btn">新建草稿</button>
+                <button class="btn-ghost" id="project_new_btn">新建项目</button>
                 <button class="btn-ghost" id="project_save_btn">保存当前项目</button>
                 <button class="btn-ghost" id="project_load_btn">载入当前项目</button>
                 <button class="btn-ghost" id="project_delete_btn">删除当前项目</button>
@@ -471,7 +471,7 @@
             <div class="hint" id="runbar_text">运行状态：空闲</div>
             <div class="hint" id="running_project_text">当前运行项目：无</div>
             <div class="hint" id="readonly_mode_text">只读模式：关闭</div>
-            <div class="hint" id="auto_save_state">草稿状态：未保存</div>
+            <div class="hint" id="auto_save_state"></div>
             <div class="hint" id="diagnostics">诊断：暂无</div>
             <div class="hint" id="metrics_text">运行指标：暂无</div>
             <div class="hint" id="digest_dist_text">错误分布(5m)：暂无</div>
@@ -1362,8 +1362,8 @@ function setProjectDraftState() {
     const el = document.getElementById('project_dirty_state');
     if (!el) return;
     el.textContent = projectDraftDirty
-        ? txt('project_draft_dirty', '项目草稿：有未保存修改')
-        : txt('project_draft_clean', '项目草稿：未修改');
+        ? txt('project_state_dirty', '项目状态：有未保存修改')
+        : txt('project_state_clean', '项目状态：已同步');
     el.style.color = projectDraftDirty ? '#9a6700' : '';
 }
 
@@ -1731,7 +1731,7 @@ async function deleteSelectedProject() {
 }
 
 function createNewProject() {
-    if (!shouldProceedWithDirtyDraft(txt('action_new_draft', '并新建草稿'))) return;
+    if (!shouldProceedWithDirtyDraft(txt('action_new_project', '并新建项目'))) return;
     const cur = getFormData();
     const defaults = defaultFormData();
     defaults.api_key = cur.api_key;
@@ -1750,29 +1750,7 @@ function createNewProject() {
     renderUiForViewBucket();
     applyReadOnlyMode();
     markProjectClean();
-    setStatus(txt('status_new_project_draft', '已切换到新项目草稿，请填写需求后保存项目。'), 'status-warn');
-}
-
-async function saveDraftRemote() {
-    ensureWorkspaceForCurrentProject();
-    const body = getFormData();
-    if (!body.workspace) return;
-    try {
-        const resp = await fetch('/draft', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-        });
-        if (!resp.ok) throw new Error('save failed');
-        setAutoSaveState(`草稿状态：已保存 (${nowText()})`);
-    } catch (_e) {
-        setAutoSaveState(`草稿状态：保存失败 (${nowText()})`);
-    }
-}
-
-function draftQueryByWorkspace() {
-    const ws = document.getElementById('workspace').value.trim();
-    return ws ? `?workspace=${encodeURIComponent(ws)}` : '';
+    setStatus(txt('status_new_project', '已切换到新项目，请继续编辑，系统会自动保存。'), 'status-warn');
 }
 
 function shouldAutoSaveProjectNow() {
@@ -1811,26 +1789,12 @@ async function autoSaveProjectFromForm() {
 function scheduleDraftSave() {
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
-        saveDraftRemote();
+        setAutoSaveState(fmt('autosave_project_pending', '项目状态：正在自动保存 ({time})', { time: nowText() }));
     }, 400);
     if (projectAutoSaveTimer) clearTimeout(projectAutoSaveTimer);
     projectAutoSaveTimer = setTimeout(() => {
         autoSaveProjectFromForm();
     }, 550);
-}
-
-async function loadDraft() {
-    try {
-        const resp = await fetch(`/draft${draftQueryByWorkspace()}`);
-        if (resp.ok) {
-            const data = await resp.json();
-            applyFormData(data);
-            setAutoSaveState('草稿状态：已从服务器恢复');
-            return;
-        }
-    } catch (_e) {
-        setAutoSaveState('草稿状态：读取失败');
-    }
 }
 
 async function loadProjectConfigForWorkspace() {
@@ -2139,7 +2103,6 @@ async function startSession() {
             const msg = await resp.text();
             throw new Error(`${resp.status} ${msg}`);
         }
-        await saveDraftRemote();
         setStatus(txt('status_started_new_task', '已启动新任务。系统将自动写代码并执行评测。'), 'status-warn');
         setRunningProjectIndicator(activeRunProjectLabel);
         setProjectControlsDisabled(true);
@@ -2458,6 +2421,22 @@ function bindEvents() {
     });
 }
 
+function autoOpenLatestProject() {
+    const items = loadProjects();
+    if (!items.length) return;
+    const current = document.getElementById('project_selector')?.value || '';
+    if (current) return;
+    const latest = items
+        .slice()
+        .sort((a, b) => Number(b?.updated_at || 0) - Number(a?.updated_at || 0))[0];
+    if (!latest || !latest.id) return;
+    const sel = document.getElementById('project_selector');
+    if (!sel) return;
+    sel.value = latest.id;
+    loadSelectedProject(true);
+    setAutoSaveState(fmt('autosave_project_restored', '项目状态：已恢复最近项目（{name}）', { name: latest.name || latest.id }));
+}
+
 function exportLogs() {
     const content = document.getElementById('log').textContent || '';
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
@@ -2568,11 +2547,11 @@ async function init() {
     document.getElementById('stop_btn').disabled = true;
     document.getElementById('revert_btn').disabled = true;
     setRunState('idle', txt('run_idle', '空闲'));
-    await loadDraft();
+    setAutoSaveState(fmt('autosave_project_idle', '项目状态：等待自动保存', {}));
     autoFillProjectNameFromGoal(false);
     markProjectClean();
     applySharedConfigToInputs();
-    selectProjectByCurrentForm();
+    autoOpenLatestProject();
     renderCurrentLogView();
     renderUiForViewBucket();
     await loadProjectConfigForWorkspace();

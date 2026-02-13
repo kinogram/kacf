@@ -21,7 +21,6 @@ use crate::protocol::{AgentEvent, AgentRequest, ClarifyAnswer, ClarifyQuestion};
 /// Index HTML page embedded at compile time.
 const INDEX_HTML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/index.html"));
 
-const DRAFT_FILENAME: &str = ".autocoding_webui_draft.json";
 const SESSION_STATE_FILENAME: &str = ".autocoding_state.json";
 const PROJECT_CONFIG_FILENAME: &str = ".autocoding_project.json";
 const UI_CACHE_FILENAME: &str = ".autocoding_webui_cache.json";
@@ -113,15 +112,7 @@ struct ProjectConfigQuery {
 }
 
 #[derive(Debug, Deserialize)]
-struct DraftQuery {
-    #[serde(default)]
-    workspace: String,
-}
-
-#[derive(Debug, Deserialize)]
 struct ResumePayload {
-    #[serde(default)]
-    workspace: String,
     #[serde(default)]
     project_id: String,
 }
@@ -238,7 +229,6 @@ struct ResumeMeta {
 #[derive(Debug, Serialize)]
 struct UiStateResponse {
     runtime: RuntimeStatus,
-    draft_exists: bool,
     resume: Option<ResumeInfo>,
 }
 
@@ -612,27 +602,6 @@ fn require_managed_workspace(workspace: &str) -> Result<PathBuf, String> {
         .join(rel))
 }
 
-fn read_draft(path: &Path) -> Option<DraftPayload> {
-    let content = fs::read_to_string(path).ok()?;
-    serde_json::from_str(&content).ok()
-}
-
-fn draft_path_for_workspace(workspace: &str) -> Option<PathBuf> {
-    let full = require_managed_workspace(workspace).ok()?;
-    Some(full.join(DRAFT_FILENAME))
-}
-
-fn save_draft(path: &Path, draft: &DraftPayload) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let json = serde_json::to_string_pretty(draft)?;
-    let tmp = path.with_extension("tmp");
-    fs::write(&tmp, json)?;
-    fs::rename(tmp, path)?;
-    Ok(())
-}
-
 fn save_project_config(
     workspace: &str,
     profile: &str,
@@ -852,42 +821,6 @@ async fn start_session(data: web::Data<AppState>, body: web::Json<StartPayload>)
     }
 }
 
-async fn save_draft_config(
-    _data: web::Data<AppState>,
-    body: web::Json<DraftPayload>,
-) -> impl Responder {
-    let payload = body.into_inner();
-    let Some(draft_path) = draft_path_for_workspace(&payload.workspace) else {
-        return HttpResponse::BadRequest().body("workspace is empty");
-    };
-    match save_draft(&draft_path, &payload) {
-        Ok(_) => {
-            if let Err(e) = save_project_config(
-                &payload.workspace,
-                &payload.auto_revert_profile,
-                &payload.precheck_cmd,
-                &payload.history_max_messages,
-                &payload.history_max_chars,
-                &payload.release_gate_threshold,
-            ) {
-                eprintln!("save project config during draft save failed: {}", e);
-            }
-            HttpResponse::Ok().body("saved")
-        }
-        Err(e) => HttpResponse::InternalServerError().body(format!("save draft failed: {}", e)),
-    }
-}
-
-async fn get_draft_config(_data: web::Data<AppState>, query: web::Query<DraftQuery>) -> impl Responder {
-    let Some(ws_path) = draft_path_for_workspace(&query.workspace) else {
-        return HttpResponse::BadRequest().body("workspace is empty");
-    };
-    match read_draft(&ws_path) {
-        Some(draft) => HttpResponse::Ok().json(draft),
-        None => HttpResponse::NotFound().body("draft not found"),
-    }
-}
-
 async fn get_project_config(query: web::Query<ProjectConfigQuery>) -> impl Responder {
     match read_project_config(&query.workspace) {
         Some(cfg) => HttpResponse::Ok().json(cfg),
@@ -1061,21 +994,16 @@ async fn resume_session(
     body: web::Json<ResumePayload>,
 ) -> impl Responder {
     let payload = body.into_inner();
-    let draft: DraftPayload = if !payload.project_id.trim().is_empty() {
+    if payload.project_id.trim().is_empty() {
+        return HttpResponse::BadRequest().body("project_id is empty");
+    }
+    let draft: DraftPayload = {
         let _guard = data.projects_lock.lock().unwrap();
         let cache = read_ui_cache();
         let Some(project) = cache.projects.into_iter().find(|p| p.id == payload.project_id) else {
             return HttpResponse::NotFound().body("project not found");
         };
         project.snapshot
-    } else {
-        let Some(draft_path) = draft_path_for_workspace(&payload.workspace) else {
-            return HttpResponse::BadRequest().body("workspace is empty");
-        };
-        let Some(d) = read_draft(&draft_path) else {
-            return HttpResponse::NotFound().body("draft not found");
-        };
-        d
     };
     if draft.api_key.trim().is_empty() {
         return HttpResponse::BadRequest().body("api_key is empty in snapshot");
@@ -1099,13 +1027,13 @@ async fn resume_session(
 
 async fn get_ui_state(data: web::Data<AppState>) -> impl Responder {
     let runtime = data.runtime.lock().unwrap().clone();
-    let draft = draft_path_for_workspace(&runtime.last_workspace).and_then(|p| read_draft(&p));
-    let resume = draft
-        .as_ref()
-        .and_then(|d| read_resume_info(&d.workspace, &d.goal));
+    let resume = if runtime.last_workspace.trim().is_empty() {
+        None
+    } else {
+        read_resume_info(&runtime.last_workspace, &runtime.last_goal)
+    };
     HttpResponse::Ok().json(UiStateResponse {
         runtime,
-        draft_exists: draft.is_some(),
         resume,
     })
 }
@@ -1740,8 +1668,6 @@ pub async fn run_web_server(
             .route("/start", web::post().to(start_session))
             .route("/stop", web::post().to(stop_session))
             .route("/resume", web::post().to(resume_session))
-            .route("/draft", web::post().to(save_draft_config))
-            .route("/draft", web::get().to(get_draft_config))
             .route("/project_config", web::get().to(get_project_config))
             .route("/projects", web::get().to(list_projects))
             .route("/projects", web::post().to(upsert_project))
