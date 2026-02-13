@@ -61,6 +61,7 @@
   "status_running_not_saved_project": "The running task is not a saved project and cannot be located in one click.",
   "status_resume_alloc_workspace_failed": "Resume failed: unable to assign a workspace directory. Save the project first.",
   "status_start_alloc_workspace_failed": "Start failed: unable to assign a workspace directory. Save the project first.",
+  "status_start_shared_config_sync_failed": "Start failed: unable to sync global settings. Please retry.",
   "status_start_api_key_empty": "Start failed: API Key is empty.",
   "status_shared_config_sync_failed": "Resume failed: unable to sync global settings. Please retry.",
   "status_api_key_fetch_failed": "Failed to load API Key. Please try again.",
