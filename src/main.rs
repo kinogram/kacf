@@ -1,12 +1,15 @@
 mod deepseek_api;
 mod git_utils;
 mod protocol;
+mod protocol_auto_revert;
 mod protocol_failure;
 mod protocol_patch;
 mod runner;
 mod web_ui;
 mod web_ui_analytics;
+mod web_ui_api_key;
 mod web_ui_languages;
+mod web_ui_slug;
 mod workspace;
 
 use crossbeam_channel::unbounded;

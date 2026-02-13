@@ -6,13 +6,10 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use crate::protocol_auto_revert;
 use crate::{deepseek_api, git_utils, runner, workspace};
 use crate::{protocol_failure, protocol_patch};
 use std::fs;
-
-thread_local! {
-    static CURRENT_AUTO_REVERT_PROFILE: RefCell<Option<String>> = const { RefCell::new(None) };
-}
 
 /// Messages sent from the UI thread to the agent thread.
 #[derive(Debug)]
@@ -298,9 +295,7 @@ async fn run_session(
     tx_evt: &Sender<AgentEvent>,
     stop_flag: &mut bool,
 ) -> Result<()> {
-    CURRENT_AUTO_REVERT_PROFILE.with(|v| {
-        *v.borrow_mut() = Some(cfg.auto_revert_profile.to_lowercase());
-    });
+    protocol_auto_revert::set_current_auto_revert_profile(&cfg.auto_revert_profile);
     workspace::ensure_dir(&cfg.workspace)?;
     // Ensure a git repository is initialized so we can commit diffs.
     git_utils::init_repo_if_needed(&cfg.workspace)?;
@@ -1131,86 +1126,6 @@ fn read_precheck_cmd() -> Option<String> {
     Some(cmd)
 }
 
-fn auto_revert_on_repeat() -> bool {
-    bool_env("AUTOCODING_AUTO_REVERT_ON_REPEAT", false)
-}
-
-fn auto_revert_repeat_count() -> u32 {
-    read_u32_env("AUTOCODING_AUTO_REVERT_REPEAT_COUNT", 2, 20).unwrap_or_else(|| {
-        match auto_revert_profile().as_str() {
-            "conservative" => 4,
-            "aggressive" => 2,
-            _ => 3,
-        }
-    })
-}
-
-fn auto_revert_min_severity() -> u8 {
-    read_u8_env("AUTOCODING_AUTO_REVERT_MIN_SEVERITY", 0, 3).unwrap_or_else(|| {
-        match auto_revert_profile().as_str() {
-            "conservative" => 3,
-            "aggressive" => 1,
-            _ => 2,
-        }
-    })
-}
-
-fn auto_revert_on_worse() -> bool {
-    bool_env("AUTOCODING_AUTO_REVERT_ON_WORSE", true)
-}
-
-fn auto_revert_min_worse_delta() -> u8 {
-    read_u8_env("AUTOCODING_AUTO_REVERT_MIN_WORSE_DELTA", 0, 3).unwrap_or_else(|| {
-        match auto_revert_profile().as_str() {
-            "conservative" => 2,
-            "aggressive" => 0,
-            _ => 1,
-        }
-    })
-}
-
-fn auto_revert_cooldown_iters() -> u32 {
-    read_u32_env("AUTOCODING_AUTO_REVERT_COOLDOWN_ITERS", 0, 20).unwrap_or_else(|| {
-        match auto_revert_profile().as_str() {
-            "conservative" => 3,
-            "aggressive" => 1,
-            _ => 2,
-        }
-    })
-}
-
-fn auto_revert_profile() -> String {
-    if let Some(cfg_profile) = CURRENT_AUTO_REVERT_PROFILE.with(|v| v.borrow().clone()) {
-        return cfg_profile;
-    }
-    std::env::var("AUTOCODING_AUTO_REVERT_PROFILE")
-        .ok()
-        .map(|v| v.to_lowercase())
-        .filter(|v| matches!(v.as_str(), "conservative" | "balanced" | "aggressive"))
-        .unwrap_or_else(|| "balanced".to_string())
-}
-
-fn read_u32_env(key: &str, min: u32, max: u32) -> Option<u32> {
-    std::env::var(key)
-        .ok()
-        .and_then(|v| v.parse::<u32>().ok())
-        .filter(|v| *v >= min && *v <= max)
-}
-
-fn read_u8_env(key: &str, min: u8, max: u8) -> Option<u8> {
-    std::env::var(key)
-        .ok()
-        .and_then(|v| v.parse::<u8>().ok())
-        .filter(|v| *v >= min && *v <= max)
-}
-
-fn bool_env(key: &str, default: bool) -> bool {
-    std::env::var(key)
-        .ok()
-        .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes" | "on"))
-        .unwrap_or(default)
-}
-
 fn failure_severity(category: &str) -> u8 {
     protocol_failure::failure_severity(category)
 }
@@ -1225,47 +1140,22 @@ fn should_auto_revert(
     previous_severity: u8,
     iter: u32,
 ) -> bool {
-    if !auto_revert_on_repeat() {
+    if !protocol_auto_revert::auto_revert_on_repeat() {
         return false;
     }
-    let cooldown = auto_revert_cooldown_iters();
+    let cooldown = protocol_auto_revert::auto_revert_cooldown_iters();
     if repair.last_auto_revert_iter > 0 && iter < repair.last_auto_revert_iter + cooldown {
         return false;
     }
-    let repeated_limit = auto_revert_repeat_count();
+    let repeated_limit = protocol_auto_revert::auto_revert_repeat_count();
     let severity_now = failure_severity(digest.category);
-    let severity_gate = severity_now >= auto_revert_min_severity();
+    let severity_gate = severity_now >= protocol_auto_revert::auto_revert_min_severity();
     let repeated_gate = repair.consecutive_same_failure >= repeated_limit;
-    let min_delta = auto_revert_min_worse_delta();
-    let worsened_gate =
-        auto_revert_on_worse() && severity_now >= previous_severity.saturating_add(min_delta);
-    let signature_gate = auto_revert_signature_allowed(&digest.signature);
+    let min_delta = protocol_auto_revert::auto_revert_min_worse_delta();
+    let worsened_gate = protocol_auto_revert::auto_revert_on_worse()
+        && severity_now >= previous_severity.saturating_add(min_delta);
+    let signature_gate = protocol_auto_revert::auto_revert_signature_allowed(&digest.signature);
     (repeated_gate || worsened_gate) && severity_gate && signature_gate
-}
-
-fn auto_revert_signature_allowed(signature: &str) -> bool {
-    let sig = signature.to_lowercase();
-    let deny = read_keyword_list("AUTOCODING_AUTO_REVERT_SIGNATURE_DENY");
-    if !deny.is_empty() && deny.iter().any(|k| sig.contains(k)) {
-        return false;
-    }
-    let allow = read_keyword_list("AUTOCODING_AUTO_REVERT_SIGNATURE_ALLOW");
-    if allow.is_empty() {
-        return true;
-    }
-    allow.iter().any(|k| sig.contains(k))
-}
-
-fn read_keyword_list(key: &str) -> Vec<String> {
-    std::env::var(key)
-        .ok()
-        .map(|v| {
-            v.split(',')
-                .map(|x| x.trim().to_lowercase())
-                .filter(|x| !x.is_empty())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default()
 }
 
 fn validate_patch_payload(summary: &str, files: &[FileWrite]) -> Result<()> {
@@ -1421,11 +1311,14 @@ fn now_unix() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        auto_revert_min_severity, auto_revert_on_repeat, auto_revert_repeat_count,
-        auto_revert_signature_allowed, category_changed_worse, compact_assistant_text,
-        failure_severity, trim_message_history_for_speed, validate_patch_payload, FileWrite,
+        category_changed_worse, compact_assistant_text, failure_severity,
+        trim_message_history_for_speed, validate_patch_payload, FileWrite,
     };
     use crate::deepseek_api::ChatMessage;
+    use crate::protocol_auto_revert::{
+        auto_revert_min_severity, auto_revert_on_repeat, auto_revert_repeat_count,
+        auto_revert_signature_allowed,
+    };
 
     #[test]
     fn trim_history_keeps_system_and_recent_messages() {
