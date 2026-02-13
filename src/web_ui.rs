@@ -132,6 +132,8 @@ struct ProjectConfigQuery {
 struct ResumePayload {
     #[serde(default)]
     project_id: String,
+    #[serde(default)]
+    unattended_mode: bool,
 }
 
 impl DraftPayload {
@@ -707,6 +709,7 @@ async fn resume_session(
         snapshot
     };
     normalize_resume_draft_defaults(&mut draft);
+    draft.unattended_mode = payload.unattended_mode;
     if draft.api_key.trim().is_empty() {
         return HttpResponse::BadRequest().body("api_key is empty in snapshot");
     }

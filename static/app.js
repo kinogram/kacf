@@ -2145,7 +2145,13 @@ function handleEvent(evt) {
             renderDiff(evt.diff);
             break;
         case 'need_clarify':
-            showClarify(evt.questions);
+            if (activeRunUnattendedMode) {
+                appendLog('[Unattended] clarify event ignored');
+                writeBucketUiState(currentLogBucket(), { clarify_questions: [] });
+                if (viewLogBucket() === currentLogBucket()) renderUiForViewBucket();
+            } else {
+                showClarify(evt.questions);
+            }
             break;
         case 'done':
             clearStopAckTimer();
@@ -2264,6 +2270,7 @@ async function startSession() {
         runSessionActive = true;
         activeRunUnattendedMode = !!body.unattended_mode;
         unattendedAutoResumeRemaining = autoResumeAttemptsSetting();
+        writeBucketUiState(activeRunLogBucket, { clarify_questions: [] });
         clearUnattendedAutoResumeTimer();
         armManualRunStopTimer();
         renderUnattendedState();
@@ -2326,6 +2333,7 @@ async function resumeSession(opts) {
             body: JSON.stringify({
                 workspace: body.workspace,
                 project_id: selectedProjectId,
+                unattended_mode: !!body.unattended_mode,
             }),
         });
         if (!resp.ok) {
@@ -2338,9 +2346,11 @@ async function resumeSession(opts) {
         runSessionActive = true;
         if (!isAuto) {
             activeRunUnattendedMode = !!body.unattended_mode;
+            unattendedAutoResumeRemaining = autoResumeAttemptsSetting();
         } else {
             unattendedAutoResumeRemaining = autoResumeAttemptsSetting();
         }
+        writeBucketUiState(activeRunLogBucket, { clarify_questions: [] });
         const mins = stopAfterMinutesSetting();
         if (mins > 0 && manualRunStopDeadlineMs <= 0) {
             manualRunStopDeadlineMs = Date.now() + mins * 60 * 1000;
