@@ -16,6 +16,10 @@
                 <button class="btn-ghost" id="sidebar_toggle_btn"></button>
             </div>
             <div class="sidebar-content">
+                <div>
+                    <label for="unattended_mode" id="label_unattended_mode"></label>
+                    <input id="unattended_mode" type="checkbox">
+                </div>
                 <h2 class="title" id="section_projects_title"></h2>
                 <p class="sub" id="section_projects_sub"></p>
                 <div>
@@ -217,6 +221,16 @@
         <div>
             <label for="language_select" id="label_language"></label>
             <select id="language_select"></select>
+        </div>
+        <div class="row two">
+            <div>
+                <label for="global_auto_resume_attempts" id="label_global_auto_resume_attempts"></label>
+                <input id="global_auto_resume_attempts" type="text" placeholder="">
+            </div>
+            <div>
+                <label for="global_stop_after_minutes" id="label_global_stop_after_minutes"></label>
+                <input id="global_stop_after_minutes" type="text" placeholder="">
+            </div>
         </div>
         <div class="buttons">
             <button id="save_global_config_btn"></button>

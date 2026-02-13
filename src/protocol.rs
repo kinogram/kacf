@@ -24,6 +24,7 @@ pub enum AgentRequest {
         model: String,
         language: String,
         auto_revert_profile: String,
+        unattended_mode: bool,
         resume_from_checkpoint: bool,
         workspace: PathBuf,
         goal: String,
@@ -129,6 +130,7 @@ pub async fn agent_loop(rx_req: Receiver<AgentRequest>, tx_evt: Sender<AgentEven
                 model,
                 language,
                 auto_revert_profile,
+                unattended_mode,
                 resume_from_checkpoint,
                 workspace,
                 goal,
@@ -142,6 +144,7 @@ pub async fn agent_loop(rx_req: Receiver<AgentRequest>, tx_evt: Sender<AgentEven
                     model,
                     language,
                     auto_revert_profile,
+                    unattended_mode,
                     resume_from_checkpoint,
                     workspace,
                     goal,
@@ -260,6 +263,7 @@ struct SessionCfg {
     model: String,
     language: String,
     auto_revert_profile: String,
+    unattended_mode: bool,
     resume_from_checkpoint: bool,
     workspace: PathBuf,
     goal: String,
@@ -360,7 +364,7 @@ async fn run_session(
     // 如果没有历史消息，则初始化系统 prompt 和首条用户消息。
     if messages.is_empty() {
         messages.push(deepseek_api::ChatMessage::system(
-            protocol_system_prompt::system_prompt(&cfg.language),
+            protocol_system_prompt::system_prompt(&cfg.language, cfg.unattended_mode),
         ));
         messages.push(deepseek_api::ChatMessage::user(format!(
             "用户的需求如下：\n{}\n\n你需要作为自编程代理，根据该需求制定项目计划和目标，选择合适的技术栈并创建项目目录结构，编写代码，编译运行程序，分析并修复错误，如此往复循环，直至项目满足需求。为此，你应在项目目录中维护一个自动评测脚本（如 scripts/run_tests.sh），该脚本必须能够编译并运行程序、自动操作程序以执行必要的功能，并检测是否存在错误或未满足的目标。每次生成补丁后，你都需要更新这个评测脚本以反映新的需求。\n首先，请输出 JSON（kind=clarify 或 kind=patch）：如需澄清问题，请用 kind=clarify，并提出关键问题；如无需澄清，请用 kind=patch，并给出包含完整文件内容的补丁，补丁可以先生成项目计划、评测脚本或基本代码使项目能够编译运行。",
@@ -374,6 +378,7 @@ async fn run_session(
         &build_session_state(cfg, &messages, 0, "session_initialized"),
     );
     let mut repair = RepairHeuristics::default();
+    let mut unattended_clarify_used = false;
 
     'outer: for iter in 1..=30 {
         if *stop_flag {
@@ -445,6 +450,30 @@ async fn run_session(
         };
         match parsed {
             ModelJson::Clarify { questions } => {
+                if cfg.unattended_mode {
+                    let count = questions.len();
+                    let once_only = !unattended_clarify_used;
+                    unattended_clarify_used = true;
+                    let _ = tx_evt.send(AgentEvent::Log(format!(
+                        "[Unattended] 模型返回 clarify（questions={}），无人值守模式下将转为自假设继续迭代",
+                        count
+                    )));
+                    messages.push(deepseek_api::ChatMessage::assistant(content));
+                    if once_only {
+                        messages.push(deepseek_api::ChatMessage::user(
+                            "当前为无人值守模式：如有疑问你必须仅此一次集中提出，并立刻基于合理默认假设自答。禁止等待用户回复。现在请直接输出 kind=patch JSON 并继续迭代。后续禁止再输出 kind=clarify。".to_string(),
+                        ));
+                    } else {
+                        messages.push(deepseek_api::ChatMessage::user(
+                            "禁止再次输出 kind=clarify。请基于现有上下文与合理默认假设直接输出 kind=patch JSON，并持续自我迭代直至满足目标。".to_string(),
+                        ));
+                    }
+                    protocol_session_state::save_session_state(
+                        &cfg.workspace,
+                        &build_session_state(cfg, &messages, iter, "unattended_clarify_redirected"),
+                    );
+                    continue;
+                }
                 // Ask the UI for clarification answers.
                 let _ = tx_evt.send(AgentEvent::NeedClarify { questions });
                 // Wait until we receive Clarify or Stop from UI.

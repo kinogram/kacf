@@ -78,6 +78,8 @@ struct StartPayload {
     #[serde(default = "default_auto_revert_profile")]
     auto_revert_profile: String,
     #[serde(default)]
+    unattended_mode: bool,
+    #[serde(default)]
     precheck_cmd: String,
     #[serde(default)]
     history_max_messages: String,
@@ -104,6 +106,8 @@ struct DraftPayload {
     language: String,
     #[serde(default = "default_auto_revert_profile")]
     auto_revert_profile: String,
+    #[serde(default)]
+    unattended_mode: bool,
     #[serde(default)]
     precheck_cmd: String,
     #[serde(default)]
@@ -144,6 +148,7 @@ impl DraftPayload {
             model: self.model,
             language: self.language,
             auto_revert_profile: self.auto_revert_profile,
+            unattended_mode: self.unattended_mode,
             precheck_cmd: self.precheck_cmd,
             history_max_messages: self.history_max_messages,
             history_max_chars: self.history_max_chars,
@@ -301,6 +306,8 @@ pub(crate) struct MetricsResponse {
 pub(crate) struct ProjectConfig {
     auto_revert_profile: String,
     #[serde(default)]
+    unattended_mode: bool,
+    #[serde(default)]
     precheck_cmd: String,
     #[serde(default)]
     history_max_messages: String,
@@ -332,6 +339,8 @@ pub(crate) struct UiCachePayload {
     #[serde(default)]
     pub(crate) shared_config: Option<SharedConfig>,
     #[serde(default)]
+    pub(crate) global_options: Option<GlobalOptions>,
+    #[serde(default)]
     pub(crate) project_logs: std::collections::BTreeMap<String, String>,
     #[serde(default)]
     pub(crate) project_ui_state: std::collections::BTreeMap<String, serde_json::Value>,
@@ -350,11 +359,21 @@ pub(crate) struct SharedConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub(crate) struct GlobalOptions {
+    #[serde(default)]
+    pub(crate) auto_resume_attempts: String,
+    #[serde(default)]
+    pub(crate) stop_after_minutes: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub(crate) struct UiCachePatch {
     #[serde(default)]
     pub(crate) projects: Option<Vec<WebProject>>,
     #[serde(default)]
     pub(crate) shared_config: Option<SharedConfig>,
+    #[serde(default)]
+    pub(crate) global_options: Option<GlobalOptions>,
     #[serde(default)]
     pub(crate) project_logs: Option<std::collections::BTreeMap<String, String>>,
     #[serde(default)]
@@ -409,6 +428,7 @@ fn require_managed_workspace(workspace: &str) -> Result<PathBuf, String> {
 fn save_project_config(
     workspace: &str,
     profile: &str,
+    unattended_mode: bool,
     precheck_cmd: &str,
     history_max_messages: &str,
     history_max_chars: &str,
@@ -418,6 +438,7 @@ fn save_project_config(
 ) -> std::io::Result<()> {
     let cfg = ProjectConfig {
         auto_revert_profile: profile.to_string(),
+        unattended_mode,
         precheck_cmd: precheck_cmd.to_string(),
         history_max_messages: history_max_messages.to_string(),
         history_max_chars: history_max_chars.to_string(),
@@ -522,6 +543,7 @@ fn start_from_payload(
         model: payload.model,
         language: payload.language,
         auto_revert_profile: auto_revert_profile.clone(),
+        unattended_mode: payload.unattended_mode,
         resume_from_checkpoint,
         workspace: workspace_full.clone(),
         goal: payload.goal.clone(),
@@ -531,6 +553,7 @@ fn start_from_payload(
     if let Err(e) = save_project_config(
         &payload.workspace,
         &auto_revert_profile,
+        payload.unattended_mode,
         &payload.precheck_cmd,
         &payload.history_max_messages,
         &payload.history_max_chars,

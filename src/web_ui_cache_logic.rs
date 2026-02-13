@@ -8,6 +8,9 @@ pub(crate) fn apply_ui_cache_patch(
     if let Some(v) = patch.shared_config {
         payload.shared_config = Some(v);
     }
+    if let Some(v) = patch.global_options {
+        payload.global_options = Some(v);
+    }
     if let Some(v) = patch.project_logs {
         payload.project_logs = v;
     }

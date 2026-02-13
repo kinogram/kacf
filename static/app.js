@@ -43,6 +43,16 @@ let projectSearchKeyword = '';
 let projectDraftDirty = false;
 let sidebarCollapsed = false;
 let sidebarMobileOpen = false;
+let globalOptions = {
+    auto_resume_attempts: '',
+    stop_after_minutes: '',
+};
+let unattendedAutoResumeRemaining = 0;
+let unattendedAutoResumeTimer = null;
+let activeRunUnattendedMode = false;
+let manualRunStopTimer = null;
+let manualRunStopDeadlineMs = 0;
+let manualRunStopExpired = false;
 let sharedConfig = {
     api_key: '',
     base_url: 'https://api.deepseek.com',
@@ -79,6 +89,7 @@ const CONFIG_EDIT_IDS = [
     'api_key', 'model', 'base_url', 'workspace', 'auto_revert_profile',
     'precheck_cmd', 'history_max_messages', 'history_max_chars', 'release_gate_threshold',
     'session_retry_max', 'session_retry_base_ms',
+    'unattended_mode',
     'goal', 'eval_cmd', 'success_regex', 'remote', 'remote_url', 'branch',
     'preset_webapp_btn', 'preset_cli_btn', 'preset_desktop_btn', 'reset_form_btn',
     'open_global_config_btn', 'language_select',
@@ -89,6 +100,14 @@ function normalizeLanguageCode(raw) {
     if (!v) return '';
     if (!/^[A-Za-z0-9_-]{1,32}$/.test(v)) return '';
     return v;
+}
+
+function parseBoundedInt(raw, min, max, fallback) {
+    const n = Number.parseInt(String(raw || '').trim(), 10);
+    if (!Number.isFinite(n)) return fallback;
+    if (n < min) return min;
+    if (n > max) return max;
+    return n;
 }
 
 function languageLabel(code) {
@@ -332,6 +351,7 @@ function defaultFormData() {
         release_gate_threshold: '',
         session_retry_max: '',
         session_retry_base_ms: '',
+        unattended_mode: false,
         workspace: '',
         goal: '',
         eval_cmd: 'bash scripts/run_tests.sh',
@@ -563,6 +583,12 @@ async function fetchUiCacheFromServer() {
                 language: normalizeLanguageCode(data.shared_config.language || ''),
             };
         }
+        if (data.global_options && typeof data.global_options === 'object') {
+            globalOptions = {
+                auto_resume_attempts: String(data.global_options.auto_resume_attempts || ''),
+                stop_after_minutes: String(data.global_options.stop_after_minutes || ''),
+            };
+        }
         return true;
     } catch (_e) {
         return false;
@@ -574,6 +600,7 @@ function scheduleUiCacheSave() {
     uiCacheSaveTimer = setTimeout(async () => {
         const payload = {
             shared_config: sharedConfig,
+            global_options: globalOptions,
             project_logs: cacheProjectLogs,
             project_ui_state: cacheProjectUiState,
         };
@@ -589,16 +616,31 @@ function scheduleUiCacheSave() {
 
 async function persistSharedConfigNow() {
     updateSharedConfigFromInputs();
+    updateGlobalOptionsFromInputs();
     try {
         const resp = await fetch('/ui_cache', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ shared_config: sharedConfig }),
+            body: JSON.stringify({ shared_config: sharedConfig, global_options: globalOptions }),
         });
         return resp.ok;
     } catch (_e) {
         return false;
     }
+}
+
+function updateGlobalOptionsFromInputs() {
+    globalOptions = {
+        auto_resume_attempts: String(document.getElementById('global_auto_resume_attempts')?.value || '').trim(),
+        stop_after_minutes: String(document.getElementById('global_stop_after_minutes')?.value || '').trim(),
+    };
+}
+
+function applyGlobalOptionsToInputs() {
+    const a = document.getElementById('global_auto_resume_attempts');
+    if (a) a.value = globalOptions.auto_resume_attempts || '';
+    const s = document.getElementById('global_stop_after_minutes');
+    if (s) s.value = globalOptions.stop_after_minutes || '';
 }
 
 function loadProjectUiStateMap() {
@@ -1026,6 +1068,7 @@ function getFormData() {
         release_gate_threshold: document.getElementById('release_gate_threshold').value.trim(),
         session_retry_max: document.getElementById('session_retry_max').value.trim(),
         session_retry_base_ms: document.getElementById('session_retry_base_ms').value.trim(),
+        unattended_mode: !!document.getElementById('unattended_mode')?.checked,
         workspace: document.getElementById('workspace').value.trim(),
         goal: document.getElementById('goal').value.trim(),
         eval_cmd: document.getElementById('eval_cmd').value.trim(),
@@ -1044,6 +1087,10 @@ function applyFormData(d) {
             document.getElementById(k).value = d[k];
         }
     });
+    if (typeof d.unattended_mode === 'boolean') {
+        const el = document.getElementById('unattended_mode');
+        if (el) el.checked = d.unattended_mode;
+    }
     if (typeof d.language === 'string' && d.language) {
         const code = normalizeLanguageCode(d.language);
         if (code) sharedConfig.language = code;
@@ -1062,6 +1109,7 @@ function applyStaticCopyToDom() {
         ['section_config_title', 'section_config_title'],
         ['section_config_sub', 'section_config_sub'],
         ['label_project_name', 'label_project_name'],
+        ['label_unattended_mode', 'label_unattended_mode'],
         ['label_global_config', 'label_global_config'],
         ['label_auto_revert_profile', 'label_auto_revert_profile'],
         ['label_precheck_cmd', 'label_precheck_cmd'],
@@ -1088,6 +1136,8 @@ function applyStaticCopyToDom() {
         ['label_model', 'label_model'],
         ['label_base_url', 'label_base_url'],
         ['label_language', 'label_language'],
+        ['label_global_auto_resume_attempts', 'label_global_auto_resume_attempts'],
+        ['label_global_stop_after_minutes', 'label_global_stop_after_minutes'],
     ];
     staticMap.forEach(([id, key]) => {
         const el = document.getElementById(id);
@@ -1138,6 +1188,8 @@ function applyStaticCopyToDom() {
         ['history_max_chars', 'ph_history_max_chars'],
         ['session_retry_max', 'ph_session_retry_max'],
         ['session_retry_base_ms', 'ph_session_retry_base_ms'],
+        ['global_auto_resume_attempts', 'ph_global_auto_resume_attempts'],
+        ['global_stop_after_minutes', 'ph_global_stop_after_minutes'],
         ['goal', 'ph_goal'],
         ['success_regex', 'ph_success_regex'],
         ['api_key', 'ph_api_key'],
@@ -1174,6 +1226,7 @@ function closeGlobalConfigModal() {
 }
 
 async function saveGlobalConfig() {
+    updateGlobalOptionsFromInputs();
     const wantedLanguage = normalizeLanguageCode(document.getElementById('language_select')?.value || currentLanguage);
     if (wantedLanguage && wantedLanguage !== currentLanguage) {
         const switched = await switchLanguage(wantedLanguage, false);
@@ -1193,6 +1246,70 @@ async function saveGlobalConfig() {
 
 function setAutoSaveState(text) {
     document.getElementById('auto_save_state').textContent = text;
+}
+
+function clearUnattendedAutoResumeTimer() {
+    if (!unattendedAutoResumeTimer) return;
+    clearTimeout(unattendedAutoResumeTimer);
+    unattendedAutoResumeTimer = null;
+}
+
+function clearManualRunStopTimer() {
+    if (!manualRunStopTimer) return;
+    clearTimeout(manualRunStopTimer);
+    manualRunStopTimer = null;
+}
+
+function stopAfterMinutesSetting() {
+    return parseBoundedInt(globalOptions.stop_after_minutes, 0, 24 * 60, 0);
+}
+
+function armManualRunStopTimer() {
+    clearManualRunStopTimer();
+    manualRunStopExpired = false;
+    const mins = stopAfterMinutesSetting();
+    if (mins <= 0) {
+        manualRunStopDeadlineMs = 0;
+        return;
+    }
+    manualRunStopDeadlineMs = Date.now() + mins * 60 * 1000;
+    manualRunStopTimer = setTimeout(() => {
+        manualRunStopExpired = true;
+        appendLog(fmt('log_stop_timer_expired', '', { minutes: mins }));
+        setStatus(fmt('status_stop_timer_wait_round', '', { minutes: mins }), 'status-warn');
+    }, mins * 60 * 1000);
+}
+
+async function triggerStopByTimeout() {
+    if (!runSessionActive || stopRequested) return;
+    manualRunStopExpired = false;
+    appendLog(txt('log_stop_timer_trigger_stop', ''));
+    await stopSession();
+}
+
+function maybeStopOnRoundBoundary(line) {
+    if (!manualRunStopExpired) return;
+    if (!line.startsWith('[Loop] Iteration')) return;
+    triggerStopByTimeout();
+}
+
+function autoResumeAttemptsSetting() {
+    return parseBoundedInt(globalOptions.auto_resume_attempts, 0, 20, 0);
+}
+
+function scheduleUnattendedAutoResume() {
+    if (!activeRunUnattendedMode || unattendedAutoResumeRemaining <= 0) return false;
+    clearUnattendedAutoResumeTimer();
+    const nextTry = unattendedAutoResumeRemaining;
+    unattendedAutoResumeRemaining -= 1;
+    appendLog(fmt('log_unattended_auto_resume_scheduled', '', {
+        try: nextTry,
+        left: unattendedAutoResumeRemaining,
+    }));
+    unattendedAutoResumeTimer = setTimeout(() => {
+        resumeSession({ auto: true });
+    }, 1200);
+    return true;
 }
 
 function setProjectDraftState() {
@@ -1650,6 +1767,9 @@ async function loadProjectConfigForWorkspace() {
         if (cfg && typeof cfg.session_retry_base_ms === 'string') {
             document.getElementById('session_retry_base_ms').value = cfg.session_retry_base_ms;
         }
+        if (cfg && typeof cfg.unattended_mode === 'boolean') {
+            document.getElementById('unattended_mode').checked = cfg.unattended_mode;
+        }
     } catch (_e) {}
 }
 
@@ -1880,6 +2000,7 @@ function handleEvent(evt) {
                 setRunState('running', txt('run_running', ''));
             }
             appendLog(evt.line);
+            maybeStopOnRoundBoundary(evt.line);
             updateDiagnosticsFromLog(evt.line);
             break;
         case 'diff':
@@ -1903,6 +2024,12 @@ function handleEvent(evt) {
                     completionAlertShown = true;
                     alert(fmt('alert_done_success', '', { message: evt.message }));
                 }
+                activeRunUnattendedMode = false;
+                unattendedAutoResumeRemaining = 0;
+                clearUnattendedAutoResumeTimer();
+                clearManualRunStopTimer();
+                manualRunStopDeadlineMs = 0;
+                manualRunStopExpired = false;
             } else if (stopRequested || isInterruptedMessage(evt.message)) {
                 setRunState('interrupted', txt('run_interrupted', ''));
                 setStatus(fmt('status_done_interrupted', '', { message: evt.message }), 'status-warn');
@@ -1910,13 +2037,25 @@ function handleEvent(evt) {
                     completionAlertShown = true;
                     alert(fmt('alert_done_interrupted', '', { message: evt.message }));
                 }
+                activeRunUnattendedMode = false;
+                unattendedAutoResumeRemaining = 0;
+                clearUnattendedAutoResumeTimer();
+                clearManualRunStopTimer();
+                manualRunStopDeadlineMs = 0;
+                manualRunStopExpired = false;
             } else {
                 setRunState('failed', txt('run_failed', ''));
                 setStatus(fmt('status_done_failed', '', { message: evt.message }), 'status-danger');
-                if (!completionAlertShown) {
+                const autoResumed = scheduleUnattendedAutoResume();
+                if (!completionAlertShown && !autoResumed) {
                     completionAlertShown = true;
                     alert(fmt('alert_done_failed', '', { message: evt.message }));
                 }
+            }
+            if (!runSessionActive && unattendedAutoResumeRemaining <= 0) {
+                clearManualRunStopTimer();
+                manualRunStopDeadlineMs = 0;
+                manualRunStopExpired = false;
             }
             stopRequested = false;
             document.getElementById('start_btn').disabled = false;
@@ -1962,6 +2101,10 @@ async function startSession() {
         setStatus(txt('status_start_api_key_empty', ''), 'status-danger');
         return;
     }
+    if (stopAfterMinutesSetting() === 0) {
+        const proceed = window.confirm(txt('warn_stop_timer_disabled', ''));
+        if (!proceed) return;
+    }
     try {
         activeRunLogBucket = currentLogBucket();
         activeRunProjectLabel = currentProjectLabel();
@@ -1978,6 +2121,10 @@ async function startSession() {
         setRunningProjectIndicator(activeRunProjectLabel);
         setProjectControlsDisabled(true);
         runSessionActive = true;
+        activeRunUnattendedMode = !!body.unattended_mode;
+        unattendedAutoResumeRemaining = autoResumeAttemptsSetting();
+        clearUnattendedAutoResumeTimer();
+        armManualRunStopTimer();
         applyReadOnlyMode();
         setRunState('running', txt('run_running', ''));
         stopRequested = false;
@@ -1991,12 +2138,17 @@ async function startSession() {
         runSessionActive = false;
         setRunningProjectIndicator(txt('running_project_none', ''));
         setProjectControlsDisabled(false);
+        clearManualRunStopTimer();
+        manualRunStopDeadlineMs = 0;
+        manualRunStopExpired = false;
         applyReadOnlyMode();
         setStatus(`${txt('status_start_failed_prefix', '')}${e}`, 'status-danger');
     }
 }
 
-async function resumeSession() {
+async function resumeSession(opts) {
+    const options = opts || {};
+    const isAuto = !!options.auto;
     try {
         ensureWorkspaceForCurrentProject();
         if (isReadOnlyView()) {
@@ -2041,6 +2193,12 @@ async function resumeSession() {
         setRunningProjectIndicator(activeRunProjectLabel);
         setProjectControlsDisabled(true);
         runSessionActive = true;
+        if (!isAuto) {
+            activeRunUnattendedMode = !!body.unattended_mode;
+        }
+        if (manualRunStopDeadlineMs > 0 && Date.now() >= manualRunStopDeadlineMs) {
+            manualRunStopExpired = true;
+        }
         applyReadOnlyMode();
         setRunState('running', txt('run_running', ''));
         stopRequested = false;
@@ -2055,6 +2213,9 @@ async function resumeSession() {
         setProjectControlsDisabled(false);
         applyReadOnlyMode();
         setStatus(`${txt('status_resume_failed_prefix', '')}${e}`, 'status-danger');
+        if (isAuto) {
+            scheduleUnattendedAutoResume();
+        }
     }
 }
 
@@ -2220,7 +2381,7 @@ function resetForm() {
 }
 
 function bindAutoSave() {
-    const ids = ['auto_revert_profile', 'precheck_cmd', 'history_max_messages', 'history_max_chars', 'release_gate_threshold', 'session_retry_max', 'session_retry_base_ms', 'goal', 'eval_cmd', 'success_regex', 'remote', 'remote_url', 'branch'];
+    const ids = ['auto_revert_profile', 'precheck_cmd', 'history_max_messages', 'history_max_chars', 'release_gate_threshold', 'session_retry_max', 'session_retry_base_ms', 'unattended_mode', 'goal', 'eval_cmd', 'success_regex', 'remote', 'remote_url', 'branch'];
     ids.forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
@@ -2294,6 +2455,14 @@ function bindEvents() {
     document.getElementById('close_global_config_btn').addEventListener('click', closeGlobalConfigModal);
     document.getElementById('api_key').addEventListener('input', () => {
         updateSharedConfigFromInputs();
+        scheduleUiCacheSave();
+    });
+    document.getElementById('global_auto_resume_attempts').addEventListener('input', () => {
+        updateGlobalOptionsFromInputs();
+        scheduleUiCacheSave();
+    });
+    document.getElementById('global_stop_after_minutes').addEventListener('input', () => {
+        updateGlobalOptionsFromInputs();
         scheduleUiCacheSave();
     });
     document.getElementById('language_select').addEventListener('change', async () => {
@@ -2449,6 +2618,7 @@ async function init() {
     sidebarMobileOpen = false;
     applyStaticCopyToDom();
     applySharedConfigToInputs();
+    applyGlobalOptionsToInputs();
     await refreshProjectsFromServer();
     renderProjectSelector('');
     bindEvents();

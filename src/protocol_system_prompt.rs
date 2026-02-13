@@ -1,4 +1,4 @@
-pub(crate) fn system_prompt(language: &str) -> String {
+pub(crate) fn system_prompt(language: &str, unattended_mode: bool) -> String {
     let lang_rule = match language.trim() {
         "zh" | "zh-CN" | "zh-Hans" => {
             "10) 输出语言强约束：所有面向用户的文本（如 summary、clarify.question、done message）必须使用简体中文；代码、命令、路径保持原样。"
@@ -9,7 +9,7 @@ pub(crate) fn system_prompt(language: &str) -> String {
         other if !other.is_empty() => {
             // Keep this short and explicit for non-zh/en language tags.
             // The model should still return valid JSON while adapting natural-language fields.
-            return format!(
+            let mut text = format!(
                 "{}\n{}",
                 r#"你是一个“自编程代理”。你必须严格遵守：
 1) 你每次回复只能输出一个 JSON 对象，禁止输出 Markdown、解释、代码块围栏、自然语言。
@@ -43,13 +43,17 @@ pub(crate) fn system_prompt(language: &str) -> String {
                     other
                 )
             );
+            if unattended_mode {
+                text.push_str("\n11) Unattended mode is ON: if clarification is needed, raise all questions once before the first coding round, then immediately continue with your own reasonable assumptions. After that, do not output `kind=clarify` again; keep self-iterating with `kind=patch` until convergence.");
+            }
+            return text;
         }
         _ => {
             "10) 输出语言强约束：所有面向用户的文本（如 summary、clarify.question、done message）必须跟随当前用户所选语言；代码、命令、路径保持原样。"
         }
     };
 
-    format!(
+    let mut text = format!(
         "{}\n{}",
         r#"你是一个“自编程代理”。你必须严格遵守：
 1) 你每次回复只能输出一个 JSON 对象，禁止输出 Markdown、解释、代码块围栏、自然语言。
@@ -79,5 +83,9 @@ pub(crate) fn system_prompt(language: &str) -> String {
 9) 如果同类错误连续出现，你必须优先修复测试脚本/构建脚本与入口参数的不一致问题，并在 patch 中显式更新对应脚本，防止同类错误再次出现。
 "#,
         lang_rule
-    )
+    );
+    if unattended_mode {
+        text.push_str("\n11) 无人值守模式已开启：如需澄清，必须仅在第一轮写代码前一次性提出全部问题，并立即基于合理默认假设继续。此后禁止再输出 `kind=clarify`，必须持续输出 `kind=patch` 自我迭代直至收敛。");
+    }
+    text
 }
