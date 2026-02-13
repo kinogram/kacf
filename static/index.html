@@ -1103,7 +1103,12 @@ async function fetchPlainApiKeyFromServer() {
 
 function looksLikeMaskedApiKey(value) {
     const v = (value || '').trim();
-    return !!v && v.includes('*');
+    if (!v) return false;
+    // Matches maskApiKey output only:
+    // 1) short keys: all '*'
+    // 2) long keys: first 4 visible + stars + last 4 visible
+    if (/^\*+$/.test(v)) return true;
+    return /^.{4}\*{4,}.{4}$/.test(v);
 }
 
 async function beginEditApiKey() {
