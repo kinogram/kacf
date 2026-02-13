@@ -1122,8 +1122,9 @@ async function beginEditApiKey() {
     }
 }
 
-async function resolveApiKeyForRequest(forceResolve) {
+async function resolveApiKeyForRequest(forceResolve, silent) {
     const force = forceResolve === true;
+    const quiet = silent === true;
     const shouldResolve = force || (
         !!sharedConfig.mask_api_key
         && sharedConfig.api_key_is_masked
@@ -1135,7 +1136,7 @@ async function resolveApiKeyForRequest(forceResolve) {
         renderApiKeyInput();
         return true;
     } catch (_e) {
-        setStatus(txt('status_api_key_fetch_failed', ''), 'status-danger');
+        if (!quiet) setStatus(txt('status_api_key_fetch_failed', ''), 'status-danger');
         return false;
     }
 }
@@ -1158,7 +1159,7 @@ function reMaskApiKeyIfNeeded() {
 
 async function suggestProjectSlug(projectName, goal) {
     try {
-        const apiReady = await resolveApiKeyForRequest();
+        const apiReady = await resolveApiKeyForRequest(false, true);
         if (!apiReady) return `project-${Date.now()}`;
         const resp = await fetch('/projects/suggest_slug', {
             method: 'POST',
