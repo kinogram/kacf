@@ -938,7 +938,11 @@ function renderUiForViewBucket() {
     document.getElementById('runbar_text').textContent = fmt('runbar_line', '', { state: state.run_text || txt('run_idle', '') });
     document.getElementById('diagnostics').textContent = state.diagnostics_text || txt('diagnostics_none', '');
     renderDiffPanel(state.diff_text || '');
-    renderClarifyQuestions(state.clarify_questions || [], bucket, false);
+    const shouldShowClarify = runSessionActive && !activeRunUnattendedMode && hasPendingClarify(bucket);
+    renderClarifyQuestions(shouldShowClarify ? (state.clarify_questions || []) : [], bucket, false);
+    if (!shouldShowClarify && hasPendingClarify(bucket)) {
+        writeBucketUiState(bucket, { clarify_questions: [] });
+    }
 }
 
 function loadProjectLogs() {
@@ -2025,6 +2029,8 @@ async function refreshUiState() {
             }
         } else {
             syncStoppedStateIfNeeded(txt('sync_reason_backend_stopped', ''));
+            writeBucketUiState(currentLogBucket(), { clarify_questions: [] });
+            if (viewLogBucket() === currentLogBucket()) renderClarifyQuestions([], currentLogBucket(), true);
             setProjectControlsDisabled(false);
             setRunningProjectIndicator(txt('running_project_none', ''));
             runSessionActive = false;
@@ -2283,6 +2289,11 @@ function handleEvent(evt) {
 
 function showClarify(questions) {
     const bucket = currentLogBucket();
+    if (activeRunUnattendedMode || !runSessionActive) {
+        writeBucketUiState(bucket, { clarify_questions: [] });
+        if (viewLogBucket() === bucket) renderClarifyQuestions([], bucket, true);
+        return;
+    }
     const list = Array.isArray(questions) ? questions : [];
     writeBucketUiState(bucket, { clarify_questions: list });
     if (list.length > 0) {
