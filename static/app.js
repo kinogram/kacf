@@ -42,15 +42,11 @@ let projectSearchKeyword = '';
 let projectDraftDirty = false;
 let sidebarCollapsed = false;
 let sidebarMobileOpen = false;
-let apiKeyEditMode = false;
 let sharedConfig = {
     api_key: '',
     base_url: 'https://api.deepseek.com',
     model: 'deepseek-reasoner',
     language: '',
-    encrypt_api_key: false,
-    mask_api_key: false,
-    api_key_is_masked: false,
 };
 let COPY = {};
 const BACKEND_COMM_BUTTON_IDS = [
@@ -66,7 +62,6 @@ const BACKEND_COMM_BUTTON_IDS = [
     'project_delete_btn',
     'open_global_config_btn',
     'save_global_config_btn',
-    'api_key_edit_btn',
     'preset_webapp_btn',
     'preset_cli_btn',
     'preset_desktop_btn',
@@ -84,7 +79,7 @@ const CONFIG_EDIT_IDS = [
     'precheck_cmd', 'history_max_messages', 'history_max_chars', 'release_gate_threshold',
     'goal', 'eval_cmd', 'success_regex', 'remote', 'remote_url', 'branch',
     'preset_webapp_btn', 'preset_cli_btn', 'preset_desktop_btn', 'reset_form_btn',
-    'open_global_config_btn', 'language_select', 'encrypt_api_key', 'mask_api_key',
+    'open_global_config_btn', 'language_select',
 ];
 
 function normalizeLanguageCode(raw) {
@@ -264,144 +259,22 @@ function autoFillProjectNameFromGoal(force) {
     projectNameManualOverride = false;
 }
 
-function maskApiKey(raw) {
-    const v = (raw || '').trim();
-    if (!v) return '';
-    if (v.length <= 8) return '*'.repeat(v.length);
-    return `${v.slice(0, 4)}${'*'.repeat(Math.max(4, v.length - 8))}${v.slice(-4)}`;
-}
-
 function getApiKeyInputValue() {
     const el = document.getElementById('api_key');
     if (!el) return '';
-    if (el.dataset.masked === '1') return (sharedConfig.api_key || '').trim();
     return el.value.trim();
-}
-
-function isMaskedApiEchoState() {
-    const el = document.getElementById('api_key');
-    if (!el) return false;
-    if (el.dataset.masked !== '1') return false;
-    const shown = (el.value || '').trim();
-    const stored = (sharedConfig.api_key || '').trim();
-    // Strong signal of masked echo from cache: shown value equals stored value in masked view.
-    return !!shown && shown === stored;
-}
-
-function isStrictGeneratedMaskedApiKey(raw) {
-    const v = (raw || '').trim();
-    if (!v) return false;
-    // Exact generated patterns only:
-    // 1) all stars (short keys)
-    // 2) first4 + stars(>=4) + last4 (long keys)
-    if (/^\*+$/.test(v)) return true;
-    return /^.{4}\*{4,}.{4}$/.test(v);
-}
-
-function shouldResolveMaskedApiKey() {
-    return sharedConfig.api_key_is_masked
-        || isMaskedApiEchoState()
-        || isStrictGeneratedMaskedApiKey(sharedConfig.api_key);
 }
 
 function renderApiKeyInput() {
     const el = document.getElementById('api_key');
-    const editBtn = document.getElementById('api_key_edit_btn');
     if (!el) return;
-    const current = (sharedConfig.api_key || '').trim();
-    const maskedView = !!sharedConfig.mask_api_key && !!current && !apiKeyEditMode;
-    if (maskedView) {
-        const display = sharedConfig.api_key_is_masked ? current : maskApiKey(current);
-        el.type = 'text';
-        el.readOnly = true;
-        el.value = display;
-        el.dataset.masked = '1';
-    } else {
-        el.type = 'text';
-        el.readOnly = false;
-        el.value = current;
-        el.dataset.masked = '0';
-    }
-    if (editBtn) {
-        editBtn.style.display = (sharedConfig.mask_api_key && !!current && !apiKeyEditMode) ? '' : 'none';
-        editBtn.disabled = !sharedConfig.mask_api_key || !current;
-    }
-}
-
-async function fetchPlainApiKeyFromServer() {
-    const resp = await fetch('/ui_cache/api_key_plain');
-    if (!resp.ok) throw new Error(`api key fetch failed: ${resp.status}`);
-    const data = await resp.json();
-    return (data && typeof data.api_key === 'string') ? data.api_key.trim() : '';
-}
-
-async function beginEditApiKey() {
-    if (!sharedConfig.mask_api_key) return;
-    try {
-        const mustFetchPlain = shouldResolveMaskedApiKey();
-        if (mustFetchPlain) {
-            const prevMaskedValue = (sharedConfig.api_key || '').trim();
-            const plain = await fetchPlainApiKeyFromServer();
-            if (!plain && prevMaskedValue) {
-                throw new Error('empty plain api key from server while masked value exists');
-            }
-            sharedConfig.api_key = plain;
-            sharedConfig.api_key_is_masked = false;
-        }
-        apiKeyEditMode = true;
-        renderApiKeyInput();
-        const editInput = document.getElementById('api_key');
-        if (editInput) {
-            editInput.focus();
-            const len = editInput.value.length;
-            editInput.setSelectionRange(len, len);
-        }
-    } catch (_e) {
-        setStatus(txt('status_api_key_edit_failed', ''), 'status-danger');
-    }
-}
-
-async function resolveApiKeyForRequest(forceResolve, silent) {
-    const force = forceResolve === true;
-    const quiet = silent === true;
-    const shouldResolve = force || shouldResolveMaskedApiKey();
-    if (!shouldResolve) return true;
-    try {
-        const prevMaskedValue = (sharedConfig.api_key || '').trim();
-        const plain = await fetchPlainApiKeyFromServer();
-        if (!plain && prevMaskedValue) {
-            throw new Error('empty plain api key from server while masked value exists');
-        }
-        sharedConfig.api_key = plain;
-        sharedConfig.api_key_is_masked = false;
-        renderApiKeyInput();
-        return true;
-    } catch (_e) {
-        if (!quiet) setStatus(txt('status_api_key_fetch_failed', ''), 'status-danger');
-        return false;
-    }
-}
-
-function reMaskApiKeyIfNeeded() {
-    const el = document.getElementById('api_key');
-    if (!el) return;
-    if (sharedConfig.mask_api_key) {
-        // Only persist when user was actually editing; never persist masked display text.
-        if (el.dataset.masked !== '1') {
-            sharedConfig.api_key = el.value.trim();
-            sharedConfig.api_key_is_masked = false;
-        }
-        apiKeyEditMode = false;
-    }
-    updateSharedConfigFromInputs();
-    scheduleUiCacheSave();
-    renderApiKeyInput();
+    el.type = 'text';
+    el.readOnly = false;
+    el.value = (sharedConfig.api_key || '').trim();
 }
 
 async function suggestProjectSlug(projectName, goal) {
     try {
-        const apiReady = await resolveApiKeyForRequest(false, true);
-        if (!apiReady) return `project-${Date.now()}`;
         const resp = await fetch('/projects/suggest_slug', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -466,27 +339,15 @@ function defaultFormData() {
 }
 
 function updateSharedConfigFromInputs() {
-    const apiKeyInput = document.getElementById('api_key');
-    const isMaskedDisplay = apiKeyInput?.dataset.masked === '1';
-    const apiKeyValue = isMaskedDisplay
-        ? (sharedConfig.api_key || '').trim()
-        : getApiKeyInputValue();
-    const apiKeyIsMasked = isMaskedDisplay ? !!sharedConfig.api_key_is_masked : false;
     sharedConfig = {
-        api_key: apiKeyValue,
+        api_key: getApiKeyInputValue(),
         base_url: document.getElementById('base_url').value.trim(),
         model: document.getElementById('model').value.trim(),
         language: normalizeLanguageCode(document.getElementById('language_select')?.value || currentLanguage),
-        encrypt_api_key: !!document.getElementById('encrypt_api_key')?.checked,
-        mask_api_key: !!document.getElementById('mask_api_key')?.checked,
-        api_key_is_masked: apiKeyIsMasked,
     };
 }
 
 function applySharedConfigToInputs() {
-    document.getElementById('encrypt_api_key').checked = !!sharedConfig.encrypt_api_key;
-    document.getElementById('mask_api_key').checked = !!sharedConfig.mask_api_key;
-    apiKeyEditMode = false;
     renderApiKeyInput();
     document.getElementById('base_url').value = sharedConfig.base_url || 'https://api.deepseek.com';
     document.getElementById('model').value = sharedConfig.model || 'deepseek-reasoner';
@@ -691,17 +552,12 @@ async function fetchUiCacheFromServer() {
         cacheProjectLogs = (data.project_logs && typeof data.project_logs === 'object') ? data.project_logs : {};
         cacheProjectUiState = (data.project_ui_state && typeof data.project_ui_state === 'object') ? data.project_ui_state : {};
         if (data.shared_config && typeof data.shared_config === 'object') {
-            const maskedFlag = !!data.shared_config.api_key_is_masked;
             sharedConfig = {
                 api_key: data.shared_config.api_key || '',
                 base_url: data.shared_config.base_url || 'https://api.deepseek.com',
                 model: data.shared_config.model || 'deepseek-reasoner',
                 language: normalizeLanguageCode(data.shared_config.language || ''),
-                encrypt_api_key: !!data.shared_config.encrypt_api_key,
-                mask_api_key: maskedFlag ? true : !!data.shared_config.mask_api_key,
-                api_key_is_masked: maskedFlag,
             };
-            apiKeyEditMode = false;
         }
         return true;
     } catch (_e) {
@@ -1101,8 +957,6 @@ function applyStaticCopyToDom() {
         ['label_model', 'label_model'],
         ['label_base_url', 'label_base_url'],
         ['label_language', 'label_language'],
-        ['label_encrypt_api_key', 'label_encrypt_api_key'],
-        ['label_mask_api_key', 'label_mask_api_key'],
     ];
     staticMap.forEach(([id, key]) => {
         const el = document.getElementById(id);
@@ -1131,7 +985,6 @@ function applyStaticCopyToDom() {
         ['export_log_btn', 'btn_export_log'],
         ['export_snapshot_btn', 'btn_export_snapshot'],
         ['export_report_btn', 'btn_export_report'],
-        ['api_key_edit_btn', 'btn_edit_api_key'],
     ];
     map.forEach(([id, key]) => {
         const el = document.getElementById(id);
@@ -1962,8 +1815,6 @@ async function startSession() {
         setStatus(txt('status_readonly_view', ''), 'status-danger');
         return;
     }
-    const apiReady = await resolveApiKeyForRequest();
-    if (!apiReady) return;
     const synced = await persistSharedConfigNow();
     if (!synced) {
         setStatus(txt('status_start_shared_config_sync_failed', ''), 'status-danger');
@@ -2024,8 +1875,6 @@ async function resumeSession() {
             setStatus(txt('status_readonly_view', ''), 'status-danger');
             return;
         }
-        const apiReady = await resolveApiKeyForRequest();
-        if (!apiReady) return;
         const selectedProjectId = document.getElementById('project_selector')?.value || '';
         if (!selectedProjectId) {
             setStatus(txt('status_need_select_project', ''), 'status-danger');
@@ -2301,31 +2150,7 @@ function bindEvents() {
     document.getElementById('open_global_config_btn').addEventListener('click', openGlobalConfigModal);
     document.getElementById('save_global_config_btn').addEventListener('click', saveGlobalConfig);
     document.getElementById('close_global_config_btn').addEventListener('click', closeGlobalConfigModal);
-    document.getElementById('api_key_edit_btn').addEventListener('click', beginEditApiKey);
     document.getElementById('api_key').addEventListener('input', () => {
-        if (document.getElementById('api_key').dataset.masked === '1') return;
-        updateSharedConfigFromInputs();
-        scheduleUiCacheSave();
-    });
-    document.getElementById('api_key').addEventListener('blur', reMaskApiKeyIfNeeded);
-    document.getElementById('mask_api_key').addEventListener('change', async () => {
-        updateSharedConfigFromInputs();
-        const needResolveOnUnmask = sharedConfig.api_key_is_masked
-            || isMaskedApiEchoState()
-            || isStrictGeneratedMaskedApiKey(sharedConfig.api_key);
-        if (!sharedConfig.mask_api_key && needResolveOnUnmask) {
-            const apiReady = await resolveApiKeyForRequest(true);
-            if (!apiReady) {
-                sharedConfig.mask_api_key = true;
-                document.getElementById('mask_api_key').checked = true;
-            }
-            updateSharedConfigFromInputs();
-        }
-        if (sharedConfig.mask_api_key) apiKeyEditMode = false;
-        renderApiKeyInput();
-        scheduleUiCacheSave();
-    });
-    document.getElementById('encrypt_api_key').addEventListener('change', () => {
         updateSharedConfigFromInputs();
         scheduleUiCacheSave();
     });

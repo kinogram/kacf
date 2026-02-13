@@ -11,7 +11,6 @@ mod protocol_system_prompt;
 mod runner;
 mod web_ui;
 mod web_ui_analytics;
-mod web_ui_api_key;
 mod web_ui_cache_logic;
 mod web_ui_languages;
 mod web_ui_projects;

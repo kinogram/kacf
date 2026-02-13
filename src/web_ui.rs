@@ -18,7 +18,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use crate::deepseek_api;
 use crate::protocol::{AgentEvent, AgentRequest, ClarifyAnswer, ClarifyQuestion};
 use crate::web_ui_analytics::{self, CategoryCount, TimePoint};
-use crate::web_ui_api_key;
 use crate::web_ui_cache_logic;
 use crate::web_ui_languages;
 use crate::web_ui_projects;
@@ -334,12 +333,6 @@ pub(crate) struct SharedConfig {
     pub(crate) model: String,
     #[serde(default)]
     pub(crate) language: String,
-    #[serde(default)]
-    pub(crate) encrypt_api_key: bool,
-    #[serde(default)]
-    pub(crate) mask_api_key: bool,
-    #[serde(default)]
-    pub(crate) api_key_is_masked: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -601,27 +594,15 @@ async fn delete_project(data: web::Data<AppState>, path: web::Path<String>) -> i
 async fn get_ui_cache(data: web::Data<AppState>) -> impl Responder {
     let _guard = data.projects_lock.lock().unwrap();
     let mut payload = read_ui_cache();
-    web_ui_cache_logic::prepare_ui_cache_for_response(&mut payload, &managed_root_path());
+    web_ui_cache_logic::prepare_ui_cache_for_response(&mut payload);
     HttpResponse::Ok().json(payload)
-}
-
-#[derive(Debug, Serialize)]
-struct ApiKeyPlainResp {
-    api_key: String,
-}
-
-async fn get_ui_cache_api_key_plain(data: web::Data<AppState>) -> impl Responder {
-    let _guard = data.projects_lock.lock().unwrap();
-    let mut payload = read_ui_cache();
-    let api_key = web_ui_cache_logic::plain_api_key_from_cache(&mut payload, &managed_root_path());
-    HttpResponse::Ok().json(ApiKeyPlainResp { api_key })
 }
 
 async fn put_ui_cache(data: web::Data<AppState>, body: web::Json<UiCachePatch>) -> impl Responder {
     let _guard = data.projects_lock.lock().unwrap();
     let patch = body.into_inner();
     let mut payload = read_ui_cache();
-    web_ui_cache_logic::apply_ui_cache_patch(&mut payload, patch, &managed_root_path());
+    web_ui_cache_logic::apply_ui_cache_patch(&mut payload, patch);
     match write_ui_cache(&payload) {
         Ok(_) => HttpResponse::Ok().body("saved"),
         Err(e) => HttpResponse::InternalServerError().body(format!("write ui cache failed: {}", e)),
@@ -693,7 +674,6 @@ async fn resume_session(
         };
         let mut snapshot = project.snapshot;
         if let Some(cfg) = cache.shared_config.as_mut() {
-            web_ui_api_key::decrypt_shared_config_for_response(cfg, &managed_root_path());
             merge_shared_config_into_draft(&mut snapshot, cfg);
         }
         snapshot
@@ -1092,10 +1072,6 @@ pub async fn run_web_server(
             )
             .route("/ui_cache", web::get().to(get_ui_cache))
             .route("/ui_cache", web::put().to(put_ui_cache))
-            .route(
-                "/ui_cache/api_key_plain",
-                web::get().to(get_ui_cache_api_key_plain),
-            )
             .route("/ui_state", web::get().to(get_ui_state))
             .route("/health", web::get().to(health))
             .route("/metrics", web::get().to(metrics))
