@@ -206,3 +206,28 @@ function markBackendAlive() {
     setBackendOfflineState(false);
 }
 
+window.KACF = window.KACF || {};
+window.KACF.logPipeline = {
+    loadProjectLogs,
+    saveProjectLogs,
+    readLogForBucket,
+    writeLogForBucket,
+    renderCurrentLogView,
+    readLogLinesForBucket,
+    writeLogLinesForBucket,
+    isModelProgressLine,
+    trimTrailingModelProgress,
+    parseModelStreamTag,
+    streamBodyLines,
+    prettyJsonStreamLine,
+    getLogRenderState,
+    appendLog,
+    updateDiagnosticsFromLog,
+    setStatus,
+    setRunState,
+    currentRunState,
+    hasPendingClarify,
+    isRunStateActive,
+    setBackendOfflineState,
+    markBackendAlive,
+};

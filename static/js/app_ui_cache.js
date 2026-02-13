@@ -317,3 +317,25 @@ function renderUiForViewBucket() {
     renderClarifyQuestions(shouldShowClarify ? (normalized.clarify_questions || []) : [], bucket, false);
 }
 
+window.KACF = window.KACF || {};
+window.KACF.uiCache = {
+    fetchUiCacheFromServer,
+    scheduleUiCacheSave,
+    persistSharedConfigNow,
+    updateGlobalOptionsFromInputs,
+    applyGlobalOptionsToInputs,
+    bindGlobalOptionInput,
+    loadProjectUiStateMap,
+    saveProjectUiStateMap,
+    defaultBucketUiState,
+    readBucketUiState,
+    writeBucketUiState,
+    renderDiffPanel,
+    normalizeClarifyQuestions,
+    snapshotClarifyAnswers,
+    renderClarifyQuestions,
+    shouldAllowClarifyInteraction,
+    normalizeBucketUiStateForRender,
+    resetBucketRuntimeUiState,
+    renderUiForViewBucket,
+};

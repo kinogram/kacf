@@ -450,3 +450,31 @@ async function loadProjectConfigForWorkspace() {
     } catch (_e) {}
 }
 
+window.KACF = window.KACF || {};
+window.KACF.projects = {
+    setProjectDraftState,
+    markProjectDirty,
+    markProjectClean,
+    shouldProceedWithDirtyDraft,
+    loadProjects,
+    saveProjects,
+    ensureWorkspaceForCurrentProject,
+    renderProjectAccordion,
+    selectProject,
+    deleteProjectById,
+    fetchProjectsFromServer,
+    refreshProjectsFromServer,
+    upsertProjectToServer,
+    deleteProjectOnServer,
+    randomProjectId,
+    renderProjectSelector,
+    syncProjectNameFromSelection,
+    saveCurrentProject,
+    loadSelectedProject,
+    deleteSelectedProject,
+    createNewProject,
+    shouldAutoSaveProjectNow,
+    autoSaveProjectFromForm,
+    scheduleDraftSave,
+    loadProjectConfigForWorkspace,
+};

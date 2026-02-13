@@ -166,6 +166,13 @@ KACF_<language_code>_<pack_version>.json
 
 - `app_runtime_actions.js` 通过 `window.KACF.runtimeSync` 调用同步层能力（如 `refreshUiState/startEventStream`）。
 - `app_runtime_sync.js` 负责注册 `window.KACF.runtimeSync`。
+- 其余模块分别注册：
+  - `window.KACF.state`
+  - `window.KACF.uiCache`
+  - `window.KACF.logPipeline`
+  - `window.KACF.runtimeState`
+  - `window.KACF.projects`
+- `app_runtime_sync.js` 启动时会执行依赖断言，若任一命名空间或关键方法缺失会立即报错。
 - 禁止回退到隐式全局 fallback 调用，以避免模块耦合失控。
 
 ## 常用脚本

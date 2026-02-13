@@ -1,3 +1,27 @@
+function assertRuntimeSyncDependencies() {
+    const root = window.KACF || {};
+    const required = {
+        state: ['txt', 'fmt', 'currentLogBucket'],
+        uiCache: ['persistSharedConfigNow', 'writeBucketUiState', 'renderUiForViewBucket'],
+        logPipeline: ['appendLog', 'setStatus', 'setRunState'],
+        runtimeState: ['syncStoppedStateIfNeeded', 'markRunSessionStarted', 'checkBackendHealth'],
+        projects: ['saveCurrentProject', 'ensureWorkspaceForCurrentProject'],
+    };
+    Object.entries(required).forEach(([scope, methods]) => {
+        const api = root[scope];
+        if (!api || typeof api !== 'object') {
+            throw new Error(`KACF.${scope} namespace missing`);
+        }
+        methods.forEach((name) => {
+            if (typeof api[name] !== 'function') {
+                throw new Error(`KACF.${scope}.${name} is not available`);
+            }
+        });
+    });
+}
+
+assertRuntimeSyncDependencies();
+
 function renderResumeBanner(info) {
     const banner = document.getElementById('resume_banner');
     if (!info || !info.resume) {
@@ -345,6 +369,7 @@ window.KACF.runtimeSync = {
     syncSharedConfigForRun,
     prepareFormDataWithWorkspace,
     primeRunRequestContext,
+    clearStopAckTimer,
     refreshUiState,
     refreshMetrics,
     bootstrapEventCursor,

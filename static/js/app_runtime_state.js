@@ -491,3 +491,36 @@ function applyStopAcceptedStatus(ack) {
     setRunActionButtons(false);
 }
 
+window.KACF = window.KACF || {};
+window.KACF.runtimeState = {
+    markBackendFailure,
+    checkBackendHealth,
+    syncStoppedStateIfNeeded,
+    isInterruptedMessage,
+    getFormData,
+    applyFormData,
+    applyStaticCopyToDom,
+    openGlobalConfigModal,
+    closeGlobalConfigModal,
+    saveGlobalConfig,
+    setAutoSaveState,
+    renderUnattendedState,
+    clearUnattendedAutoResumeTimer,
+    clearManualRunStopTimer,
+    stopAfterMinutesSetting,
+    armManualRunStopTimer,
+    triggerStopByTimeout,
+    maybeStopOnRoundBoundary,
+    autoResumeAttemptsSetting,
+    scheduleUnattendedAutoResume,
+    resetStopTimerState,
+    resetUnattendedRunState,
+    resetRunSessionUiState,
+    showAlertOnce,
+    setRunStateAndStatus,
+    finishRunSessionUi,
+    markRunSessionStarted,
+    applyDoneOutcome,
+    applyInterruptedTerminalState,
+    applyStopAcceptedStatus,
+};
