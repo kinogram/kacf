@@ -1106,7 +1106,12 @@ async function beginEditApiKey() {
     try {
         const mustFetchPlain = sharedConfig.api_key_is_masked;
         if (mustFetchPlain) {
-            sharedConfig.api_key = await fetchPlainApiKeyFromServer();
+            const prevMaskedValue = (sharedConfig.api_key || '').trim();
+            const plain = await fetchPlainApiKeyFromServer();
+            if (!plain && prevMaskedValue) {
+                throw new Error('empty plain api key from server while masked value exists');
+            }
+            sharedConfig.api_key = plain;
             sharedConfig.api_key_is_masked = false;
         }
         apiKeyEditMode = true;
@@ -1131,7 +1136,12 @@ async function resolveApiKeyForRequest(forceResolve, silent) {
     );
     if (!shouldResolve) return true;
     try {
-        sharedConfig.api_key = await fetchPlainApiKeyFromServer();
+        const prevMaskedValue = (sharedConfig.api_key || '').trim();
+        const plain = await fetchPlainApiKeyFromServer();
+        if (!plain && prevMaskedValue) {
+            throw new Error('empty plain api key from server while masked value exists');
+        }
+        sharedConfig.api_key = plain;
         sharedConfig.api_key_is_masked = false;
         renderApiKeyInput();
         return true;
