@@ -32,6 +32,7 @@ let runSessionActive = false;
 let cachedProjects = [];
 let cacheProjectLogs = {};
 let cacheProjectUiState = {};
+let logRenderStateByBucket = {};
 let uiCacheSaveTimer = null;
 const WORKSPACE_ROOT = './autocoding_data/workspaces';
 let projectNameManualOverride = false;
@@ -631,10 +632,49 @@ function writeBucketUiState(bucket, patch) {
     saveProjectUiStateMap(all);
 }
 
-function renderClarifyQuestions(questions) {
+function normalizeClarifyQuestions(questions) {
+    return (Array.isArray(questions) ? questions : []).map(q => ({
+        id: String(q?.id || ''),
+        question: String(q?.question || ''),
+        type: String(q?.type || 'text'),
+        options: Array.isArray(q?.options) ? q.options.map(opt => String(opt)) : [],
+    }));
+}
+
+function snapshotClarifyAnswers(form) {
+    const formData = new FormData(form);
+    const answers = {};
+    formData.forEach((value, key) => {
+        const v = String(value);
+        if (Object.prototype.hasOwnProperty.call(answers, key)) {
+            if (!Array.isArray(answers[key])) answers[key] = [answers[key]];
+            answers[key].push(v);
+            return;
+        }
+        answers[key] = v;
+    });
+    return answers;
+}
+
+function renderClarifyQuestions(questions, bucket, force) {
     const form = document.getElementById('clarify_form');
+    const normalized = normalizeClarifyQuestions(questions);
+    const bucketKey = String(bucket || '');
+    const locked = form.dataset.locked === '1' && form.dataset.lockBucket === bucketKey;
+    if (!force && normalized.length > 0 && locked) return;
+    const signature = JSON.stringify(normalized);
+    const renderKey = `${bucketKey}|${signature}`;
+    if (form.dataset.renderKey === renderKey) return;
+    if (normalized.length === 0) {
+        form.innerHTML = '';
+        form.dataset.renderKey = renderKey;
+        form.dataset.locked = '0';
+        form.dataset.lockBucket = bucketKey;
+        return;
+    }
+    const answers = snapshotClarifyAnswers(form);
     form.innerHTML = '';
-    (questions || []).forEach(q => {
+    normalized.forEach(q => {
         const div = document.createElement('div');
         div.style.marginBottom = '10px';
         const label = document.createElement('label');
@@ -646,6 +686,7 @@ function renderClarifyQuestions(questions) {
                 radio.type = 'radio';
                 radio.name = q.id;
                 radio.value = opt;
+                radio.checked = answers[q.id] === opt;
                 div.appendChild(radio);
                 const span = document.createElement('span');
                 span.textContent = ` ${opt}`;
@@ -658,6 +699,8 @@ function renderClarifyQuestions(questions) {
                 checkbox.type = 'checkbox';
                 checkbox.name = q.id;
                 checkbox.value = opt;
+                const prev = answers[q.id];
+                checkbox.checked = Array.isArray(prev) ? prev.includes(opt) : prev === opt;
                 div.appendChild(checkbox);
                 const span = document.createElement('span');
                 span.textContent = ` ${opt}`;
@@ -668,10 +711,14 @@ function renderClarifyQuestions(questions) {
             const input = document.createElement('input');
             input.type = 'text';
             input.name = q.id;
+            input.value = String(answers[q.id] || '');
             div.appendChild(input);
         }
         form.appendChild(div);
     });
+    form.dataset.renderKey = renderKey;
+    form.dataset.locked = '0';
+    form.dataset.lockBucket = bucketKey;
 }
 
 function renderUiForViewBucket() {
@@ -701,7 +748,7 @@ function renderUiForViewBucket() {
         document.getElementById('diff_section').style.display = 'none';
         document.getElementById('diff').innerHTML = '';
     }
-    renderClarifyQuestions(state.clarify_questions || []);
+    renderClarifyQuestions(state.clarify_questions || [], bucket, false);
 }
 
 function loadProjectLogs() {
@@ -732,24 +779,93 @@ function renderCurrentLogView() {
     log.scrollTop = log.scrollHeight;
 }
 
-function normalizeLogLine(text) {
-    const raw = String(text || '');
-    if (!raw.startsWith('[Model-Stream]')) return raw;
-    const body = raw.slice('[Model-Stream]'.length).trim();
-    if (!body) return raw;
-    const compact = body
-        .replace(/\\n|\\r|\\t/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-    if (!compact) return '[Model-Stream]';
-    return `[Model-Stream] ${compact.length > 220 ? `${compact.slice(0, 220)}...` : compact}`;
+function readLogLinesForBucket(bucket) {
+    const raw = readLogForBucket(bucket);
+    if (!raw) return [];
+    const lines = raw.split('\n');
+    if (lines.length && lines[lines.length - 1] === '') lines.pop();
+    return lines;
+}
+
+function writeLogLinesForBucket(bucket, lines) {
+    writeLogForBucket(bucket, `${lines.join('\n')}\n`);
+}
+
+function isModelProgressLine(line) {
+    return String(line || '').startsWith('[Model] 仍在生成中...');
+}
+
+function trimTrailingModelProgress(lines) {
+    if (lines.length && isModelProgressLine(lines[lines.length - 1])) {
+        lines.pop();
+    }
+}
+
+function streamBodyLines(raw) {
+    const body = String(raw || '').slice('[Model-Stream]'.length).trim();
+    if (!body) return [];
+    const out = [];
+    for (const line of body.split(/\r?\n/)) {
+        const expanded = line
+            .replace(/\\r/g, '\r')
+            .replace(/\\n/g, '\n')
+            .replace(/\\t/g, '\t');
+        for (const seg of expanded.split('\n')) {
+            const pretty = prettyJsonStreamLine(seg);
+            for (const one of pretty) out.push(one);
+        }
+    }
+    return out;
+}
+
+function prettyJsonStreamLine(line) {
+    const raw = String(line || '');
+    const trimmed = raw.trim();
+    if (!trimmed) return [''];
+    const startsLikeJson = trimmed.startsWith('{') || trimmed.startsWith('[');
+    const endsLikeJson = trimmed.endsWith('}') || trimmed.endsWith(']');
+    if (!(startsLikeJson && endsLikeJson)) return [raw];
+    try {
+        const parsed = JSON.parse(trimmed);
+        return JSON.stringify(parsed, null, 2).split('\n');
+    } catch (_e) {
+        return [raw];
+    }
+}
+
+function getLogRenderState(bucket) {
+    if (!logRenderStateByBucket[bucket]) {
+        logRenderStateByBucket[bucket] = {
+            modelStreamOpen: false,
+        };
+    }
+    return logRenderStateByBucket[bucket];
 }
 
 function appendLog(text) {
-    const line = normalizeLogLine(text);
+    const line = String(text || '');
     const bucket = currentLogBucket();
-    const existing = readLogForBucket(bucket);
-    writeLogForBucket(bucket, existing + line + "\n");
+    const state = getLogRenderState(bucket);
+    const lines = readLogLinesForBucket(bucket);
+    if (line.startsWith('[Model-Stream]')) {
+        trimTrailingModelProgress(lines);
+        if (!state.modelStreamOpen) {
+            lines.push('[Model-Stream]');
+            state.modelStreamOpen = true;
+        }
+        const bodyLines = streamBodyLines(line);
+        for (const one of bodyLines) lines.push(one);
+    } else if (isModelProgressLine(line)) {
+        if (lines.length && isModelProgressLine(lines[lines.length - 1])) {
+            lines[lines.length - 1] = line;
+        } else {
+            lines.push(line);
+        }
+    } else {
+        state.modelStreamOpen = false;
+        lines.push(line);
+    }
+    writeLogLinesForBucket(bucket, lines);
     const log = document.getElementById('log');
     log.textContent = readLogForBucket(bucket);
     log.scrollTop = log.scrollHeight;
@@ -1027,11 +1143,17 @@ function applyStaticCopyToDom() {
 
 function openGlobalConfigModal() {
     closeSidebarOnNarrow();
-    document.getElementById('global_config_modal').style.display = 'flex';
+    const modal = document.getElementById('global_config_modal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+    document.body.classList.add('modal-open');
 }
 
 function closeGlobalConfigModal() {
-    document.getElementById('global_config_modal').style.display = 'none';
+    const modal = document.getElementById('global_config_modal');
+    if (!modal) return;
+    modal.style.display = 'none';
+    document.body.classList.remove('modal-open');
 }
 
 async function saveGlobalConfig() {
@@ -1987,7 +2109,8 @@ async function submitClarify(e) {
         setStatus(txt('status_readonly_no_clarify', ''), 'status-danger');
         return;
     }
-    const formData = new FormData(document.getElementById('clarify_form'));
+    const form = document.getElementById('clarify_form');
+    const formData = new FormData(form);
     const answers = {};
     formData.forEach((value, key) => {
         if (answers[key]) {
@@ -2006,11 +2129,15 @@ async function submitClarify(e) {
             body: JSON.stringify({ answers }),
         });
         if (!resp.ok) throw new Error(`clarify error ${resp.status}`);
+        form.dataset.locked = '0';
         writeBucketUiState(currentLogBucket(), { clarify_questions: [] });
         setRunState('running', txt('run_running', ''));
         setStatus(txt('status_clarify_submitted_waiting', ''), 'status-warn');
         appendLog(txt('log_submit_clarify', ''));
-        if (viewLogBucket() === currentLogBucket()) renderUiForViewBucket();
+        if (viewLogBucket() === currentLogBucket()) {
+            renderClarifyQuestions([], currentLogBucket(), true);
+            renderUiForViewBucket();
+        }
     } catch (err) {
         setStatus(`${txt('status_clarify_failed_prefix', '')}${err}`, 'status-danger');
     }
@@ -2120,6 +2247,15 @@ function bindEvents() {
         projectSearchKeyword = document.getElementById('project_search').value || '';
         renderProjectAccordion();
     });
+    const clarifyForm = document.getElementById('clarify_form');
+    if (clarifyForm) {
+        const lockClarifyRender = () => {
+            if (!clarifyForm.children.length) return;
+            clarifyForm.dataset.locked = '1';
+        };
+        clarifyForm.addEventListener('input', lockClarifyRender);
+        clarifyForm.addEventListener('change', lockClarifyRender);
+    }
     document.getElementById('project_name').addEventListener('input', () => {
         markProjectDirty();
         const value = document.getElementById('project_name').value.trim();

@@ -900,7 +900,7 @@ async fn chat_complete_with_progress(
             || delta.contains('}')
             || delta.contains(']');
         if should_flush {
-            let out = st.buf.replace('\n', "\\n");
+            let out = st.buf.clone();
             st.buf.clear();
             let _ = tx_evt.send(AgentEvent::Log(format!(
                 "[Model-Stream] {}",
@@ -916,7 +916,7 @@ async fn chat_complete_with_progress(
         &mut on_delta,
     );
     tokio::pin!(req);
-    let mut ticker = tokio::time::interval(Duration::from_secs(5));
+    let mut ticker = tokio::time::interval(Duration::from_secs(1));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut first_tick = true;
     loop {
@@ -924,7 +924,7 @@ async fn chat_complete_with_progress(
             out = &mut req => {
                 let st = preview.borrow();
                 if !st.buf.is_empty() {
-                    let out_tail = st.buf.replace('\n', "\\n");
+                    let out_tail = st.buf.clone();
                     let _ = tx_evt.send(AgentEvent::Log(format!(
                         "[Model-Stream] {}",
                         truncate(&out_tail, 600)
