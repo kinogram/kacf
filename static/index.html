@@ -1858,7 +1858,11 @@ function closeGlobalConfigModal() {
 async function saveGlobalConfig() {
     const wantedLanguage = normalizeLanguageCode(document.getElementById('language_select')?.value || currentLanguage);
     if (wantedLanguage && wantedLanguage !== currentLanguage) {
-        await switchLanguage(wantedLanguage, false);
+        const switched = await switchLanguage(wantedLanguage, false);
+        if (!switched) {
+            setStatus(fmt('status_language_switch_failed', '', { code: wantedLanguage }), 'status-danger');
+            return;
+        }
     }
     const ok = await persistSharedConfigNow();
     if (!ok) {
