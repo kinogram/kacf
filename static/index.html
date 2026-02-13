@@ -1104,7 +1104,9 @@ async function fetchPlainApiKeyFromServer() {
 async function beginEditApiKey() {
     if (!sharedConfig.mask_api_key) return;
     try {
-        if (sharedConfig.api_key_is_masked) {
+        const el = document.getElementById('api_key');
+        const showingMasked = !!el && el.dataset.masked === '1';
+        if (sharedConfig.api_key_is_masked || showingMasked) {
             sharedConfig.api_key = await fetchPlainApiKeyFromServer();
             sharedConfig.api_key_is_masked = false;
         }
@@ -1136,8 +1138,11 @@ function reMaskApiKeyIfNeeded() {
     const el = document.getElementById('api_key');
     if (!el) return;
     if (sharedConfig.mask_api_key) {
-        sharedConfig.api_key = el.value.trim();
-        sharedConfig.api_key_is_masked = false;
+        // Only persist when user was actually editing; never persist masked display text.
+        if (el.dataset.masked !== '1') {
+            sharedConfig.api_key = el.value.trim();
+            sharedConfig.api_key_is_masked = false;
+        }
         apiKeyEditMode = false;
     }
     updateSharedConfigFromInputs();
