@@ -801,8 +801,15 @@ function trimTrailingModelProgress(lines) {
     }
 }
 
-function streamBodyLines(raw) {
-    const body = String(raw || '').slice('[Model-Stream]'.length).trim();
+function parseModelStreamTag(line) {
+    const raw = String(line || '');
+    if (raw.startsWith('[Model-Stream]')) return '[Model-Stream]';
+    if (raw.startsWith('[Model-Thought]')) return '[Model-Thought]';
+    return '';
+}
+
+function streamBodyLines(raw, tag) {
+    const body = String(raw || '').slice(tag.length).trim();
     if (!body) return [];
     const out = [];
     for (const line of body.split(/\r?\n/)) {
@@ -836,7 +843,7 @@ function prettyJsonStreamLine(line) {
 function getLogRenderState(bucket) {
     if (!logRenderStateByBucket[bucket]) {
         logRenderStateByBucket[bucket] = {
-            modelStreamOpen: false,
+            activeModelStreamTag: '',
         };
     }
     return logRenderStateByBucket[bucket];
@@ -847,13 +854,14 @@ function appendLog(text) {
     const bucket = currentLogBucket();
     const state = getLogRenderState(bucket);
     const lines = readLogLinesForBucket(bucket);
-    if (line.startsWith('[Model-Stream]')) {
+    const streamTag = parseModelStreamTag(line);
+    if (streamTag) {
         trimTrailingModelProgress(lines);
-        if (!state.modelStreamOpen) {
-            lines.push('[Model-Stream]');
-            state.modelStreamOpen = true;
+        if (state.activeModelStreamTag !== streamTag) {
+            lines.push(streamTag);
+            state.activeModelStreamTag = streamTag;
         }
-        const bodyLines = streamBodyLines(line);
+        const bodyLines = streamBodyLines(line, streamTag);
         for (const one of bodyLines) lines.push(one);
     } else if (isModelProgressLine(line)) {
         if (lines.length && isModelProgressLine(lines[lines.length - 1])) {
@@ -862,7 +870,7 @@ function appendLog(text) {
             lines.push(line);
         }
     } else {
-        state.modelStreamOpen = false;
+        state.activeModelStreamTag = '';
         lines.push(line);
     }
     writeLogLinesForBucket(bucket, lines);

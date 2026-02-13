@@ -54,6 +54,7 @@ struct StreamChoice {
 #[derive(Debug, Deserialize)]
 struct StreamDelta {
     content: Option<String>,
+    reasoning_content: Option<String>,
 }
 
 /// Call DeepSeek chat completion in streaming mode (`stream=true`) and feed
@@ -65,6 +66,26 @@ pub async fn chat_complete_streaming(
     model: &str,
     messages: &[ChatMessage],
     on_delta: &mut dyn FnMut(&str),
+) -> Result<String> {
+    let mut sink = |_delta: &str| {};
+    chat_complete_streaming_with_reasoning(
+        base_url,
+        api_key,
+        model,
+        messages,
+        on_delta,
+        &mut sink,
+    )
+    .await
+}
+
+pub async fn chat_complete_streaming_with_reasoning(
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+    messages: &[ChatMessage],
+    on_delta: &mut dyn FnMut(&str),
+    on_reasoning: &mut dyn FnMut(&str),
 ) -> Result<String> {
     if api_key.trim().is_empty() {
         return Err(anyhow!(
@@ -108,7 +129,7 @@ pub async fn chat_complete_streaming(
                     }
                     return Err(err);
                 }
-                match parse_streaming_response(resp, on_delta).await {
+                match parse_streaming_response(resp, on_delta, on_reasoning).await {
                     Ok(text) => return Ok(text),
                     Err(e) => {
                         if attempt < max_attempts {
@@ -137,6 +158,7 @@ pub async fn chat_complete_streaming(
 async fn parse_streaming_response(
     mut resp: reqwest::Response,
     on_delta: &mut dyn FnMut(&str),
+    on_reasoning: &mut dyn FnMut(&str),
 ) -> Result<String> {
     let mut line_buf = String::new();
     let mut merged = String::new();
@@ -153,11 +175,11 @@ async fn parse_streaming_response(
             if line.ends_with('\r') {
                 line.pop();
             }
-            handle_sse_line(&line, &mut merged, on_delta)?;
+            handle_sse_line(&line, &mut merged, on_delta, on_reasoning)?;
         }
     }
     if !line_buf.trim().is_empty() {
-        handle_sse_line(line_buf.trim(), &mut merged, on_delta)?;
+        handle_sse_line(line_buf.trim(), &mut merged, on_delta, on_reasoning)?;
     }
     if merged.trim().is_empty() {
         return Err(anyhow!("streaming response completed with empty content"));
@@ -165,7 +187,12 @@ async fn parse_streaming_response(
     Ok(merged)
 }
 
-fn handle_sse_line(line: &str, merged: &mut String, on_delta: &mut dyn FnMut(&str)) -> Result<()> {
+fn handle_sse_line(
+    line: &str,
+    merged: &mut String,
+    on_delta: &mut dyn FnMut(&str),
+    on_reasoning: &mut dyn FnMut(&str),
+) -> Result<()> {
     let trimmed = line.trim();
     if trimmed.is_empty() || trimmed.starts_with(':') {
         return Ok(());
@@ -188,6 +215,11 @@ fn handle_sse_line(line: &str, merged: &mut String, on_delta: &mut dyn FnMut(&st
                     if !content.is_empty() {
                         merged.push_str(&content);
                         on_delta(&content);
+                    }
+                }
+                if let Some(reasoning) = delta.reasoning_content {
+                    if !reasoning.is_empty() {
+                        on_reasoning(&reasoning);
                     }
                 }
             }
