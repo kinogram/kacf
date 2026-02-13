@@ -38,7 +38,13 @@ pub(crate) fn truncate(s: &str, max: usize) -> String {
     if s.len() <= max {
         return s.to_string();
     }
-    format!("{}...\n[truncated {} chars]", &s[..max], s.len() - max)
+    let mut end = max.min(s.len());
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    let head = &s[..end];
+    let truncated_chars = s[end..].chars().count();
+    format!("{}...\n[truncated {} chars]", head, truncated_chars)
 }
 
 pub(crate) fn extract_json(input: &str) -> Result<String> {
@@ -54,4 +60,24 @@ pub(crate) fn extract_json(input: &str) -> Result<String> {
         }
     }
     Err(anyhow!("未找到合法 JSON 段"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncate;
+
+    #[test]
+    fn truncate_handles_utf8_boundary_safely() {
+        let s = "abc数字xyz";
+        let out = truncate(s, 4);
+        assert!(out.starts_with("abc..."));
+        assert!(out.contains("[truncated"));
+    }
+
+    #[test]
+    fn truncate_keeps_short_strings_unchanged() {
+        let s = "hello";
+        assert_eq!(truncate(s, 5), "hello");
+        assert_eq!(truncate(s, 8), "hello");
+    }
 }
