@@ -19,7 +19,9 @@ use crate::deepseek_api;
 use crate::protocol::{AgentEvent, AgentRequest, ClarifyAnswer, ClarifyQuestion};
 use crate::web_ui_analytics::{self, CategoryCount, TimePoint};
 use crate::web_ui_api_key;
+use crate::web_ui_cache_logic;
 use crate::web_ui_languages;
+use crate::web_ui_projects;
 use crate::web_ui_runtime_env;
 use crate::web_ui_slug;
 use crate::web_ui_store;
@@ -300,25 +302,25 @@ pub(crate) struct ProjectConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct WebProject {
-    id: String,
-    name: String,
-    workspace: String,
-    goal: String,
-    updated_at: u64,
+pub(crate) struct WebProject {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) workspace: String,
+    pub(crate) goal: String,
+    pub(crate) updated_at: u64,
     snapshot: DraftPayload,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub(crate) struct UiCachePayload {
     #[serde(default)]
-    projects: Vec<WebProject>,
+    pub(crate) projects: Vec<WebProject>,
     #[serde(default)]
-    shared_config: Option<SharedConfig>,
+    pub(crate) shared_config: Option<SharedConfig>,
     #[serde(default)]
-    project_logs: std::collections::BTreeMap<String, String>,
+    pub(crate) project_logs: std::collections::BTreeMap<String, String>,
     #[serde(default)]
-    project_ui_state: std::collections::BTreeMap<String, serde_json::Value>,
+    pub(crate) project_ui_state: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -340,15 +342,15 @@ pub(crate) struct SharedConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-struct UiCachePatch {
+pub(crate) struct UiCachePatch {
     #[serde(default)]
-    projects: Option<Vec<WebProject>>,
+    pub(crate) projects: Option<Vec<WebProject>>,
     #[serde(default)]
-    shared_config: Option<SharedConfig>,
+    pub(crate) shared_config: Option<SharedConfig>,
     #[serde(default)]
-    project_logs: Option<std::collections::BTreeMap<String, String>>,
+    pub(crate) project_logs: Option<std::collections::BTreeMap<String, String>>,
     #[serde(default)]
-    project_ui_state: Option<std::collections::BTreeMap<String, serde_json::Value>>,
+    pub(crate) project_ui_state: Option<std::collections::BTreeMap<String, serde_json::Value>>,
 }
 
 fn now_unix() -> u64 {
@@ -560,26 +562,18 @@ async fn get_project_config(query: web::Query<ProjectConfigQuery>) -> impl Respo
 async fn list_projects(data: web::Data<AppState>) -> impl Responder {
     let _guard = data.projects_lock.lock().unwrap();
     let mut items = read_ui_cache().projects;
-    items.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    web_ui_projects::sort_projects_by_updated_desc(&mut items);
     HttpResponse::Ok().json(items)
 }
 
 async fn upsert_project(data: web::Data<AppState>, body: web::Json<WebProject>) -> impl Responder {
     let _guard = data.projects_lock.lock().unwrap();
-    let mut item = body.into_inner();
-    if item.id.trim().is_empty() {
-        return HttpResponse::BadRequest().body("project id is empty");
-    }
-    if item.name.trim().is_empty() {
-        item.name = item.workspace.clone();
-    }
-    item.updated_at = now_unix();
+    let item = match web_ui_projects::normalize_project_for_upsert(body.into_inner(), now_unix()) {
+        Ok(v) => v,
+        Err(e) => return HttpResponse::BadRequest().body(e),
+    };
     let mut cache = read_ui_cache();
-    if let Some(idx) = cache.projects.iter().position(|p| p.id == item.id) {
-        cache.projects[idx] = item.clone();
-    } else {
-        cache.projects.push(item.clone());
-    }
+    web_ui_projects::upsert_project_in_cache(&mut cache, item.clone());
     if let Err(e) = write_ui_cache(&cache) {
         return HttpResponse::InternalServerError().body(format!("write projects failed: {}", e));
     }
@@ -589,14 +583,13 @@ async fn upsert_project(data: web::Data<AppState>, body: web::Json<WebProject>) 
 async fn delete_project(data: web::Data<AppState>, path: web::Path<String>) -> impl Responder {
     let _guard = data.projects_lock.lock().unwrap();
     let id = path.into_inner();
-    if id.trim().is_empty() {
-        return HttpResponse::BadRequest().body("project id is empty");
-    }
     let mut cache = read_ui_cache();
-    let before = cache.projects.len();
-    cache.projects.retain(|p| p.id != id);
-    if cache.projects.len() == before {
-        return HttpResponse::NotFound().body("project not found");
+    if let Err(e) = web_ui_projects::delete_project_from_cache(&mut cache, &id) {
+        return if e == "project id is empty" {
+            HttpResponse::BadRequest().body(e)
+        } else {
+            HttpResponse::NotFound().body(e)
+        };
     }
     if let Err(e) = write_ui_cache(&cache) {
         return HttpResponse::InternalServerError().body(format!("write projects failed: {}", e));
@@ -607,13 +600,7 @@ async fn delete_project(data: web::Data<AppState>, path: web::Path<String>) -> i
 async fn get_ui_cache(data: web::Data<AppState>) -> impl Responder {
     let _guard = data.projects_lock.lock().unwrap();
     let mut payload = read_ui_cache();
-    if let Some(cfg) = payload.shared_config.as_mut() {
-        web_ui_api_key::decrypt_shared_config_for_response(cfg, &managed_root_path());
-        if cfg.mask_api_key && !cfg.api_key.trim().is_empty() {
-            cfg.api_key = web_ui_api_key::mask_api_key_for_display(&cfg.api_key);
-            cfg.api_key_is_masked = true;
-        }
-    }
+    web_ui_cache_logic::prepare_ui_cache_for_response(&mut payload, &managed_root_path());
     HttpResponse::Ok().json(payload)
 }
 
@@ -625,43 +612,15 @@ struct ApiKeyPlainResp {
 async fn get_ui_cache_api_key_plain(data: web::Data<AppState>) -> impl Responder {
     let _guard = data.projects_lock.lock().unwrap();
     let mut payload = read_ui_cache();
-    if let Some(cfg) = payload.shared_config.as_mut() {
-        web_ui_api_key::decrypt_shared_config_for_response(cfg, &managed_root_path());
-        return HttpResponse::Ok().json(ApiKeyPlainResp {
-            api_key: cfg.api_key.clone(),
-        });
-    }
-    HttpResponse::Ok().json(ApiKeyPlainResp {
-        api_key: String::new(),
-    })
+    let api_key = web_ui_cache_logic::plain_api_key_from_cache(&mut payload, &managed_root_path());
+    HttpResponse::Ok().json(ApiKeyPlainResp { api_key })
 }
 
 async fn put_ui_cache(data: web::Data<AppState>, body: web::Json<UiCachePatch>) -> impl Responder {
     let _guard = data.projects_lock.lock().unwrap();
     let patch = body.into_inner();
     let mut payload = read_ui_cache();
-    if let Some(v) = patch.projects {
-        payload.projects = v;
-    }
-    if let Some(v) = patch.shared_config {
-        let mut cfg = v;
-        if cfg.api_key_is_masked {
-            if let Some(prev) = payload.shared_config.as_ref() {
-                cfg.api_key = prev.api_key.clone();
-            } else {
-                cfg.api_key.clear();
-            }
-        }
-        cfg.api_key_is_masked = false;
-        web_ui_api_key::encrypt_shared_config_for_storage(&mut cfg, &managed_root_path());
-        payload.shared_config = Some(cfg);
-    }
-    if let Some(v) = patch.project_logs {
-        payload.project_logs = v;
-    }
-    if let Some(v) = patch.project_ui_state {
-        payload.project_ui_state = v;
-    }
+    web_ui_cache_logic::apply_ui_cache_patch(&mut payload, patch, &managed_root_path());
     match write_ui_cache(&payload) {
         Ok(_) => HttpResponse::Ok().body("saved"),
         Err(e) => HttpResponse::InternalServerError().body(format!("write ui cache failed: {}", e)),
