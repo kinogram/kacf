@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const LANGUAGES_DIR: &str = "static/languages";
-const LANGUAGE_INPUTER_VERSION: &str = "00001";
+const LANGUAGE_INPUTER_VERSION: &str = "00002";
 const LANGUAGE_PACK_PREFIX: &str = "KACF_";
 
 #[derive(Debug, Clone)]
