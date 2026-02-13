@@ -945,7 +945,9 @@ fn spawn_event_collector(state: AppState) {
     std::thread::spawn(move || {
         for evt in state.rx_evt.iter() {
             if let AgentEvent::Log(line) = &evt {
-                println!("{}", line);
+                if should_print_terminal_log(line) {
+                    println!("{}", line);
+                }
             }
             {
                 let mut runtime = state.runtime.lock().unwrap();
@@ -1023,6 +1025,15 @@ fn spawn_event_collector(state: AppState) {
             *next_id += 1;
         }
     });
+}
+
+fn should_print_terminal_log(line: &str) -> bool {
+    let raw = line.trim_start();
+    // Avoid printing model thinking/body stream to terminal to prevent huge output freezes.
+    !(raw.starts_with("[Model-Stream]")
+        || raw.starts_with("[Model-Thought]")
+        || raw.starts_with("[Model] 仍在生成中...")
+        || raw.starts_with("[Model] still generating..."))
 }
 
 fn parse_perf_ms(line: &str, prefix: &str) -> Option<u32> {
