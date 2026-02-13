@@ -930,16 +930,31 @@ function renderClarifyQuestions(questions, bucket, force) {
 function renderUiForViewBucket() {
     const bucket = viewLogBucket();
     const state = readBucketUiState(bucket);
+    const normalized = { ...state };
+    if (!runSessionActive) {
+        normalized.run_state = 'idle';
+        normalized.run_text = txt('run_idle', '');
+        normalized.status_text = txt('status_waiting', '');
+        normalized.status_class = '';
+        if (Array.isArray(normalized.clarify_questions) && normalized.clarify_questions.length > 0) {
+            writeBucketUiState(bucket, { clarify_questions: [] });
+            normalized.clarify_questions = [];
+        }
+    }
+    if (activeRunUnattendedMode && Array.isArray(normalized.clarify_questions) && normalized.clarify_questions.length > 0) {
+        writeBucketUiState(bucket, { clarify_questions: [] });
+        normalized.clarify_questions = [];
+    }
     const status = document.getElementById('status');
-    status.textContent = state.status_text || txt('status_waiting', '');
-    status.className = 'status-box ' + (state.status_class || '');
+    status.textContent = normalized.status_text || txt('status_waiting', '');
+    status.className = 'status-box ' + (normalized.status_class || '');
     const bar = document.getElementById('runbar');
-    bar.dataset.state = state.run_state || 'idle';
-    document.getElementById('runbar_text').textContent = fmt('runbar_line', '', { state: state.run_text || txt('run_idle', '') });
-    document.getElementById('diagnostics').textContent = state.diagnostics_text || txt('diagnostics_none', '');
-    renderDiffPanel(state.diff_text || '');
+    bar.dataset.state = normalized.run_state || 'idle';
+    document.getElementById('runbar_text').textContent = fmt('runbar_line', '', { state: normalized.run_text || txt('run_idle', '') });
+    document.getElementById('diagnostics').textContent = normalized.diagnostics_text || txt('diagnostics_none', '');
+    renderDiffPanel(normalized.diff_text || '');
     const shouldShowClarify = runSessionActive && !activeRunUnattendedMode && hasPendingClarify(bucket);
-    renderClarifyQuestions(shouldShowClarify ? (state.clarify_questions || []) : [], bucket, false);
+    renderClarifyQuestions(shouldShowClarify ? (normalized.clarify_questions || []) : [], bucket, false);
     if (!shouldShowClarify && hasPendingClarify(bucket)) {
         writeBucketUiState(bucket, { clarify_questions: [] });
     }
@@ -1118,10 +1133,13 @@ function setRunState(state, text) {
 }
 
 function currentRunState() {
+    if (!runSessionActive) return 'idle';
     return readBucketUiState(currentLogBucket()).run_state || 'idle';
 }
 
 function hasPendingClarify(bucket) {
+    if (!runSessionActive) return false;
+    if (activeRunUnattendedMode) return false;
     const state = readBucketUiState(bucket || currentLogBucket());
     return Array.isArray(state.clarify_questions) && state.clarify_questions.length > 0;
 }
