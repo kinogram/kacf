@@ -16,9 +16,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::deepseek_api;
-use crate::protocol::{AgentEvent, AgentRequest, ClarifyAnswer, ClarifyQuestion};
+use crate::protocol::{AgentEvent, AgentRequest, ClarifyAnswer};
 use crate::web_ui_analytics::{self, CategoryCount, TimePoint};
 use crate::web_ui_cache_logic;
+use crate::web_ui_events::{self, SerializableEvent};
 use crate::web_ui_languages;
 use crate::web_ui_projects;
 use crate::web_ui_runtime_env;
@@ -71,15 +72,10 @@ const PROJECT_CONFIG_FILENAME: &str = ".autocoding_project.json";
 const UI_CACHE_FILENAME: &str = ".autocoding_webui_cache.json";
 const MANAGED_ROOT_DIR: &str = "autocoding_data";
 const MANAGED_WORKSPACES_DIR: &str = "workspaces";
-const MAX_EVENT_BUFFER: usize = 5000;
-const MAX_EVENT_BUFFER_BYTES: usize = 8 * 1024 * 1024;
-const MAX_EVENTS_PER_PULL: usize = 300;
-const MAX_EVENTS_PER_STREAM_BATCH: usize = 120;
 
 #[derive(Clone)]
 pub struct AppState {
     tx_req: Sender<AgentRequest>,
-    rx_evt: Receiver<AgentEvent>,
     events: Arc<Mutex<Vec<(usize, SerializableEvent)>>>,
     event_bytes: Arc<Mutex<usize>>,
     next_event_id: Arc<Mutex<usize>>,
@@ -87,42 +83,6 @@ pub struct AppState {
     projects_lock: Arc<Mutex<()>>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum SerializableEvent {
-    Log { line: String },
-    NeedClarify { questions: Vec<ClarifyQuestion> },
-    Diff { diff: String },
-    Done { success: bool, message: String },
-}
-
-impl From<AgentEvent> for SerializableEvent {
-    fn from(evt: AgentEvent) -> Self {
-        match evt {
-            AgentEvent::Log(line) => SerializableEvent::Log { line },
-            AgentEvent::NeedClarify { questions } => SerializableEvent::NeedClarify { questions },
-            AgentEvent::Diff { diff } => SerializableEvent::Diff { diff },
-            AgentEvent::Done { success, message } => SerializableEvent::Done { success, message },
-        }
-    }
-}
-
-fn serializable_event_size(evt: &SerializableEvent) -> usize {
-    match evt {
-        SerializableEvent::Log { line } => line.len(),
-        SerializableEvent::Diff { diff } => diff.len(),
-        SerializableEvent::Done { message, .. } => message.len(),
-        SerializableEvent::NeedClarify { questions } => questions
-            .iter()
-            .map(|q| {
-                q.id.len()
-                    + q.question.len()
-                    + q.qtype.len()
-                    + q.options.iter().map(|x| x.len()).sum::<usize>()
-            })
-            .sum(),
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StartPayload {
@@ -900,12 +860,7 @@ async fn get_events(
 ) -> impl Responder {
     let from_id: usize = query.get("from").and_then(|v| v.parse().ok()).unwrap_or(0);
     let events = data.events.lock().unwrap();
-    let list: Vec<_> = events
-        .iter()
-        .filter(|(id, _)| *id >= from_id)
-        .take(MAX_EVENTS_PER_PULL)
-        .cloned()
-        .collect();
+    let list = web_ui_events::pull_events(&events, from_id, web_ui_events::MAX_EVENTS_PER_PULL);
     HttpResponse::Ok().json(list)
 }
 
@@ -930,12 +885,7 @@ async fn stream_events(
         loop {
             let batch: Vec<(usize, SerializableEvent)> = {
                 let events = data.events.lock().unwrap();
-                events
-                    .iter()
-                    .filter(|(id, _)| *id >= next_id)
-                    .take(MAX_EVENTS_PER_STREAM_BATCH)
-                    .cloned()
-                    .collect()
+                web_ui_events::pull_events(&events, next_id, web_ui_events::MAX_EVENTS_PER_STREAM_BATCH)
             };
             if batch.is_empty() {
                 yield Ok(web::Bytes::from_static(b"data: {\"heartbeat\":true}\n\n"));
@@ -997,138 +947,6 @@ async fn get_language_pack(path: web::Path<String>) -> impl Responder {
     }
 }
 
-fn spawn_event_collector(state: AppState) {
-    std::thread::spawn(move || {
-        for evt in state.rx_evt.iter() {
-            if let AgentEvent::Log(line) = &evt {
-                if should_print_terminal_log(line) {
-                    println!("{}", line);
-                }
-            }
-            {
-                let mut runtime = state.runtime.lock().unwrap();
-                runtime.total_events += 1;
-                match &evt {
-                    AgentEvent::Log(line) => {
-                        runtime.total_logs += 1;
-                        if line.contains("失败") || line.to_lowercase().contains("error") {
-                            runtime.last_error = line.clone();
-                        }
-                        if let Some(cat) = parse_eval_digest_category(line) {
-                            push_digest(&mut runtime.digest_history, now_unix(), cat, 600);
-                        }
-                        if let Some(sig) = parse_eval_digest_signature(line) {
-                            push_digest(&mut runtime.root_cause_history, now_unix(), sig, 600);
-                        }
-                        if let Some(ms) = parse_perf_ms(line, "[Perf] deepseek_api=") {
-                            push_sample(&mut runtime.api_ms_samples, ms, 400);
-                        }
-                        if let Some(ms) = parse_eval_ms(line) {
-                            push_sample(&mut runtime.eval_ms_samples, ms, 400);
-                        }
-                    }
-                    AgentEvent::Done { success, message } => {
-                        runtime.running = false;
-                        push_done_history(&mut runtime.done_history, now_unix(), *success, 500);
-                        if *success {
-                            runtime.total_done_ok += 1;
-                        } else {
-                            runtime.total_done_fail += 1;
-                            runtime.last_error = message.clone();
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            let serial: SerializableEvent = evt.clone().into();
-            let mut evts = state.events.lock().unwrap();
-            let mut bytes = state.event_bytes.lock().unwrap();
-            let mut next_id = state.next_event_id.lock().unwrap();
-            *bytes += serializable_event_size(&serial);
-            evts.push((*next_id, serial));
-            while evts.len() > MAX_EVENT_BUFFER || *bytes > MAX_EVENT_BUFFER_BYTES {
-                if let Some((_, removed)) = evts.first() {
-                    *bytes = bytes.saturating_sub(serializable_event_size(removed));
-                }
-                evts.remove(0);
-            }
-            *next_id += 1;
-        }
-        // If event channel closes unexpectedly while UI still thinks it's running,
-        // force a terminal event so the WebUI can converge to a stopped state.
-        let should_emit_done = {
-            let mut runtime = state.runtime.lock().unwrap();
-            if runtime.running {
-                runtime.running = false;
-                if runtime.last_error.trim().is_empty() {
-                    runtime.last_error = "agent event channel closed".to_string();
-                }
-                true
-            } else {
-                false
-            }
-        };
-        if should_emit_done {
-            let mut evts = state.events.lock().unwrap();
-            let mut bytes = state.event_bytes.lock().unwrap();
-            let mut next_id = state.next_event_id.lock().unwrap();
-            let done = SerializableEvent::Done {
-                success: false,
-                message: "Agent event channel closed".to_string(),
-            };
-            *bytes += serializable_event_size(&done);
-            evts.push((
-                *next_id,
-                done,
-            ));
-            while evts.len() > MAX_EVENT_BUFFER || *bytes > MAX_EVENT_BUFFER_BYTES {
-                if let Some((_, removed)) = evts.first() {
-                    *bytes = bytes.saturating_sub(serializable_event_size(removed));
-                }
-                evts.remove(0);
-            }
-            *next_id += 1;
-        }
-    });
-}
-
-fn should_print_terminal_log(line: &str) -> bool {
-    let raw = line.trim_start();
-    // Avoid printing model thinking/body stream to terminal to prevent huge output freezes.
-    !(raw.starts_with("[Model-Stream]")
-        || raw.starts_with("[Model-Thought]")
-        || raw.starts_with("[Model] 仍在生成中...")
-        || raw.starts_with("[Model] still generating..."))
-}
-
-fn parse_perf_ms(line: &str, prefix: &str) -> Option<u32> {
-    web_ui_analytics::parse_perf_ms(line, prefix)
-}
-
-fn parse_eval_ms(line: &str) -> Option<u32> {
-    web_ui_analytics::parse_eval_ms(line)
-}
-
-fn push_sample(samples: &mut Vec<u32>, value: u32, max_len: usize) {
-    web_ui_analytics::push_sample(samples, value, max_len)
-}
-
-fn parse_eval_digest_category(line: &str) -> Option<String> {
-    web_ui_analytics::parse_eval_digest_category(line)
-}
-
-fn parse_eval_digest_signature(line: &str) -> Option<String> {
-    web_ui_analytics::parse_eval_digest_signature(line)
-}
-
-fn push_digest(history: &mut Vec<(u64, String)>, ts: u64, category: String, max_len: usize) {
-    web_ui_analytics::push_digest(history, ts, category, max_len)
-}
-
-fn push_done_history(history: &mut Vec<(u64, bool)>, ts: u64, ok: bool, max_len: usize) {
-    web_ui_analytics::push_done_history(history, ts, ok, max_len)
-}
-
 pub(crate) fn read_gate_threshold() -> u8 {
     std::env::var("AUTOCODING_RELEASE_GATE_THRESHOLD")
         .ok()
@@ -1162,14 +980,19 @@ pub async fn run_web_server(
         .unwrap_or(8080);
     let state = AppState {
         tx_req,
-        rx_evt,
         events: Arc::new(Mutex::new(Vec::new())),
         event_bytes: Arc::new(Mutex::new(0)),
         next_event_id: Arc::new(Mutex::new(0)),
         runtime: Arc::new(Mutex::new(RuntimeStatus::default())),
         projects_lock: Arc::new(Mutex::new(())),
     };
-    spawn_event_collector(state.clone());
+    web_ui_events::spawn_event_collector(
+        rx_evt,
+        state.runtime.clone(),
+        state.events.clone(),
+        state.event_bytes.clone(),
+        state.next_event_id.clone(),
+    );
 
     HttpServer::new(move || {
         App::new()

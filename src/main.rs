@@ -12,6 +12,7 @@ mod runner;
 mod web_ui;
 mod web_ui_analytics;
 mod web_ui_cache_logic;
+mod web_ui_events;
 mod web_ui_languages;
 mod web_ui_projects;
 mod web_ui_runtime_env;
