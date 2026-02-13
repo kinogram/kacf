@@ -1129,13 +1129,15 @@ async function beginEditApiKey() {
 }
 
 async function resolveApiKeyForRequest() {
-    if (!sharedConfig.api_key_is_masked && !looksLikeMaskedApiKey(sharedConfig.api_key)) return;
+    if (!sharedConfig.api_key_is_masked && !looksLikeMaskedApiKey(sharedConfig.api_key)) return true;
     try {
         sharedConfig.api_key = await fetchPlainApiKeyFromServer();
         sharedConfig.api_key_is_masked = false;
         renderApiKeyInput();
+        return true;
     } catch (_e) {
         setStatus(txt('status_api_key_fetch_failed', ''), 'status-danger');
+        return false;
     }
 }
 
@@ -1157,7 +1159,8 @@ function reMaskApiKeyIfNeeded() {
 
 async function suggestProjectSlug(projectName, goal) {
     try {
-        await resolveApiKeyForRequest();
+        const apiReady = await resolveApiKeyForRequest();
+        if (!apiReady) return `project-${Date.now()}`;
         const resp = await fetch('/projects/suggest_slug', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -2595,7 +2598,8 @@ function showClarify(questions) {
 
 async function startSession() {
     ensureWorkspaceForCurrentProject();
-    await resolveApiKeyForRequest();
+    const apiReady = await resolveApiKeyForRequest();
+    if (!apiReady) return;
     let body = getFormData();
     if (isReadOnlyView()) {
         setStatus(txt('status_readonly_view', ''), 'status-danger');
@@ -2651,7 +2655,6 @@ async function startSession() {
 async function resumeSession() {
     try {
         ensureWorkspaceForCurrentProject();
-        await resolveApiKeyForRequest();
         if (isReadOnlyView()) {
             setStatus(txt('status_readonly_view', ''), 'status-danger');
             return;
@@ -2932,7 +2935,11 @@ function bindEvents() {
     document.getElementById('mask_api_key').addEventListener('change', async () => {
         updateSharedConfigFromInputs();
         if (!sharedConfig.mask_api_key && sharedConfig.api_key_is_masked) {
-            await resolveApiKeyForRequest();
+            const apiReady = await resolveApiKeyForRequest();
+            if (!apiReady) {
+                sharedConfig.mask_api_key = true;
+                document.getElementById('mask_api_key').checked = true;
+            }
             updateSharedConfigFromInputs();
         }
         if (sharedConfig.mask_api_key) apiKeyEditMode = false;
