@@ -1281,6 +1281,7 @@ function getFormData() {
         api_key: getApiKeyInputValue(),
         base_url: document.getElementById('base_url').value.trim(),
         model: document.getElementById('model').value.trim(),
+        language: normalizeLanguageCode(sharedConfig.language || currentLanguage),
         auto_revert_profile: document.getElementById('auto_revert_profile').value.trim(),
         precheck_cmd: document.getElementById('precheck_cmd').value.trim(),
         history_max_messages: document.getElementById('history_max_messages').value.trim(),
@@ -1304,6 +1305,10 @@ function applyFormData(d) {
             document.getElementById(k).value = d[k];
         }
     });
+    if (typeof d.language === 'string' && d.language) {
+        const code = normalizeLanguageCode(d.language);
+        if (code) sharedConfig.language = code;
+    }
 }
 
 function applyStaticCopyToDom() {

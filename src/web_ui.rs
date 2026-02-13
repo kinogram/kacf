@@ -66,6 +66,8 @@ struct StartPayload {
     api_key: String,
     base_url: String,
     model: String,
+    #[serde(default)]
+    language: String,
     #[serde(default = "default_auto_revert_profile")]
     auto_revert_profile: String,
     #[serde(default)]
@@ -87,6 +89,8 @@ struct DraftPayload {
     api_key: String,
     base_url: String,
     model: String,
+    #[serde(default)]
+    language: String,
     #[serde(default = "default_auto_revert_profile")]
     auto_revert_profile: String,
     #[serde(default)]
@@ -123,6 +127,7 @@ impl DraftPayload {
             api_key: self.api_key,
             base_url: self.base_url,
             model: self.model,
+            language: self.language,
             auto_revert_profile: self.auto_revert_profile,
             precheck_cmd: self.precheck_cmd,
             history_max_messages: self.history_max_messages,
@@ -776,6 +781,7 @@ fn start_from_payload(
         api_key: payload.api_key,
         base_url: payload.base_url,
         model: payload.model,
+        language: payload.language,
         auto_revert_profile: auto_revert_profile.clone(),
         resume_from_checkpoint,
         workspace: workspace_full.clone(),
