@@ -501,8 +501,21 @@ function applyBackendOfflineMode() {
     BACKEND_COMM_BUTTON_IDS.forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
-        el.style.display = backendOffline ? 'none' : '';
-        el.disabled = backendOffline ? true : !!el.disabled;
+        if (backendOffline) {
+            if (el.dataset.backendOfflineLocked !== '1') {
+                el.dataset.backendOfflinePrevDisabled = el.disabled ? '1' : '0';
+                el.dataset.backendOfflineLocked = '1';
+            }
+            el.style.display = 'none';
+            el.disabled = true;
+            return;
+        }
+        el.style.display = '';
+        if (el.dataset.backendOfflineLocked === '1') {
+            el.disabled = el.dataset.backendOfflinePrevDisabled === '1';
+            delete el.dataset.backendOfflinePrevDisabled;
+            delete el.dataset.backendOfflineLocked;
+        }
     });
 }
 
@@ -1061,6 +1074,10 @@ function applyStaticCopyToDom() {
         ['hint_log_exports', 'hint_log_exports'],
         ['section_diff_title', 'section_diff_title'],
         ['section_global_title', 'section_global_title'],
+        ['label_api_key', 'label_api_key'],
+        ['label_model', 'label_model'],
+        ['label_base_url', 'label_base_url'],
+        ['label_language', 'label_language'],
         ['label_encrypt_api_key', 'label_encrypt_api_key'],
         ['label_mask_api_key', 'label_mask_api_key'],
     ];
@@ -2468,4 +2485,3 @@ async function init() {
 }
 
 init();
-</script>
