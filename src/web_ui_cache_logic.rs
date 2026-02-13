@@ -1,7 +1,5 @@
-const MAX_LOG_CHARS_PER_BUCKET: usize = 120_000;
-const MAX_LOG_LINES_PER_BUCKET: usize = 2_500;
-const MAX_DIFF_CHARS: usize = 120_000;
-const MAX_DIFF_LINES: usize = 2_500;
+const DEFAULT_LOG_MAX_CHARS: usize = 50_000;
+const DEFAULT_DIFF_MAX_CHARS: usize = 50_000;
 
 fn truncate_tail_chars(input: &str, max_chars: usize) -> String {
     if max_chars == 0 {
@@ -14,30 +12,25 @@ fn truncate_tail_chars(input: &str, max_chars: usize) -> String {
     input.chars().skip(total - max_chars).collect()
 }
 
-fn keep_tail_lines(input: &str, max_lines: usize) -> String {
-    if max_lines == 0 {
-        return String::new();
-    }
-    let mut lines: Vec<&str> = input.lines().collect();
-    if lines.len() > max_lines {
-        lines = lines.split_off(lines.len() - max_lines);
-    }
-    lines.join("\n")
+fn parse_limit(raw: &str, fallback: usize) -> usize {
+    raw.trim()
+        .parse::<usize>()
+        .ok()
+        .filter(|v| *v > 0)
+        .unwrap_or(fallback)
 }
 
-fn sanitize_log_bucket(raw: &str) -> String {
-    let tail = truncate_tail_chars(raw, MAX_LOG_CHARS_PER_BUCKET);
-    let trimmed_lines = keep_tail_lines(&tail, MAX_LOG_LINES_PER_BUCKET);
-    if trimmed_lines.is_empty() {
+fn sanitize_log_bucket(raw: &str, max_chars: usize) -> String {
+    let tail = truncate_tail_chars(raw, max_chars);
+    if tail.is_empty() {
         String::new()
     } else {
-        format!("{}\n", trimmed_lines)
+        format!("{}\n", tail.trim_end_matches('\n'))
     }
 }
 
-fn sanitize_diff_text(raw: &str) -> String {
-    let tail = truncate_tail_chars(raw, MAX_DIFF_CHARS);
-    keep_tail_lines(&tail, MAX_DIFF_LINES)
+fn sanitize_diff_text(raw: &str, max_chars: usize) -> String {
+    truncate_tail_chars(raw, max_chars)
 }
 
 pub(crate) fn apply_ui_cache_patch(
@@ -53,10 +46,20 @@ pub(crate) fn apply_ui_cache_patch(
     if let Some(v) = patch.global_options {
         payload.global_options = Some(v);
     }
+    let (log_max_chars, diff_max_chars) = payload
+        .global_options
+        .as_ref()
+        .map(|g| {
+            (
+                parse_limit(&g.log_max_chars, DEFAULT_LOG_MAX_CHARS),
+                parse_limit(&g.diff_max_chars, DEFAULT_DIFF_MAX_CHARS),
+            )
+        })
+        .unwrap_or((DEFAULT_LOG_MAX_CHARS, DEFAULT_DIFF_MAX_CHARS));
     if let Some(v) = patch.project_logs {
         payload.project_logs = v
             .into_iter()
-            .map(|(k, val)| (k, sanitize_log_bucket(&val)))
+            .map(|(k, val)| (k, sanitize_log_bucket(&val, log_max_chars)))
             .collect();
     }
     if let Some(v) = patch.project_ui_state {
@@ -67,7 +70,7 @@ pub(crate) fn apply_ui_cache_patch(
                     if let Some(raw) = obj.get("diff_text").and_then(|x| x.as_str()) {
                         obj.insert(
                             "diff_text".to_string(),
-                            serde_json::Value::String(sanitize_diff_text(raw)),
+                            serde_json::Value::String(sanitize_diff_text(raw, diff_max_chars)),
                         );
                     }
                 }
@@ -80,7 +83,7 @@ pub(crate) fn apply_ui_cache_patch(
 #[cfg(test)]
 mod tests {
     use super::apply_ui_cache_patch;
-    use crate::web_ui::{UiCachePatch, UiCachePayload};
+    use crate::web_ui::{GlobalOptions, UiCachePatch, UiCachePayload};
     use serde_json::json;
     use std::collections::BTreeMap;
 
@@ -92,12 +95,16 @@ mod tests {
         apply_ui_cache_patch(
             &mut payload,
             UiCachePatch {
+                global_options: Some(GlobalOptions {
+                    log_max_chars: "50000".to_string(),
+                    ..GlobalOptions::default()
+                }),
                 project_logs: Some(logs),
                 ..UiCachePatch::default()
             },
         );
         let out = payload.project_logs.get("project:a").cloned().unwrap_or_default();
-        assert!(out.chars().count() <= 120_001);
+        assert!(out.chars().count() <= 50_001);
     }
 
     #[test]
@@ -114,6 +121,10 @@ mod tests {
         apply_ui_cache_patch(
             &mut payload,
             UiCachePatch {
+                global_options: Some(GlobalOptions {
+                    diff_max_chars: "50000".to_string(),
+                    ..GlobalOptions::default()
+                }),
                 project_ui_state: Some(ui_state),
                 ..UiCachePatch::default()
             },
@@ -124,6 +135,6 @@ mod tests {
             .and_then(|v| v.get("diff_text"))
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        assert!(out.chars().count() <= 120_000);
+        assert!(out.chars().count() <= 50_000);
     }
 }

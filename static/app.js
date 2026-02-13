@@ -26,11 +26,9 @@ const FALLBACK_LOG_DEDUP_MS = 30000;
 const BACKEND_FAILURE_THRESHOLD = 3;
 const SSE_ERROR_LIMIT = 6;
 const SSE_CONNECT_GRACE_MS = 10000;
-const LOG_BUCKET_MAX_CHARS = 120000;
-const LOG_BUCKET_MAX_LINES = 2500;
-const LOG_LINE_MAX_CHARS = 2000;
-const DIFF_MAX_CHARS = 120000;
-const DIFF_MAX_LINES = 2500;
+const DEFAULT_LOG_MAX_CHARS = 50000;
+const DEFAULT_DIFF_MAX_CHARS = 50000;
+const LARGE_CHAR_LIMIT_WARNING_THRESHOLD = 50000;
 let activeRunLogBucket = '';
 let activeRunProjectLabel = '';
 let runSessionActive = false;
@@ -51,6 +49,8 @@ let sidebarMobileOpen = false;
 let globalOptions = {
     auto_resume_attempts: '',
     stop_after_minutes: '',
+    log_max_chars: String(DEFAULT_LOG_MAX_CHARS),
+    diff_max_chars: String(DEFAULT_DIFF_MAX_CHARS),
 };
 let unattendedAutoResumeRemaining = 0;
 let unattendedAutoResumeTimer = null;
@@ -109,6 +109,28 @@ function parseBoundedInt(raw, min, max, fallback) {
     return n;
 }
 
+function logMaxCharsSetting() {
+    return parseBoundedInt(globalOptions.log_max_chars, 1, 2_000_000, DEFAULT_LOG_MAX_CHARS);
+}
+
+function diffMaxCharsSetting() {
+    return parseBoundedInt(globalOptions.diff_max_chars, 1, 2_000_000, DEFAULT_DIFF_MAX_CHARS);
+}
+
+function maybeWarnLargeCharLimit(source) {
+    const logLimit = logMaxCharsSetting();
+    const diffLimit = diffMaxCharsSetting();
+    if (logLimit <= LARGE_CHAR_LIMIT_WARNING_THRESHOLD && diffLimit <= LARGE_CHAR_LIMIT_WARNING_THRESHOLD) {
+        return;
+    }
+    setStatus(fmt('status_large_char_limit_warning', '', {
+        source: source || txt('label_global_config', ''),
+        threshold: LARGE_CHAR_LIMIT_WARNING_THRESHOLD,
+        log_limit: logLimit,
+        diff_limit: diffLimit,
+    }), 'status-warn');
+}
+
 function truncateTailChars(raw, maxChars) {
     const text = String(raw || '');
     if (maxChars <= 0) return '';
@@ -116,31 +138,14 @@ function truncateTailChars(raw, maxChars) {
     return text.slice(text.length - maxChars);
 }
 
-function truncateHeadChars(raw, maxChars) {
-    const text = String(raw || '');
-    if (maxChars <= 0) return '';
-    if (text.length <= maxChars) return text;
-    return text.slice(0, maxChars);
-}
-
 function sanitizeDiffText(raw) {
-    const tail = truncateTailChars(raw, DIFF_MAX_CHARS);
-    let lines = tail.split('\n');
-    if (lines.length > DIFF_MAX_LINES) {
-        lines = lines.slice(lines.length - DIFF_MAX_LINES);
-    }
-    return lines.join('\n');
+    return truncateTailChars(raw, diffMaxCharsSetting());
 }
 
 function sanitizeLogContent(raw) {
-    const tail = truncateTailChars(raw, LOG_BUCKET_MAX_CHARS);
-    let lines = tail.split('\n');
-    if (lines.length && lines[lines.length - 1] === '') lines.pop();
-    if (lines.length > LOG_BUCKET_MAX_LINES) {
-        lines = lines.slice(lines.length - LOG_BUCKET_MAX_LINES);
-    }
-    lines = lines.map(line => truncateHeadChars(line, LOG_LINE_MAX_CHARS));
-    return lines.length ? `${lines.join('\n')}\n` : '';
+    const tail = truncateTailChars(raw, logMaxCharsSetting());
+    if (!tail) return '';
+    return tail.endsWith('\n') ? tail : `${tail}\n`;
 }
 
 function sanitizeProjectLogsMap(rawMap) {
@@ -629,12 +634,6 @@ async function fetchUiCacheFromServer() {
         const resp = await fetch('/ui_cache');
         if (!resp.ok) return false;
         const data = await resp.json();
-        cacheProjectLogs = sanitizeProjectLogsMap(
-            (data.project_logs && typeof data.project_logs === 'object') ? data.project_logs : {}
-        );
-        cacheProjectUiState = sanitizeProjectUiStateMap(
-            (data.project_ui_state && typeof data.project_ui_state === 'object') ? data.project_ui_state : {}
-        );
         if (data.shared_config && typeof data.shared_config === 'object') {
             sharedConfig = {
                 api_key: data.shared_config.api_key || '',
@@ -647,8 +646,16 @@ async function fetchUiCacheFromServer() {
             globalOptions = {
                 auto_resume_attempts: String(data.global_options.auto_resume_attempts || ''),
                 stop_after_minutes: String(data.global_options.stop_after_minutes || ''),
+                log_max_chars: String(data.global_options.log_max_chars || DEFAULT_LOG_MAX_CHARS),
+                diff_max_chars: String(data.global_options.diff_max_chars || DEFAULT_DIFF_MAX_CHARS),
             };
         }
+        cacheProjectLogs = sanitizeProjectLogsMap(
+            (data.project_logs && typeof data.project_logs === 'object') ? data.project_logs : {}
+        );
+        cacheProjectUiState = sanitizeProjectUiStateMap(
+            (data.project_ui_state && typeof data.project_ui_state === 'object') ? data.project_ui_state : {}
+        );
         return true;
     } catch (_e) {
         return false;
@@ -693,6 +700,8 @@ function updateGlobalOptionsFromInputs() {
     globalOptions = {
         auto_resume_attempts: String(document.getElementById('global_auto_resume_attempts')?.value || '').trim(),
         stop_after_minutes: String(document.getElementById('global_stop_after_minutes')?.value || '').trim(),
+        log_max_chars: String(document.getElementById('global_log_max_chars')?.value || '').trim(),
+        diff_max_chars: String(document.getElementById('global_diff_max_chars')?.value || '').trim(),
     };
 }
 
@@ -701,6 +710,10 @@ function applyGlobalOptionsToInputs() {
     if (a) a.value = globalOptions.auto_resume_attempts || '';
     const s = document.getElementById('global_stop_after_minutes');
     if (s) s.value = globalOptions.stop_after_minutes || '';
+    const l = document.getElementById('global_log_max_chars');
+    if (l) l.value = globalOptions.log_max_chars || String(DEFAULT_LOG_MAX_CHARS);
+    const d = document.getElementById('global_diff_max_chars');
+    if (d) d.value = globalOptions.diff_max_chars || String(DEFAULT_DIFF_MAX_CHARS);
 }
 
 function loadProjectUiStateMap() {
@@ -958,6 +971,7 @@ function getLogRenderState(bucket) {
     if (!logRenderStateByBucket[bucket]) {
         logRenderStateByBucket[bucket] = {
             activeModelStreamTag: '',
+            streamLineSinceTrim: 0,
         };
     }
     return logRenderStateByBucket[bucket];
@@ -969,25 +983,37 @@ function appendLog(text) {
     const state = getLogRenderState(bucket);
     const lines = readLogLinesForBucket(bucket);
     const streamTag = parseModelStreamTag(line);
+    let appendedLines = 0;
     if (streamTag) {
         trimTrailingModelProgress(lines);
         if (state.activeModelStreamTag !== streamTag) {
             lines.push(streamTag);
             state.activeModelStreamTag = streamTag;
+            appendedLines += 1;
         }
         const bodyLines = streamBodyLines(line, streamTag);
-        for (const one of bodyLines) lines.push(one);
+        for (const one of bodyLines) {
+            lines.push(one);
+            appendedLines += 1;
+        }
     } else if (isModelProgressLine(line)) {
         if (lines.length && isModelProgressLine(lines[lines.length - 1])) {
             lines[lines.length - 1] = line;
         } else {
             lines.push(line);
+            appendedLines += 1;
         }
     } else {
         state.activeModelStreamTag = '';
         lines.push(line);
+        appendedLines += 1;
     }
     writeLogLinesForBucket(bucket, lines);
+    state.streamLineSinceTrim += appendedLines;
+    if (state.streamLineSinceTrim >= 10) {
+        writeLogForBucket(bucket, readLogForBucket(bucket));
+        state.streamLineSinceTrim = 0;
+    }
     const log = document.getElementById('log');
     log.textContent = readLogForBucket(bucket);
     log.scrollTop = log.scrollHeight;
@@ -1205,6 +1231,8 @@ function applyStaticCopyToDom() {
         ['label_language', 'label_language'],
         ['label_global_auto_resume_attempts', 'label_global_auto_resume_attempts'],
         ['label_global_stop_after_minutes', 'label_global_stop_after_minutes'],
+        ['label_global_log_max_chars', 'label_global_log_max_chars'],
+        ['label_global_diff_max_chars', 'label_global_diff_max_chars'],
     ];
     staticMap.forEach(([id, key]) => {
         const el = document.getElementById(id);
@@ -1251,6 +1279,8 @@ function applyStaticCopyToDom() {
         ['history_max_chars', 'ph_history_max_chars'],
         ['global_auto_resume_attempts', 'ph_global_auto_resume_attempts'],
         ['global_stop_after_minutes', 'ph_global_stop_after_minutes'],
+        ['global_log_max_chars', 'ph_global_log_max_chars'],
+        ['global_diff_max_chars', 'ph_global_diff_max_chars'],
         ['goal', 'ph_goal'],
         ['success_regex', 'ph_success_regex'],
         ['api_key', 'ph_api_key'],
@@ -1289,6 +1319,14 @@ function closeGlobalConfigModal() {
 
 async function saveGlobalConfig() {
     updateGlobalOptionsFromInputs();
+    maybeWarnLargeCharLimit(txt('label_global_config', ''));
+    if (logMaxCharsSetting() > LARGE_CHAR_LIMIT_WARNING_THRESHOLD || diffMaxCharsSetting() > LARGE_CHAR_LIMIT_WARNING_THRESHOLD) {
+        alert(fmt('warn_large_char_limit_alert', '', {
+            threshold: LARGE_CHAR_LIMIT_WARNING_THRESHOLD,
+            log_limit: logMaxCharsSetting(),
+            diff_limit: diffMaxCharsSetting(),
+        }));
+    }
     const wantedLanguage = normalizeLanguageCode(document.getElementById('language_select')?.value || currentLanguage);
     if (wantedLanguage && wantedLanguage !== currentLanguage) {
         const switched = await switchLanguage(wantedLanguage, false);
@@ -1304,6 +1342,8 @@ async function saveGlobalConfig() {
     }
     closeGlobalConfigModal();
     setStatus(txt('status_global_saved', ''), 'status-warn');
+    renderCurrentLogView();
+    renderUiForViewBucket();
 }
 
 function setAutoSaveState(text) {
@@ -2517,6 +2557,18 @@ function bindEvents() {
     });
     document.getElementById('global_stop_after_minutes').addEventListener('input', () => {
         updateGlobalOptionsFromInputs();
+        scheduleUiCacheSave();
+    });
+    document.getElementById('global_log_max_chars').addEventListener('input', () => {
+        updateGlobalOptionsFromInputs();
+        maybeWarnLargeCharLimit(txt('label_global_log_max_chars', ''));
+        renderCurrentLogView();
+        scheduleUiCacheSave();
+    });
+    document.getElementById('global_diff_max_chars').addEventListener('input', () => {
+        updateGlobalOptionsFromInputs();
+        maybeWarnLargeCharLimit(txt('label_global_diff_max_chars', ''));
+        renderUiForViewBucket();
         scheduleUiCacheSave();
     });
     document.getElementById('language_select').addEventListener('change', async () => {
