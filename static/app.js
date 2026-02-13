@@ -522,6 +522,13 @@ function setRunningProjectIndicator(label) {
     renderProjectAccordion();
 }
 
+function setRunActionButtons(running) {
+    const startBtn = document.getElementById('start_btn');
+    const stopBtn = document.getElementById('stop_btn');
+    if (startBtn) startBtn.disabled = !!running;
+    if (stopBtn) stopBtn.disabled = !running;
+}
+
 function setElementsDisabled(ids, disabled) {
     ids.forEach(id => {
         const el = document.getElementById(id);
@@ -1265,15 +1272,9 @@ function syncStoppedStateIfNeeded(reason, suppressStoppedAlert) {
     if (!isRunStateActive(state)) return;
     clearStopAckTimer();
     stopRequested = false;
-    activeRunLogBucket = '';
-    activeRunProjectLabel = '';
-    runSessionActive = false;
-    setRunningProjectIndicator(txt('running_project_none', ''));
-    setProjectControlsDisabled(false);
-    applyReadOnlyMode();
+    resetRunSessionUiState();
     setRunState('idle', txt('run_idle', ''));
-    document.getElementById('start_btn').disabled = false;
-    document.getElementById('stop_btn').disabled = true;
+    setRunActionButtons(false);
     if (!suppressStoppedAlert && !completionAlertShown) {
         completionAlertShown = true;
         alert(txt('alert_task_stopped', ''));
@@ -1613,6 +1614,19 @@ function resetRunSessionUiState() {
     setRunningProjectIndicator(txt('running_project_none', ''));
     setProjectControlsDisabled(false);
     applyReadOnlyMode();
+}
+
+function markRunSessionStarted(label, resetFlags) {
+    setRunningProjectIndicator(label);
+    setProjectControlsDisabled(true);
+    runSessionActive = true;
+    applyReadOnlyMode();
+    setRunActionButtons(true);
+    document.getElementById('revert_btn').disabled = false;
+    if (resetFlags) {
+        stopRequested = false;
+        completionAlertShown = false;
+    }
 }
 
 function setProjectDraftState() {
@@ -2105,14 +2119,8 @@ async function refreshUiState() {
             if (!activeRunLogBucket) {
                 activeRunLogBucket = `runtime:${label}`;
             }
-            runSessionActive = true;
             unattendedAutoResumeRemaining = autoResumeAttemptsSetting();
-            setRunningProjectIndicator(label);
-            setProjectControlsDisabled(true);
-            applyReadOnlyMode();
-            document.getElementById('start_btn').disabled = true;
-            document.getElementById('stop_btn').disabled = false;
-            document.getElementById('revert_btn').disabled = false;
+            markRunSessionStarted(label, false);
             if (hasPendingClarify(currentLogBucket())) {
                 setStatus(txt('status_need_clarify', ''), 'status-warn');
                 setRunState('waiting_clarify', txt('run_waiting_clarify', ''));
@@ -2124,10 +2132,7 @@ async function refreshUiState() {
             syncStoppedStateIfNeeded(txt('sync_reason_backend_stopped', ''));
             resetBucketRuntimeUiState(currentLogBucket());
             if (viewLogBucket() === currentLogBucket()) renderClarifyQuestions([], currentLogBucket(), true);
-            setProjectControlsDisabled(false);
-            setRunningProjectIndicator(txt('running_project_none', ''));
-            runSessionActive = false;
-            applyReadOnlyMode();
+            resetRunSessionUiState();
         }
     } catch (_e) {
         markBackendFailure('ui_state');
@@ -2370,8 +2375,7 @@ function handleDoneEvent(evt) {
     uiCacheLastHeavySyncMs = 0;
     scheduleUiCacheSave();
     stopRequested = false;
-    document.getElementById('start_btn').disabled = false;
-    document.getElementById('stop_btn').disabled = true;
+    setRunActionButtons(false);
 }
 
 const EVENT_HANDLERS = {
@@ -2446,22 +2450,14 @@ async function startSession() {
             throw new Error(`${resp.status} ${msg}`);
         }
         setStatus(txt('status_started_new_task', ''), 'status-warn');
-        setRunningProjectIndicator(activeRunProjectLabel);
-        setProjectControlsDisabled(true);
-        runSessionActive = true;
+        markRunSessionStarted(activeRunProjectLabel, true);
         activeRunUnattendedMode = !!body.unattended_mode;
         unattendedAutoResumeRemaining = autoResumeAttemptsSetting();
         writeBucketUiState(activeRunLogBucket, { clarify_questions: [] });
         clearUnattendedAutoResumeTimer();
         armManualRunStopTimer();
         renderUnattendedState();
-        applyReadOnlyMode();
         setRunState('running', txt('run_running', ''));
-        stopRequested = false;
-        completionAlertShown = false;
-        document.getElementById('start_btn').disabled = true;
-        document.getElementById('stop_btn').disabled = false;
-        document.getElementById('revert_btn').disabled = false;
     } catch (e) {
         resetRunSessionUiState();
         resetStopTimerState();
@@ -2515,9 +2511,7 @@ async function resumeSession(opts) {
             throw new Error(`${resp.status} ${msg}`);
         }
         setStatus(txt('status_resumed', ''), 'status-warn');
-        setRunningProjectIndicator(activeRunProjectLabel);
-        setProjectControlsDisabled(true);
-        runSessionActive = true;
+        markRunSessionStarted(activeRunProjectLabel, true);
         clearUnattendedAutoResumeTimer();
         if (!isAuto) {
             activeRunUnattendedMode = !!body.unattended_mode;
@@ -2532,12 +2526,7 @@ async function resumeSession(opts) {
         }
         manualRunStopExpired = manualRunStopDeadlineMs > 0 && Date.now() >= manualRunStopDeadlineMs;
         renderUnattendedState();
-        applyReadOnlyMode();
         setRunState('running', txt('run_running', ''));
-        stopRequested = false;
-        completionAlertShown = false;
-        document.getElementById('start_btn').disabled = true;
-        document.getElementById('stop_btn').disabled = false;
     } catch (e) {
         resetRunSessionUiState();
         setStatus(`${txt('status_resume_failed_prefix', '')}${e}`, 'status-danger');
@@ -2566,8 +2555,7 @@ async function stopSession() {
         } else {
             setStatus(txt('status_stop_waiting_ack', ''), 'status-warn');
         }
-        document.getElementById('start_btn').disabled = false;
-        document.getElementById('stop_btn').disabled = true;
+        setRunActionButtons(false);
     } catch (e) {
         setRunState('interrupted', txt('run_interrupted', ''));
         setStatus(`${txt('status_stop_failed_prefix', '')}${e}`, 'status-danger');
@@ -2927,7 +2915,7 @@ async function init() {
     setProjectControlsDisabled(false);
     applyReadOnlyMode();
     updateGoRunningProjectButton();
-    document.getElementById('stop_btn').disabled = true;
+    setRunActionButtons(false);
     document.getElementById('revert_btn').disabled = true;
     setRunState('idle', txt('run_idle', ''));
     setAutoSaveState(fmt('autosave_project_idle', '', {}));
