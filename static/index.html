@@ -1104,19 +1104,19 @@ async function fetchPlainApiKeyFromServer() {
 async function beginEditApiKey() {
     if (!sharedConfig.mask_api_key) return;
     try {
-        const el = document.getElementById('api_key');
-        const showingMasked = !!el && el.dataset.masked === '1';
+        const inputEl = document.getElementById('api_key');
+        const showingMasked = !!inputEl && inputEl.dataset.masked === '1';
         if (sharedConfig.api_key_is_masked || showingMasked) {
             sharedConfig.api_key = await fetchPlainApiKeyFromServer();
             sharedConfig.api_key_is_masked = false;
         }
         apiKeyEditMode = true;
         renderApiKeyInput();
-        const el = document.getElementById('api_key');
-        if (el) {
-            el.focus();
-            const len = el.value.length;
-            el.setSelectionRange(len, len);
+        const editInput = document.getElementById('api_key');
+        if (editInput) {
+            editInput.focus();
+            const len = editInput.value.length;
+            editInput.setSelectionRange(len, len);
         }
     } catch (_e) {
         setStatus(txt('status_api_key_edit_failed', ''), 'status-danger');
