@@ -27,6 +27,21 @@ pub(crate) fn validate_patch_payload(summary: &str, diff: &str) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn sanitize_unified_diff(raw: &str) -> String {
+    let input = raw.trim();
+    if input.is_empty() {
+        return String::new();
+    }
+    // Prefer fenced ```diff blocks when model wraps JSON string with markdown-like payload.
+    if let Some(extracted) = extract_fenced_block(input, "diff") {
+        return extracted.trim().to_string();
+    }
+    if let Some(extracted) = extract_fenced_block(input, "") {
+        return extracted.trim().to_string();
+    }
+    input.to_string()
+}
+
 pub(crate) fn extract_paths_from_unified_diff(diff: &str) -> Result<Vec<String>> {
     let mut out = BTreeSet::new();
     for line in diff.lines() {
@@ -52,6 +67,18 @@ pub(crate) fn extract_paths_from_unified_diff(diff: &str) -> Result<Vec<String>>
         out.insert(path.to_string());
     }
     Ok(out.into_iter().collect())
+}
+
+fn extract_fenced_block(input: &str, lang: &str) -> Option<String> {
+    let tag = if lang.is_empty() {
+        "```".to_string()
+    } else {
+        format!("```{}", lang)
+    };
+    let start = input.find(&tag)?;
+    let body_start = input[start..].find('\n')? + start + 1;
+    let end = input[body_start..].find("```")? + body_start;
+    Some(input[body_start..end].to_string())
 }
 
 pub(crate) fn truncate(s: &str, max: usize) -> String {
@@ -84,7 +111,9 @@ pub(crate) fn extract_json(input: &str) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_paths_from_unified_diff, truncate, validate_patch_payload};
+    use super::{
+        extract_paths_from_unified_diff, sanitize_unified_diff, truncate, validate_patch_payload,
+    };
 
     #[test]
     fn truncate_handles_utf8_boundary_safely() {
@@ -114,5 +143,20 @@ index 1111111..2222222 100644\n\
         assert!(validate_patch_payload("fix", diff).is_ok());
         let paths = extract_paths_from_unified_diff(diff).expect("paths");
         assert_eq!(paths, vec!["src/main.rs".to_string()]);
+    }
+
+    #[test]
+    fn sanitize_unified_diff_extracts_fenced_diff_block() {
+        let raw = "```diff\n\
+diff --git a/a.txt b/a.txt\n\
+--- a/a.txt\n\
++++ b/a.txt\n\
+@@ -1 +1 @@\n\
+-a\n\
++b\n\
+```";
+        let out = sanitize_unified_diff(raw);
+        assert!(out.starts_with("diff --git"));
+        assert!(!out.contains("```"));
     }
 }

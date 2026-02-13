@@ -499,6 +499,7 @@ async fn run_session(
             ModelJson::Patch { summary, diff } => {
                 // 记录 patch 输出方便之后放入对话历史
                 let patch_content = content.clone();
+                let diff = protocol_patch::sanitize_unified_diff(&diff);
                 let patch_paths = protocol_patch::extract_paths_from_unified_diff(&diff)
                     .unwrap_or_default();
                 let patch_history =
@@ -525,8 +526,9 @@ async fn run_session(
                     )));
                     messages.push(deepseek_api::ChatMessage::assistant(patch_content));
                     messages.push(deepseek_api::ChatMessage::user(format!(
-                        "你的 unified diff 无法应用：{}。请基于当前工作区重新生成更小且可应用的 hunk diff。",
-                        truncate(&e.to_string(), 1200)
+                        "你的 unified diff 无法应用：{}。{}",
+                        truncate(&e.to_string(), 1200),
+                        apply_failure_hint(&e.to_string())
                     )));
                     protocol_session_state::save_session_state(
                         &cfg.workspace,
@@ -548,8 +550,9 @@ async fn run_session(
                     )));
                     messages.push(deepseek_api::ChatMessage::assistant(patch_content));
                     messages.push(deepseek_api::ChatMessage::user(format!(
-                        "你的 unified diff 在应用阶段失败：{}。请重发可直接应用的最小 hunk diff。",
-                        truncate(&e.to_string(), 1200)
+                        "你的 unified diff 在应用阶段失败：{}。{}",
+                        truncate(&e.to_string(), 1200),
+                        apply_failure_hint(&e.to_string())
                     )));
                     protocol_session_state::save_session_state(
                         &cfg.workspace,
@@ -1091,6 +1094,20 @@ fn digest_eval_failure(exit_code: i32, stdout: &str, stderr: &str) -> FailureDig
 
 fn eval_has_fatal_runtime_marker(stdout: &str, stderr: &str) -> bool {
     protocol_failure::eval_has_fatal_runtime_marker(stdout, stderr)
+}
+
+fn apply_failure_hint(err: &str) -> &'static str {
+    let t = err.to_lowercase();
+    if t.contains("patch failed") || t.contains("does not apply") {
+        return "hunk 与当前文件不匹配，请缩小改动范围并更新 hunk 上下文后重试。";
+    }
+    if t.contains("corrupt patch") || t.contains("malformed patch") {
+        return "diff 格式损坏，请输出标准 unified diff（包含 diff --git / --- / +++ / @@）。";
+    }
+    if t.contains("no such file") {
+        return "目标文件路径不正确，请核对 b/<path> 与仓库实际相对路径。";
+    }
+    "请输出更小、更精确、可直接应用的 unified diff。"
 }
 
 /// Truncate a string to a maximum length for log display. If the string is

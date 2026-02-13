@@ -172,7 +172,22 @@ pub fn check_apply_unified_diff(workspace: &Path, diff: &str) -> Result<()> {
 
 /// Apply a unified diff to the workspace.
 pub fn apply_unified_diff(workspace: &Path, diff: &str) -> Result<()> {
-    run_git_apply(workspace, diff, &["apply", "--recount", "--whitespace=nowarn"])
+    // First try direct apply for speed.
+    if run_git_apply(
+        workspace,
+        diff,
+        &["apply", "--recount", "--whitespace=nowarn"],
+    )
+    .is_ok()
+    {
+        return Ok(());
+    }
+    // Fallback to 3-way apply when context has drifted but base is available.
+    run_git_apply(
+        workspace,
+        diff,
+        &["apply", "--3way", "--recount", "--whitespace=nowarn"],
+    )
 }
 
 fn run_git_apply(workspace: &Path, diff: &str, args: &[&str]) -> Result<()> {
