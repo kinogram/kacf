@@ -57,20 +57,20 @@ pub(crate) fn compact_assistant_text(s: &str, max: usize) -> String {
 
 pub(crate) fn compact_patch_history(
     summary: &str,
-    files: &[crate::protocol::FileWrite],
+    paths: &[String],
     raw_patch_json: &str,
 ) -> String {
-    let paths = files
+    let path_preview = paths
         .iter()
         .take(30)
-        .map(|f| f.path.as_str())
+        .map(|p| p.as_str())
         .collect::<Vec<_>>()
         .join(", ");
     let header = format!(
         "kind=patch summary={} file_count={} paths=[{}]",
         summary,
-        files.len(),
-        paths
+        paths.len(),
+        path_preview
     );
     let raw = compact_assistant_text(raw_patch_json, 16_000);
     format!("{header}\n{raw}")
@@ -96,7 +96,6 @@ fn read_history_max_chars() -> usize {
 mod tests {
     use super::{compact_assistant_text, compact_patch_history, trim_message_history_for_speed};
     use crate::deepseek_api::ChatMessage;
-    use crate::protocol::FileWrite;
 
     #[test]
     fn compact_assistant_text_truncates_and_marks() {
@@ -108,11 +107,8 @@ mod tests {
 
     #[test]
     fn compact_patch_history_includes_header_and_paths() {
-        let files = vec![FileWrite {
-            path: "src/main.rs".to_string(),
-            content: "fn main() {}".to_string(),
-        }];
-        let out = compact_patch_history("fix", &files, "{\"kind\":\"patch\"}");
+        let paths = vec!["src/main.rs".to_string()];
+        let out = compact_patch_history("fix", &paths, "{\"kind\":\"patch\"}");
         assert!(out.contains("kind=patch summary=fix"));
         assert!(out.contains("src/main.rs"));
     }

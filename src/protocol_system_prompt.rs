@@ -16,9 +16,9 @@ pub(crate) fn system_prompt(language: &str, unattended_mode: bool) -> String {
 2) 允许输出的 JSON 只能有两种形式：
    A) {"kind":"clarify","questions":[{"id":"q1","question":"...","type":"single|multi|text","options":["..."]}]}
       用于向用户提出疑问或选项，问题应尽量关键、简洁。
-   B) {"kind":"patch","summary":"...","files":[{"path":"relative/path","content":"FULL FILE CONTENT"}]}
-      用于生成或修改代码文件，summary 用中文说明补丁目的。
-3) files.content 必须是完整文件内容（覆盖写入），path 必须是相对路径，不允许写出工作区。
+   B) {"kind":"patch","summary":"...","diff":"UNIFIED_DIFF_WITH_HUNKS"}
+      用于生成或修改代码文件，diff 必须是标准 unified diff（含 hunk）。
+3) diff 必须可应用：包含 `diff --git` 与 hunk（`@@`），path 必须是相对路径，不允许写出工作区。
 4) 模型应在必要时创建或更新一个自动评测脚本（如 scripts/run_tests.sh），该脚本必须包含：编译项目、运行程序、按照项目要求自动操作程序、检测是否存在错误或未满足目标的情况。脚本应返回非零退出码以指示失败，并提供足够的日志供模型分析。
 5) 按照“小步迭代”原则生成补丁：先生成最小可运行版本，再逐步完善和修复 bug。
 6) 当评测脚本通过后，请在 summary 中提示已完成目标，并在下一轮中询问用户是否满意、是否有改进建议。若用户给出改进意见，请根据建议继续迭代。
@@ -60,9 +60,9 @@ pub(crate) fn system_prompt(language: &str, unattended_mode: bool) -> String {
 2) 允许输出的 JSON 只能有两种形式：
    A) {"kind":"clarify","questions":[{"id":"q1","question":"...","type":"single|multi|text","options":["..."]}]}
       用于向用户提出疑问或选项，问题应尽量关键、简洁。
-   B) {"kind":"patch","summary":"...","files":[{"path":"relative/path","content":"FULL FILE CONTENT"}]}
-      用于生成或修改代码文件，summary 用中文说明补丁目的。
-3) files.content 必须是完整文件内容（覆盖写入），path 必须是相对路径，不允许写出工作区。
+   B) {"kind":"patch","summary":"...","diff":"UNIFIED_DIFF_WITH_HUNKS"}
+      用于生成或修改代码文件，diff 必须是标准 unified diff（含 hunk）。
+3) diff 必须可应用：包含 `diff --git` 与 hunk（`@@`），path 必须是相对路径，不允许写出工作区。
 4) 模型应在必要时创建或更新一个自动评测脚本（如 scripts/run_tests.sh），该脚本必须包含：编译项目、运行程序、按照项目要求自动操作程序、检测是否存在错误或未满足目标的情况。脚本应返回非零退出码以指示失败，并提供足够的日志供模型分析。
 5) 按照“小步迭代”原则生成补丁：先生成最小可运行版本，再逐步完善和修复 bug。
 6) 当评测脚本通过后，请在 summary 中提示已完成目标，并在下一轮中询问用户是否满意、是否有改进建议。若用户给出改进意见，请根据建议继续迭代。

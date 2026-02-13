@@ -96,16 +96,8 @@ enum ModelJson {
     #[serde(rename = "patch")]
     Patch {
         summary: String,
-        files: Vec<FileWrite>,
+        diff: String,
     },
-}
-
-/// A file write instruction from the model. The `path` field is relative
-/// to the workspace root and `content` holds the entire file contents.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct FileWrite {
-    pub path: String,
-    pub content: String,
 }
 
 /// Run the agent loop. This function listens for requests from the UI and
@@ -336,12 +328,12 @@ async fn run_session(
         ));
         let first_user = if cfg.unattended_mode {
             format!(
-                "用户的需求如下：\n{}\n\n你需要作为自编程代理，根据该需求制定项目计划和目标，选择合适的技术栈并创建项目目录结构，编写代码，编译运行程序，分析并修复错误，如此往复循环，直至项目满足需求。为此，你应在项目目录中维护一个自动评测脚本（如 scripts/run_tests.sh），该脚本必须能够编译并运行程序、自动操作程序以执行必要的功能，并检测是否存在错误或未满足的目标。每次生成补丁后，你都需要更新这个评测脚本以反映新的需求。\n当前为无人值守模式：禁止输出 kind=clarify，必须直接基于合理默认假设输出 kind=patch JSON 并持续迭代。",
+                "用户的需求如下：\n{}\n\n你需要作为自编程代理，根据该需求制定项目计划和目标，选择合适的技术栈并创建项目目录结构，编写代码，编译运行程序，分析并修复错误，如此往复循环，直至项目满足需求。为此，你应在项目目录中维护一个自动评测脚本（如 scripts/run_tests.sh），该脚本必须能够编译并运行程序、自动操作程序以执行必要的功能，并检测是否存在错误或未满足的目标。每次生成补丁后，你都需要更新这个评测脚本以反映新的需求。\n当前为无人值守模式：禁止输出 kind=clarify，必须直接基于合理默认假设输出 kind=patch JSON（diff 字段为 unified diff）并持续迭代。",
                 cfg.goal
             )
         } else {
             format!(
-                "用户的需求如下：\n{}\n\n你需要作为自编程代理，根据该需求制定项目计划和目标，选择合适的技术栈并创建项目目录结构，编写代码，编译运行程序，分析并修复错误，如此往复循环，直至项目满足需求。为此，你应在项目目录中维护一个自动评测脚本（如 scripts/run_tests.sh），该脚本必须能够编译并运行程序、自动操作程序以执行必要的功能，并检测是否存在错误或未满足的目标。每次生成补丁后，你都需要更新这个评测脚本以反映新的需求。\n首先，请输出 JSON（kind=clarify 或 kind=patch）：如需澄清问题，请用 kind=clarify，并提出关键问题；如无需澄清，请用 kind=patch，并给出包含完整文件内容的补丁，补丁可以先生成项目计划、评测脚本或基本代码使项目能够编译运行。",
+                "用户的需求如下：\n{}\n\n你需要作为自编程代理，根据该需求制定项目计划和目标，选择合适的技术栈并创建项目目录结构，编写代码，编译运行程序，分析并修复错误，如此往复循环，直至项目满足需求。为此，你应在项目目录中维护一个自动评测脚本（如 scripts/run_tests.sh），该脚本必须能够编译并运行程序、自动操作程序以执行必要的功能，并检测是否存在错误或未满足的目标。每次生成补丁后，你都需要更新这个评测脚本以反映新的需求。\n首先，请输出 JSON（kind=clarify 或 kind=patch）：如需澄清问题，请用 kind=clarify，并提出关键问题；如无需澄清，请用 kind=patch，并给出 unified diff（含 hunk）的补丁。",
                 cfg.goal
             )
         };
@@ -495,7 +487,7 @@ async fn run_session(
                 let answers_json = serde_json::to_string_pretty(&to_answer_map(clarify_answers))?;
                 messages.push(deepseek_api::ChatMessage::assistant(content));
                 messages.push(deepseek_api::ChatMessage::user(format!(
-                    "这是用户对澄清问题的回答(JSON)：\n{}\n\n现在请输出 kind=patch 的 JSON，给出最小可运行实现。要求：\n- 只输出 JSON（不要 markdown）\n- files 是完整文件内容（覆盖写）\n- 如果需要新文件，请直接提供。\n- 尽量小步提交，方便迭代。",
+                    "这是用户对澄清问题的回答(JSON)：\n{}\n\n现在请输出 kind=patch 的 JSON，给出最小可运行实现。要求：\n- 只输出 JSON（不要 markdown）\n- diff 必须是 unified diff（包含 `diff --git` 与 `@@` hunk）\n- 尽量小步提交，方便迭代。",
                     answers_json
                 )));
                 // Save session state after appending new messages so that we can resume later.
@@ -504,18 +496,20 @@ async fn run_session(
                     &build_session_state(cfg, &messages, iter, "waiting_patch_after_clarify"),
                 );
             }
-            ModelJson::Patch { summary, files } => {
+            ModelJson::Patch { summary, diff } => {
                 // 记录 patch 输出方便之后放入对话历史
                 let patch_content = content.clone();
+                let patch_paths = protocol_patch::extract_paths_from_unified_diff(&diff)
+                    .unwrap_or_default();
                 let patch_history =
-                    protocol_history::compact_patch_history(&summary, &files, &patch_content);
+                    protocol_history::compact_patch_history(&summary, &patch_paths, &patch_content);
                 repair.total_patches += 1;
-                if let Err(e) = validate_patch_payload(&summary, &files) {
+                if let Err(e) = validate_patch_payload(&summary, &diff) {
                     let _ =
                         tx_evt.send(AgentEvent::Log(format!("[Patch] 无效补丁，已拒绝：{}", e)));
                     messages.push(deepseek_api::ChatMessage::assistant(patch_content));
                     messages.push(deepseek_api::ChatMessage::user(format!(
-                        "你给出的 patch 无效：{}。请重新输出 kind=patch JSON，只做必要最小改动，并确保 files 中每个 path 唯一且 content 是完整文件内容。",
+                        "你给出的 patch 无效：{}。请重新输出 kind=patch JSON，并确保 diff 是可应用的 unified diff（含 `diff --git` 与 `@@` hunk），只做必要最小改动。",
                         e
                     )));
                     protocol_session_state::save_session_state(
@@ -524,22 +518,44 @@ async fn run_session(
                     );
                     continue;
                 }
-                let total_bytes: usize = files.iter().map(|f| f.content.len()).sum();
+                if let Err(e) = git_utils::check_apply_unified_diff(&cfg.workspace, &diff) {
+                    let _ = tx_evt.send(AgentEvent::Log(format!(
+                        "[Patch] diff 预检失败：{}",
+                        truncate(&e.to_string(), 800)
+                    )));
+                    messages.push(deepseek_api::ChatMessage::assistant(patch_content));
+                    messages.push(deepseek_api::ChatMessage::user(format!(
+                        "你的 unified diff 无法应用：{}。请基于当前工作区重新生成更小且可应用的 hunk diff。",
+                        truncate(&e.to_string(), 1200)
+                    )));
+                    protocol_session_state::save_session_state(
+                        &cfg.workspace,
+                        &build_session_state(cfg, &messages, iter, "invalid_patch_apply_check"),
+                    );
+                    continue;
+                }
                 let _ = tx_evt.send(AgentEvent::Log(format!(
-                    "[Patch] #{} {} | files={} total_bytes={}",
+                    "[Patch] #{} {} | files={} diff_bytes={}",
                     repair.total_patches,
                     summary,
-                    files.len(),
-                    total_bytes
+                    patch_paths.len(),
+                    diff.len()
                 )));
-                // Write files to workspace.
-                for f in &files {
-                    workspace::write_file_safely(&cfg.workspace, &f.path, &f.content)?;
+                if let Err(e) = git_utils::apply_unified_diff(&cfg.workspace, &diff) {
                     let _ = tx_evt.send(AgentEvent::Log(format!(
-                        "[Write] {} ({} bytes)",
-                        f.path,
-                        f.content.len()
+                        "[Patch] diff 应用失败：{}",
+                        truncate(&e.to_string(), 800)
                     )));
+                    messages.push(deepseek_api::ChatMessage::assistant(patch_content));
+                    messages.push(deepseek_api::ChatMessage::user(format!(
+                        "你的 unified diff 在应用阶段失败：{}。请重发可直接应用的最小 hunk diff。",
+                        truncate(&e.to_string(), 1200)
+                    )));
+                    protocol_session_state::save_session_state(
+                        &cfg.workspace,
+                        &build_session_state(cfg, &messages, iter, "invalid_patch_apply_exec"),
+                    );
+                    continue;
                 }
                 // Commit the patch so we can generate diffs and revert easily.
                 let commit_message = summary.to_string();
@@ -1063,8 +1079,8 @@ fn should_auto_revert(
     (repeated_gate || worsened_gate) && severity_gate && signature_gate
 }
 
-fn validate_patch_payload(summary: &str, files: &[FileWrite]) -> Result<()> {
-    protocol_patch::validate_patch_payload(summary, files)
+fn validate_patch_payload(summary: &str, diff: &str) -> Result<()> {
+    protocol_patch::validate_patch_payload(summary, diff)
 }
 
 type FailureDigest = protocol_failure::FailureDigest;
@@ -1111,7 +1127,7 @@ fn build_session_state(
 
 #[cfg(test)]
 mod tests {
-    use super::{category_changed_worse, failure_severity, validate_patch_payload, FileWrite};
+    use super::{category_changed_worse, failure_severity, validate_patch_payload};
     use crate::deepseek_api::ChatMessage;
     use crate::protocol_auto_revert::{
         auto_revert_min_severity, auto_revert_on_repeat, auto_revert_repeat_count,
@@ -1132,19 +1148,9 @@ mod tests {
     }
 
     #[test]
-    fn validate_patch_rejects_duplicate_paths() {
-        let files = vec![
-            FileWrite {
-                path: "a.txt".to_string(),
-                content: "1".to_string(),
-            },
-            FileWrite {
-                path: "a.txt".to_string(),
-                content: "2".to_string(),
-            },
-        ];
-        let err = validate_patch_payload("summary", &files).expect_err("must fail");
-        assert!(err.to_string().contains("重复"));
+    fn validate_patch_rejects_empty_diff() {
+        let err = validate_patch_payload("summary", "").expect_err("must fail");
+        assert!(err.to_string().contains("diff"));
     }
 
     #[test]

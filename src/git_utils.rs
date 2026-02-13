@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use std::fs;
+use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -162,4 +163,47 @@ pub fn push(workspace: &Path, remote: &str, branch: &str) -> Result<()> {
         return Err(anyhow!("git push failed"));
     }
     Ok(())
+}
+
+/// Validate whether a unified diff can be applied cleanly in the workspace.
+pub fn check_apply_unified_diff(workspace: &Path, diff: &str) -> Result<()> {
+    run_git_apply(workspace, diff, &["apply", "--check", "--recount", "--whitespace=nowarn"])
+}
+
+/// Apply a unified diff to the workspace.
+pub fn apply_unified_diff(workspace: &Path, diff: &str) -> Result<()> {
+    run_git_apply(workspace, diff, &["apply", "--recount", "--whitespace=nowarn"])
+}
+
+fn run_git_apply(workspace: &Path, diff: &str, args: &[&str]) -> Result<()> {
+    let mut child = Command::new("git")
+        .args(args)
+        .current_dir(workspace)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .with_context(|| "failed to spawn git apply")?;
+    {
+        let stdin = child
+            .stdin
+            .as_mut()
+            .ok_or_else(|| anyhow!("git apply stdin unavailable"))?;
+        stdin
+            .write_all(diff.as_bytes())
+            .with_context(|| "failed writing diff to git apply stdin")?;
+    }
+    let output = child
+        .wait_with_output()
+        .with_context(|| "failed waiting git apply output")?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Err(anyhow!(
+        "git apply failed: {}\n{}",
+        stderr.trim(),
+        stdout.trim()
+    ))
 }
