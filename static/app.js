@@ -585,7 +585,7 @@ function applyReadOnlyMode() {
     const hint = document.getElementById('readonly_mode_text');
     if (hint) {
         if (backendOffline) {
-            hint.textContent = txt('readonly_backend_offline', 'Read-only mode: backend offline.');
+            hint.textContent = txt('readonly_backend_offline', '');
         } else {
             hint.textContent = readOnly
                 ? txt('readonly_on', '')
@@ -606,7 +606,7 @@ function applyReadOnlyMode() {
     if (offlineBanner) {
         offlineBanner.textContent = txt(
             'banner_backend_offline',
-            'Backend offline: communication actions are hidden and all input fields are read-only.'
+            ''
         );
         offlineBanner.style.display = backendOffline ? 'block' : 'none';
     }
@@ -1677,9 +1677,9 @@ function renderProjectAccordion() {
   </div>
   <div class="project-goal" title="${escapeHtml(goalText)}">${escapeHtml(txt('project_goal_prefix', ''))}${escapeHtml(goalText)}</div>
   <div class="meta">
-    workspace: ${escapeHtml(p.workspace || '-')}<br>
+    ${escapeHtml(txt('project_meta_workspace', ''))}: ${escapeHtml(p.workspace || '-')}<br>
     ${escapeHtml(txt('project_meta_updated', ''))}: ${escapeHtml(dt)}<br>
-    eval: ${escapeHtml(snap.eval_cmd || '-')}<br>
+    ${escapeHtml(txt('project_meta_eval', ''))}: ${escapeHtml(snap.eval_cmd || '-')}<br>
     ${escapeHtml(txt('project_meta_revert', ''))}: ${escapeHtml(snap.auto_revert_profile || '-')}
   </div>
   <div class="buttons">
@@ -2291,7 +2291,7 @@ function handleEvent(evt) {
             break;
         case 'need_clarify':
             if (activeRunUnattendedMode) {
-                appendLog('[Unattended] clarify event ignored');
+                appendLog(txt('log_unattended_clarify_ignored', ''));
                 writeBucketUiState(currentLogBucket(), { clarify_questions: [] });
                 if (viewLogBucket() === currentLogBucket()) renderUiForViewBucket();
             } else {
