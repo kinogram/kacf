@@ -1374,7 +1374,7 @@ function applyReadOnlyMode() {
     const hint = document.getElementById('readonly_mode_text');
     if (hint) {
         if (backendOffline) {
-            hint.textContent = txt('readonly_backend_offline', '');
+            hint.textContent = txt('readonly_backend_offline', 'Read-only mode: backend offline.');
         } else {
             hint.textContent = readonly
                 ? txt('readonly_on', '')
@@ -1393,7 +1393,10 @@ function applyReadOnlyMode() {
     setOfflineInputLock(backendOffline);
     const offlineBanner = document.getElementById('backend_offline_banner');
     if (offlineBanner) {
-        offlineBanner.textContent = txt('banner_backend_offline', '');
+        offlineBanner.textContent = txt(
+            'banner_backend_offline',
+            'Backend offline: communication actions are hidden and all input fields are read-only.'
+        );
         offlineBanner.style.display = backendOffline ? 'block' : 'none';
     }
     updateGoRunningProjectButton();
