@@ -23,6 +23,7 @@ use crate::web_ui_cache_logic;
 use crate::web_ui_languages;
 use crate::web_ui_projects;
 use crate::web_ui_runtime_env;
+use crate::web_ui_runtime_metrics;
 use crate::web_ui_slug;
 use crate::web_ui_store;
 
@@ -195,24 +196,24 @@ struct SlugSuggestResponse {
 #[derive(Debug, Clone, Serialize, Default)]
 pub(crate) struct RuntimeStatus {
     pub(crate) running: bool,
-    last_start_unix: u64,
-    last_workspace: String,
-    last_goal: String,
-    total_events: u64,
-    total_logs: u64,
+    pub(crate) last_start_unix: u64,
+    pub(crate) last_workspace: String,
+    pub(crate) last_goal: String,
+    pub(crate) total_events: u64,
+    pub(crate) total_logs: u64,
     pub(crate) total_done_ok: u64,
     pub(crate) total_done_fail: u64,
     pub(crate) last_error: String,
     #[serde(skip_serializing)]
-    api_ms_samples: Vec<u32>,
+    pub(crate) api_ms_samples: Vec<u32>,
     #[serde(skip_serializing)]
-    eval_ms_samples: Vec<u32>,
+    pub(crate) eval_ms_samples: Vec<u32>,
     #[serde(skip_serializing)]
-    done_history: Vec<(u64, bool)>,
+    pub(crate) done_history: Vec<(u64, bool)>,
     #[serde(skip_serializing)]
-    digest_history: Vec<(u64, String)>,
+    pub(crate) digest_history: Vec<(u64, String)>,
     #[serde(skip_serializing)]
-    root_cause_history: Vec<(u64, String)>,
+    pub(crate) root_cause_history: Vec<(u64, String)>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -258,33 +259,33 @@ struct HealthResponse {
 }
 
 #[derive(Debug, Serialize)]
-struct MetricsResponse {
-    unix_time: u64,
-    event_buffer_len: usize,
-    next_event_id: usize,
-    running: bool,
-    total_events: u64,
-    total_logs: u64,
-    total_done_ok: u64,
-    total_done_fail: u64,
-    last_error: String,
-    api_p50_ms: Option<u32>,
-    api_p95_ms: Option<u32>,
-    eval_p50_ms: Option<u32>,
-    eval_p95_ms: Option<u32>,
-    done_5m_ok: u64,
-    done_5m_fail: u64,
-    done_5m_success_rate: Option<f64>,
-    readiness: String,
-    readiness_score: u8,
-    blockers: Vec<String>,
-    actions: Vec<String>,
-    gate_threshold: u8,
-    gate_passed: bool,
-    gate_reason: String,
-    digest_5m: Vec<CategoryCount>,
-    root_causes_5m: Vec<CategoryCount>,
-    success_rate_series_5m: Vec<TimePoint>,
+pub(crate) struct MetricsResponse {
+    pub(crate) unix_time: u64,
+    pub(crate) event_buffer_len: usize,
+    pub(crate) next_event_id: usize,
+    pub(crate) running: bool,
+    pub(crate) total_events: u64,
+    pub(crate) total_logs: u64,
+    pub(crate) total_done_ok: u64,
+    pub(crate) total_done_fail: u64,
+    pub(crate) last_error: String,
+    pub(crate) api_p50_ms: Option<u32>,
+    pub(crate) api_p95_ms: Option<u32>,
+    pub(crate) eval_p50_ms: Option<u32>,
+    pub(crate) eval_p95_ms: Option<u32>,
+    pub(crate) done_5m_ok: u64,
+    pub(crate) done_5m_fail: u64,
+    pub(crate) done_5m_success_rate: Option<f64>,
+    pub(crate) readiness: String,
+    pub(crate) readiness_score: u8,
+    pub(crate) blockers: Vec<String>,
+    pub(crate) actions: Vec<String>,
+    pub(crate) gate_threshold: u8,
+    pub(crate) gate_passed: bool,
+    pub(crate) gate_reason: String,
+    pub(crate) digest_5m: Vec<CategoryCount>,
+    pub(crate) root_causes_5m: Vec<CategoryCount>,
+    pub(crate) success_rate_series_5m: Vec<TimePoint>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -741,71 +742,9 @@ async fn metrics(data: web::Data<AppState>) -> impl Responder {
     let runtime = data.runtime.lock().unwrap().clone();
     let events_len = data.events.lock().unwrap().len();
     let next_id = *data.next_event_id.lock().unwrap();
-    let (done_5m_ok, done_5m_fail) = done_recent_counts(&runtime.done_history, 300);
-    let done_total = done_5m_ok + done_5m_fail;
-    let done_5m_success_rate = if done_total == 0 {
-        None
-    } else {
-        Some((done_5m_ok as f64) * 100.0 / (done_total as f64))
-    };
-    let readiness = readiness_level(&runtime, done_5m_ok, done_5m_fail).to_string();
-    let readiness_score = readiness_score(
-        &runtime,
-        done_5m_ok,
-        done_5m_fail,
-        done_5m_success_rate,
-        percentile_ms(&runtime.api_ms_samples, 95),
-        percentile_ms(&runtime.eval_ms_samples, 95),
-    );
-    let blockers = release_blockers(
-        &runtime,
-        done_5m_fail,
-        done_5m_success_rate,
-        percentile_ms(&runtime.eval_ms_samples, 95),
-    );
-    let actions = release_actions(
-        &runtime,
-        percentile_ms(&runtime.api_ms_samples, 95),
-        percentile_ms(&runtime.eval_ms_samples, 95),
-    );
-    let digest_5m = digest_recent_counts(&runtime.digest_history, 300);
-    let root_causes_5m = digest_recent_counts(&runtime.root_cause_history, 300);
-    let success_rate_series_5m = success_rate_series(&runtime.done_history, 5, 60);
-    let gate_threshold = read_gate_threshold();
-    let (gate_passed, gate_reason) =
-        release_gate(readiness_score, gate_threshold, &blockers, runtime.running);
-    let api_p50 = percentile_ms(&runtime.api_ms_samples, 50);
-    let api_p95 = percentile_ms(&runtime.api_ms_samples, 95);
-    let eval_p50 = percentile_ms(&runtime.eval_ms_samples, 50);
-    let eval_p95 = percentile_ms(&runtime.eval_ms_samples, 95);
-    HttpResponse::Ok().json(MetricsResponse {
-        unix_time: now_unix(),
-        event_buffer_len: events_len,
-        next_event_id: next_id,
-        running: runtime.running,
-        total_events: runtime.total_events,
-        total_logs: runtime.total_logs,
-        total_done_ok: runtime.total_done_ok,
-        total_done_fail: runtime.total_done_fail,
-        last_error: runtime.last_error,
-        api_p50_ms: api_p50,
-        api_p95_ms: api_p95,
-        eval_p50_ms: eval_p50,
-        eval_p95_ms: eval_p95,
-        done_5m_ok,
-        done_5m_fail,
-        done_5m_success_rate,
-        readiness,
-        readiness_score,
-        blockers,
-        actions,
-        gate_threshold,
-        gate_passed,
-        gate_reason,
-        digest_5m,
-        root_causes_5m,
-        success_rate_series_5m,
-    })
+    let body =
+        web_ui_runtime_metrics::build_metrics_response(&runtime, events_len, next_id, now_unix());
+    HttpResponse::Ok().json(body)
 }
 
 async fn answer_clarify(
@@ -1072,10 +1011,6 @@ fn push_sample(samples: &mut Vec<u32>, value: u32, max_len: usize) {
     web_ui_analytics::push_sample(samples, value, max_len)
 }
 
-fn percentile_ms(samples: &[u32], p: usize) -> Option<u32> {
-    web_ui_analytics::percentile_ms(samples, p)
-}
-
 fn parse_eval_digest_category(line: &str) -> Option<String> {
     web_ui_analytics::parse_eval_digest_category(line)
 }
@@ -1088,62 +1023,11 @@ fn push_digest(history: &mut Vec<(u64, String)>, ts: u64, category: String, max_
     web_ui_analytics::push_digest(history, ts, category, max_len)
 }
 
-fn digest_recent_counts(history: &[(u64, String)], window_secs: u64) -> Vec<CategoryCount> {
-    web_ui_analytics::digest_recent_counts(history, window_secs)
-}
-
 fn push_done_history(history: &mut Vec<(u64, bool)>, ts: u64, ok: bool, max_len: usize) {
     web_ui_analytics::push_done_history(history, ts, ok, max_len)
 }
 
-fn done_recent_counts(history: &[(u64, bool)], window_secs: u64) -> (u64, u64) {
-    web_ui_analytics::done_recent_counts(history, window_secs)
-}
-
-fn readiness_level(runtime: &RuntimeStatus, done_5m_ok: u64, done_5m_fail: u64) -> &'static str {
-    web_ui_analytics::readiness_level(runtime, done_5m_ok, done_5m_fail)
-}
-
-fn readiness_score(
-    runtime: &RuntimeStatus,
-    done_5m_ok: u64,
-    done_5m_fail: u64,
-    done_5m_success_rate: Option<f64>,
-    api_p95_ms: Option<u32>,
-    eval_p95_ms: Option<u32>,
-) -> u8 {
-    web_ui_analytics::readiness_score(
-        runtime,
-        done_5m_ok,
-        done_5m_fail,
-        done_5m_success_rate,
-        api_p95_ms,
-        eval_p95_ms,
-    )
-}
-
-fn release_blockers(
-    runtime: &RuntimeStatus,
-    done_5m_fail: u64,
-    done_5m_success_rate: Option<f64>,
-    eval_p95_ms: Option<u32>,
-) -> Vec<String> {
-    web_ui_analytics::release_blockers(runtime, done_5m_fail, done_5m_success_rate, eval_p95_ms)
-}
-
-fn release_actions(
-    runtime: &RuntimeStatus,
-    api_p95_ms: Option<u32>,
-    eval_p95_ms: Option<u32>,
-) -> Vec<String> {
-    web_ui_analytics::release_actions(runtime, api_p95_ms, eval_p95_ms)
-}
-
-fn success_rate_series(history: &[(u64, bool)], minutes: u32, bucket_secs: u64) -> Vec<TimePoint> {
-    web_ui_analytics::success_rate_series(history, minutes, bucket_secs)
-}
-
-fn read_gate_threshold() -> u8 {
+pub(crate) fn read_gate_threshold() -> u8 {
     std::env::var("AUTOCODING_RELEASE_GATE_THRESHOLD")
         .ok()
         .and_then(|v| v.parse::<u8>().ok())
@@ -1151,7 +1035,7 @@ fn read_gate_threshold() -> u8 {
         .unwrap_or(75)
 }
 
-fn release_gate(
+pub(crate) fn release_gate(
     readiness_score: u8,
     gate_threshold: u8,
     blockers: &[String],
@@ -1228,7 +1112,7 @@ pub async fn run_web_server(
 
 #[cfg(test)]
 mod tests {
-    use super::{readiness_score, release_gate};
+    use super::release_gate;
 
     #[test]
     fn gate_fails_when_blockers_exist() {
@@ -1254,7 +1138,7 @@ mod tests {
 
     #[test]
     fn readiness_score_penalizes_failures() {
-        let score = readiness_score(
+        let score = crate::web_ui_analytics::readiness_score(
             &super::RuntimeStatus::default(),
             0,
             2,

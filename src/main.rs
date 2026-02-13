@@ -16,6 +16,7 @@ mod web_ui_cache_logic;
 mod web_ui_languages;
 mod web_ui_projects;
 mod web_ui_runtime_env;
+mod web_ui_runtime_metrics;
 mod web_ui_slug;
 mod web_ui_store;
 mod workspace;
