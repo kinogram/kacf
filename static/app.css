@@ -342,16 +342,26 @@
             align-items: center;
             justify-content: center;
             padding: 16px;
+            overflow-y: auto;
+            overscroll-behavior: contain;
         }
         .modal-card {
             width: min(760px, 96vw);
             max-height: calc(100dvh - 32px);
             overflow: auto;
+            -webkit-overflow-scrolling: touch;
             background: #fff;
             border: 1px solid var(--line);
             border-radius: 12px;
             box-shadow: 0 20px 40px rgba(0, 0, 0, 0.22);
             padding: 14px;
+        }
+        .modal-card .title {
+            font-size: 18px;
+        }
+        body.modal-open {
+            overflow: hidden;
+            touch-action: none;
         }
         .project-list details {
             border: 1px solid var(--line);
@@ -548,16 +558,18 @@
                 align-items: flex-end;
                 justify-content: stretch;
                 padding: 0;
+                padding-top: max(10px, env(safe-area-inset-top));
+                padding-bottom: env(safe-area-inset-bottom);
             }
             .modal-card {
                 width: 100%;
                 max-width: none;
-                max-height: 92dvh;
+                max-height: calc(100dvh - max(10px, env(safe-area-inset-top)));
                 border-radius: 16px 16px 0 0;
                 border-left: none;
                 border-right: none;
                 border-bottom: none;
-                padding: 16px 14px 18px;
+                padding: 16px 14px calc(16px + env(safe-area-inset-bottom));
             }
             .modal-card .title {
                 font-size: 20px;
