@@ -1090,6 +1090,7 @@ function applyFormData(d) {
         const code = normalizeLanguageCode(d.language);
         if (code) sharedConfig.language = code;
     }
+    renderUnattendedState();
 }
 
 function applyStaticCopyToDom() {
@@ -1244,6 +1245,8 @@ function setAutoSaveState(text) {
 function renderUnattendedState() {
     const el = document.getElementById('unattended_state_text');
     if (!el) return;
+    const configuredUnattendedMode = !!document.getElementById('unattended_mode')?.checked;
+    const unattendedMode = runSessionActive ? activeRunUnattendedMode : configuredUnattendedMode;
     const mins = stopAfterMinutesSetting();
     const stopText = mins <= 0
         ? txt('unattended_stop_disabled', '')
@@ -1253,7 +1256,7 @@ function renderUnattendedState() {
                 minutes: Math.max(0, Math.ceil((manualRunStopDeadlineMs - Date.now()) / 60000)),
             }));
     el.textContent = fmt('unattended_state_line', '', {
-        mode: activeRunUnattendedMode ? txt('unattended_mode_on', '') : txt('unattended_mode_off', ''),
+        mode: unattendedMode ? txt('unattended_mode_on', '') : txt('unattended_mode_off', ''),
         resume_left: String(Math.max(0, unattendedAutoResumeRemaining)),
         stop: stopText,
     });
@@ -2402,8 +2405,16 @@ function bindAutoSave() {
     ids.forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
-        el.addEventListener('input', () => { markProjectDirty(); scheduleDraftSave(); });
-        el.addEventListener('change', () => { markProjectDirty(); scheduleDraftSave(); });
+        el.addEventListener('input', () => {
+            markProjectDirty();
+            scheduleDraftSave();
+            if (id === 'unattended_mode') renderUnattendedState();
+        });
+        el.addEventListener('change', () => {
+            markProjectDirty();
+            scheduleDraftSave();
+            if (id === 'unattended_mode') renderUnattendedState();
+        });
     });
     const goal = document.getElementById('goal');
     if (goal) {
