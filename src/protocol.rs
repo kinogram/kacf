@@ -1,13 +1,13 @@
 use anyhow::Error;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use crossbeam_channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::{deepseek_api, git_utils, runner, workspace};
+use crate::{protocol_failure, protocol_patch};
 use std::fs;
 
 thread_local! {
@@ -1212,18 +1212,11 @@ fn bool_env(key: &str, default: bool) -> bool {
 }
 
 fn failure_severity(category: &str) -> u8 {
-    match category {
-        "compile_error" => 3,
-        "runtime_crash" => 3,
-        "test_failure" => 2,
-        "runtime_or_logic_failure" => 2,
-        "timeout" => 1,
-        _ => 1,
-    }
+    protocol_failure::failure_severity(category)
 }
 
 fn category_changed_worse(previous: &str, current: &str) -> bool {
-    failure_severity(current) > failure_severity(previous)
+    protocol_failure::category_changed_worse(previous, current)
 }
 
 fn should_auto_revert(
@@ -1276,122 +1269,17 @@ fn read_keyword_list(key: &str) -> Vec<String> {
 }
 
 fn validate_patch_payload(summary: &str, files: &[FileWrite]) -> Result<()> {
-    if summary.trim().is_empty() {
-        return Err(anyhow!("summary 不能为空"));
-    }
-    if files.is_empty() {
-        return Err(anyhow!("files 不能为空"));
-    }
-    if files.len() > 80 {
-        return Err(anyhow!("单次 patch 文件数量过多: {}", files.len()));
-    }
-    let mut seen = HashSet::new();
-    let mut total_bytes = 0usize;
-    for f in files {
-        let path = f.path.trim();
-        if path.is_empty() {
-            return Err(anyhow!("存在空 path"));
-        }
-        if !seen.insert(path.to_string()) {
-            return Err(anyhow!("path 重复: {}", path));
-        }
-        if f.content.len() > 700_000 {
-            return Err(anyhow!("单文件过大: {} ({} bytes)", path, f.content.len()));
-        }
-        total_bytes += f.content.len();
-    }
-    if total_bytes > 3_000_000 {
-        return Err(anyhow!("本次 patch 总体积过大: {} bytes", total_bytes));
-    }
-    Ok(())
+    protocol_patch::validate_patch_payload(summary, files)
 }
 
-struct FailureDigest {
-    category: &'static str,
-    signature: String,
-    key_lines: Vec<String>,
-}
+type FailureDigest = protocol_failure::FailureDigest;
 
 fn digest_eval_failure(exit_code: i32, stdout: &str, stderr: &str) -> FailureDigest {
-    let joined = format!("{stdout}\n{stderr}");
-    let lowered = joined.to_lowercase();
-    let category =
-        if exit_code == -2 || lowered.contains("timed out") || lowered.contains("timeout") {
-            "timeout"
-        } else if lowered.contains("error[") || lowered.contains("could not compile") {
-            "compile_error"
-        } else if lowered.contains("test result: failed")
-            || lowered.contains("failures:")
-            || lowered.contains("assertion failed")
-        {
-            "test_failure"
-        } else if lowered.contains("panicked") || lowered.contains("traceback") {
-            "runtime_crash"
-        } else {
-            "runtime_or_logic_failure"
-        };
-
-    let key_lines = collect_key_lines(stdout, stderr, 8);
-    let signature = key_lines
-        .first()
-        .cloned()
-        .unwrap_or_else(|| format!("exit_code={exit_code}"));
-
-    FailureDigest {
-        category,
-        signature,
-        key_lines,
-    }
+    protocol_failure::digest_eval_failure(exit_code, stdout, stderr)
 }
 
 fn eval_has_fatal_runtime_marker(stdout: &str, stderr: &str) -> bool {
-    let lowered = format!("{stdout}\n{stderr}").to_lowercase();
-    lowered.contains("thread 'main' panicked")
-        || lowered.contains(" panicked at ")
-        || lowered.contains("xopendisplay() failed")
-        || lowered.contains("segmentation fault")
-        || lowered.contains("stack backtrace:")
-        || lowered.contains("fatal runtime error")
-}
-
-fn collect_key_lines(stdout: &str, stderr: &str, limit: usize) -> Vec<String> {
-    let mut out = Vec::new();
-    for line in stderr.lines() {
-        maybe_add_key_line(&mut out, line, limit);
-        if out.len() >= limit {
-            return out;
-        }
-    }
-    for line in stdout.lines() {
-        maybe_add_key_line(&mut out, line, limit);
-        if out.len() >= limit {
-            return out;
-        }
-    }
-    out
-}
-
-fn maybe_add_key_line(out: &mut Vec<String>, line: &str, limit: usize) {
-    if out.len() >= limit {
-        return;
-    }
-    let l = line.trim();
-    if l.is_empty() || l.len() > 220 {
-        return;
-    }
-    let lowered = l.to_lowercase();
-    let hit = lowered.contains("error")
-        || lowered.contains("failed")
-        || lowered.contains("panic")
-        || lowered.contains("assert")
-        || lowered.contains("exception")
-        || lowered.contains("traceback")
-        || lowered.contains("timeout")
-        || lowered.contains("could not compile")
-        || lowered.contains("caused by");
-    if hit && !out.iter().any(|x| x == l) {
-        out.push(l.to_string());
-    }
+    protocol_failure::eval_has_fatal_runtime_marker(stdout, stderr)
 }
 
 fn build_repair_prompt(
@@ -1469,30 +1357,14 @@ stderr:\n{stderr}\n\
 /// Truncate a string to a maximum length for log display. If the string is
 /// longer than `max`, an ellipsis and truncation indicator are appended.
 fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        return s.to_string();
-    }
-    format!("{}...\n[truncated {} chars]", &s[..max], s.len() - max)
+    protocol_patch::truncate(s, max)
 }
 
 /// 尝试从模型回复中提取可解析的 JSON 字符串。
 /// 如果输入本身已经是合法 JSON，则直接返回。
 /// 否则查找首个 '{' 与最后一个 '}' 之间的子串尝试解析。
 fn extract_json(input: &str) -> Result<String> {
-    // 如果整个字符串就是合法 JSON
-    if serde_json::from_str::<serde_json::Value>(input).is_ok() {
-        return Ok(input.to_string());
-    }
-    // 尝试提取第一个 '{' 到最后一个 '}' 之间的内容
-    if let (Some(start), Some(end)) = (input.find('{'), input.rfind('}')) {
-        if start < end {
-            let candidate = &input[start..=end];
-            if serde_json::from_str::<serde_json::Value>(candidate).is_ok() {
-                return Ok(candidate.to_string());
-            }
-        }
-    }
-    Err(anyhow!("未找到合法 JSON 段"))
+    protocol_patch::extract_json(input)
 }
 
 /// Attempt to load a persisted session state from the workspace. Returns

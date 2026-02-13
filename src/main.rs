@@ -1,6 +1,8 @@
 mod deepseek_api;
 mod git_utils;
 mod protocol;
+mod protocol_failure;
+mod protocol_patch;
 mod runner;
 mod web_ui;
 mod web_ui_analytics;
