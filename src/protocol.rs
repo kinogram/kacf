@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::protocol_auto_revert;
+use crate::protocol_repair_prompt;
 use crate::{deepseek_api, git_utils, runner, workspace};
 use crate::{protocol_failure, protocol_patch};
 use crate::{protocol_history, protocol_session_state};
@@ -601,16 +602,18 @@ async fn run_session(
                         repair.last_failure_severity = severity;
                         repair.last_failure_category = digest.category.to_string();
                         messages.push(deepseek_api::ChatMessage::assistant(patch_history.clone()));
+                        let repair_prompt = protocol_repair_prompt::build_repair_prompt(
+                            &cfg.eval_cmd,
+                            iter,
+                            &verify,
+                            &digest,
+                            repair.consecutive_eval_failures,
+                            repair.consecutive_same_failure,
+                            &diff_for_feedback,
+                        );
                         messages.push(deepseek_api::ChatMessage::user(format!(
                             "你上一次补丁在主评测通过，但在回归复测失败。请优先修复不稳定/漏测问题。\n{}",
-                            build_repair_prompt(
-                                cfg,
-                                iter,
-                                &verify,
-                                &digest,
-                                &repair,
-                                &diff_for_feedback,
-                            )
+                            repair_prompt
                         )));
                         protocol_session_state::save_session_state(
                             &cfg.workspace,
@@ -757,14 +760,17 @@ async fn run_session(
                         digest.signature
                     )));
                     messages.push(deepseek_api::ChatMessage::assistant(patch_history));
-                    messages.push(deepseek_api::ChatMessage::user(build_repair_prompt(
-                        cfg,
-                        iter,
-                        &result,
-                        &digest,
-                        &repair,
-                        &diff_for_feedback,
-                    )));
+                    messages.push(deepseek_api::ChatMessage::user(
+                        protocol_repair_prompt::build_repair_prompt(
+                            &cfg.eval_cmd,
+                            iter,
+                            &result,
+                            &digest,
+                            repair.consecutive_eval_failures,
+                            repair.consecutive_same_failure,
+                            &diff_for_feedback,
+                        ),
+                    ));
                     if should_auto_revert(&repair, &digest, previous_severity, iter) {
                         let _ = git_utils::revert_last_commit(&cfg.workspace);
                         let _ = tx_evt.send(AgentEvent::Log(
@@ -1083,78 +1089,6 @@ fn digest_eval_failure(exit_code: i32, stdout: &str, stderr: &str) -> FailureDig
 
 fn eval_has_fatal_runtime_marker(stdout: &str, stderr: &str) -> bool {
     protocol_failure::eval_has_fatal_runtime_marker(stdout, stderr)
-}
-
-fn build_repair_prompt(
-    cfg: &SessionCfg,
-    iter: u32,
-    result: &runner::EvalResult,
-    digest: &FailureDigest,
-    repair: &RepairHeuristics,
-    diff_for_feedback: &str,
-) -> String {
-    let repeated_hint = if repair.consecutive_same_failure >= 2 {
-        "检测到同类错误重复出现。你必须先写出根因，再给出最小修复，并补充/修正测试以防回归。"
-    } else {
-        "请基于错误日志做最小必要修复。"
-    };
-    let strictness_hint = if repair.consecutive_eval_failures >= 3 {
-        "你需要额外检查：依赖版本、构建脚本、入口参数、测试脚本本身是否错误。"
-    } else {
-        ""
-    };
-    let key_lines_text = if digest.key_lines.is_empty() {
-        "（无）".to_string()
-    } else {
-        digest
-            .key_lines
-            .iter()
-            .map(|x| format!("- {x}"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-    format!(
-        "本地评测失败，请继续修复。\n\
-迭代轮次: {iter}\n\
-命令: {cmd}\n\
-exit_code: {exit}\n\
-错误类别: {category}\n\
-失败签名: {signature}\n\
-连续失败次数: {fail_count}\n\
-同签名重复次数: {same_count}\n\
-\n\
-关键错误行:\n{key_lines}\n\
-\n\
-最近补丁 diff 摘要:\n{diff}\n\
-\n\
-stdout:\n{stdout}\n\
-\n\
-stderr:\n{stderr}\n\
-\n\
-修复要求:\n\
-1) {repeated}\n\
-2) 先修复导致失败的直接原因，再处理次要问题。\n\
-3) 如果评测脚本本身不准确，先修正评测脚本再修代码。\n\
-4) 输出必须是 kind=patch JSON，且只输出 JSON。\n\
-5) 小步修改，避免大面积重写。\n\
-6) 修复后必须确保 `{cmd}` 可通过。{strictness}",
-        cmd = cfg.eval_cmd,
-        exit = result.exit_code,
-        category = digest.category,
-        signature = digest.signature,
-        fail_count = repair.consecutive_eval_failures,
-        same_count = repair.consecutive_same_failure,
-        key_lines = key_lines_text,
-        diff = if diff_for_feedback.is_empty() {
-            "（当前 diff 不可用）"
-        } else {
-            diff_for_feedback
-        },
-        stdout = truncate(&result.stdout, 8000),
-        stderr = truncate(&result.stderr, 8000),
-        repeated = repeated_hint,
-        strictness = strictness_hint,
-    )
 }
 
 /// Truncate a string to a maximum length for log display. If the string is
