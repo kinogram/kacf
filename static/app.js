@@ -2136,6 +2136,29 @@ function syncStoppedUiFromRuntime() {
     resetRunSessionUiState();
 }
 
+async function syncSharedConfigForRun(syncFailStatusKey) {
+    const synced = await persistSharedConfigNow();
+    if (synced) return true;
+    setStatus(txt(syncFailStatusKey, ''), 'status-danger');
+    return false;
+}
+
+async function prepareFormDataWithWorkspace(allocWorkspaceFailStatusKey) {
+    let body = getFormData();
+    if (body.workspace) return body;
+    const ok = await saveCurrentProject();
+    ensureWorkspaceForCurrentProject();
+    body = getFormData();
+    if (ok && body.workspace) return body;
+    setStatus(txt(allocWorkspaceFailStatusKey, ''), 'status-danger');
+    return null;
+}
+
+function primeRunRequestContext() {
+    activeRunLogBucket = currentLogBucket();
+    activeRunProjectLabel = currentProjectLabel();
+}
+
 async function refreshUiState() {
     try {
         const resp = await fetch('/ui_state');
@@ -2428,20 +2451,12 @@ async function startSession() {
         setStatus(txt('status_readonly_view', ''), 'status-danger');
         return;
     }
-    const synced = await persistSharedConfigNow();
-    if (!synced) {
-        setStatus(txt('status_start_shared_config_sync_failed', ''), 'status-danger');
+    if (!(await syncSharedConfigForRun('status_start_shared_config_sync_failed'))) {
         return;
     }
-    let body = getFormData();
-    if (!body.workspace) {
-        const ok = await saveCurrentProject();
-        ensureWorkspaceForCurrentProject();
-        body = getFormData();
-        if (!ok || !body.workspace) {
-            setStatus(txt('status_start_alloc_workspace_failed', ''), 'status-danger');
-            return;
-        }
+    const body = await prepareFormDataWithWorkspace('status_start_alloc_workspace_failed');
+    if (!body) {
+        return;
     }
     if (!body.api_key) {
         setStatus(txt('status_start_api_key_empty', ''), 'status-danger');
@@ -2452,8 +2467,7 @@ async function startSession() {
         if (!proceed) return;
     }
     try {
-        activeRunLogBucket = currentLogBucket();
-        activeRunProjectLabel = currentProjectLabel();
+        primeRunRequestContext();
         const resp = await fetch('/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -2494,23 +2508,14 @@ async function resumeSession(opts) {
             setStatus(txt('status_need_select_project', ''), 'status-danger');
             return;
         }
-        const synced = await persistSharedConfigNow();
-        if (!synced) {
-            setStatus(txt('status_shared_config_sync_failed', ''), 'status-danger');
+        if (!(await syncSharedConfigForRun('status_shared_config_sync_failed'))) {
             return;
         }
-        let body = getFormData();
-        if (!body.workspace) {
-            const ok = await saveCurrentProject();
-            ensureWorkspaceForCurrentProject();
-            body = getFormData();
-            if (!ok || !body.workspace) {
-                setStatus(txt('status_resume_alloc_workspace_failed', ''), 'status-danger');
-                return;
-            }
+        const body = await prepareFormDataWithWorkspace('status_resume_alloc_workspace_failed');
+        if (!body) {
+            return;
         }
-        activeRunLogBucket = currentLogBucket();
-        activeRunProjectLabel = currentProjectLabel();
+        primeRunRequestContext();
         const resp = await fetch('/resume', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
