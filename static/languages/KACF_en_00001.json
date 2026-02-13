@@ -1,4 +1,10 @@
 {
+  "__meta": {
+    "app": "KACF",
+    "language_code": "en",
+    "pack_version": "00001",
+    "inputer_version": "00001"
+  },
   "app_title": "KACF - Kevin AutoCoding Framework",
   "app_header": "KACF - Kevin AutoCoding Framework",
   "hero_sub": "After you enter requirements, the system writes code, runs tests, and fixes issues automatically. Inputs, checkpoints, and templates are remembered to reduce setup friction.",
