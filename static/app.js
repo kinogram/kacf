@@ -288,6 +288,23 @@ function isMaskedApiEchoState() {
     return !!shown && shown === stored;
 }
 
+function isStrictGeneratedMaskedApiKey(raw) {
+    const v = (raw || '').trim();
+    if (!v) return false;
+    // Exact generated patterns only:
+    // 1) all stars (short keys)
+    // 2) first4 + stars(>=4) + last4 (long keys)
+    if (/^\*+$/.test(v)) return true;
+    return /^.{4}\*{4,}.{4}$/.test(v);
+}
+
+function shouldResolveMaskedApiKey() {
+    if (!sharedConfig.mask_api_key) return false;
+    return sharedConfig.api_key_is_masked
+        || isMaskedApiEchoState()
+        || isStrictGeneratedMaskedApiKey(sharedConfig.api_key);
+}
+
 function renderApiKeyInput() {
     const el = document.getElementById('api_key');
     const editBtn = document.getElementById('api_key_edit_btn');
@@ -322,7 +339,7 @@ async function fetchPlainApiKeyFromServer() {
 async function beginEditApiKey() {
     if (!sharedConfig.mask_api_key) return;
     try {
-        const mustFetchPlain = sharedConfig.api_key_is_masked || isMaskedApiEchoState();
+        const mustFetchPlain = shouldResolveMaskedApiKey();
         if (mustFetchPlain) {
             const prevMaskedValue = (sharedConfig.api_key || '').trim();
             const plain = await fetchPlainApiKeyFromServer();
@@ -348,10 +365,7 @@ async function beginEditApiKey() {
 async function resolveApiKeyForRequest(forceResolve, silent) {
     const force = forceResolve === true;
     const quiet = silent === true;
-    const shouldResolve = force || (
-        !!sharedConfig.mask_api_key
-        && (sharedConfig.api_key_is_masked || isMaskedApiEchoState())
-    );
+    const shouldResolve = force || shouldResolveMaskedApiKey();
     if (!shouldResolve) return true;
     try {
         const prevMaskedValue = (sharedConfig.api_key || '').trim();
@@ -2011,6 +2025,8 @@ async function resumeSession() {
             setStatus(txt('status_readonly_view', ''), 'status-danger');
             return;
         }
+        const apiReady = await resolveApiKeyForRequest();
+        if (!apiReady) return;
         const selectedProjectId = document.getElementById('project_selector')?.value || '';
         if (!selectedProjectId) {
             setStatus(txt('status_need_select_project', ''), 'status-danger');
@@ -2295,7 +2311,10 @@ function bindEvents() {
     document.getElementById('api_key').addEventListener('blur', reMaskApiKeyIfNeeded);
     document.getElementById('mask_api_key').addEventListener('change', async () => {
         updateSharedConfigFromInputs();
-        if (!sharedConfig.mask_api_key && (sharedConfig.api_key_is_masked || isMaskedApiEchoState())) {
+        const needResolveOnUnmask = sharedConfig.api_key_is_masked
+            || isMaskedApiEchoState()
+            || isStrictGeneratedMaskedApiKey(sharedConfig.api_key);
+        if (!sharedConfig.mask_api_key && needResolveOnUnmask) {
             const apiReady = await resolveApiKeyForRequest(true);
             if (!apiReady) {
                 sharedConfig.mask_api_key = true;
