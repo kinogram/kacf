@@ -32,7 +32,17 @@ const APP_CSS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/
 const APP_JS: &str = concat!(
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/static/js/app_core.js"
+        "/static/js/app_state.js"
+    )),
+    "\n",
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/static/js/app_config.js"
+    )),
+    "\n",
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/static/js/app_projects.js"
     )),
     "\n",
     include_str!(concat!(
