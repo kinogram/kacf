@@ -1,9 +1,12 @@
 use anyhow::{Context, Result};
 use crossbeam_channel::{Receiver, Sender};
-use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 
 use crate::protocol_auto_revert;
+pub use crate::protocol_models::{AgentEvent, AgentRequest, ClarifyAnswer, ClarifyQuestion};
+use crate::protocol_models::{
+    EvalPipelineReport, ModelJson, RepairHeuristics, SessionCfg,
+};
+pub(crate) use crate::protocol_models::SessionState;
 use crate::protocol_repair_prompt;
 use crate::protocol_stream;
 use crate::protocol_system_prompt;
@@ -11,90 +14,6 @@ use crate::protocol_wait::{self, ClarifyWaitOutcome};
 use crate::{deepseek_api, git_utils, runner, workspace};
 use crate::{protocol_failure, protocol_patch};
 use crate::{protocol_history, protocol_session_state};
-
-/// Messages sent from the UI thread to the agent thread.
-#[derive(Debug)]
-pub enum AgentRequest {
-    /// Start or continue a new session. Contains all user-configured fields.
-    Start {
-        api_key: String,
-        base_url: String,
-        model: String,
-        language: String,
-        auto_revert_profile: String,
-        unattended_mode: bool,
-        resume_from_checkpoint: bool,
-        workspace: PathBuf,
-        goal: String,
-        eval_cmd: String,
-        success_regex: String,
-    },
-    /// Provide answers to clarification questions from the model.
-    Clarify { answers: Vec<ClarifyAnswer> },
-    /// Revert the most recent commit in the workspace via git.
-    RevertLast,
-    /// Stop the agent loop gracefully.
-    Stop,
-    /// Push the current git branch to a remote. Contains the remote name,
-    /// remote URL, and the branch name. The agent will add or update the
-    /// remote and then push the branch. Errors will be logged via events.
-    PushRemote {
-        remote: String,
-        url: String,
-        branch: String,
-    },
-}
-
-/// Messages sent from the agent thread back to the UI.
-#[derive(Debug, Clone)]
-pub enum AgentEvent {
-    /// Append a line of text to the log.
-    Log(String),
-    /// The model needs clarification on some aspects before it can continue.
-    NeedClarify { questions: Vec<ClarifyQuestion> },
-    /// A unified diff of the most recent patch commit. Display this to the user.
-    Diff { diff: String },
-    /// The session has completed (successfully or not).
-    Done { success: bool, message: String },
-}
-
-/// A question posed by the model for clarification. The `type` field indicates
-/// the expected answer form: "single" (one of the options), "multi" (any
-/// number of options), or "text" (free text input).
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ClarifyQuestion {
-    pub id: String,
-    pub question: String,
-    #[serde(rename = "type")]
-    pub qtype: String,
-    #[serde(default)]
-    pub options: Vec<String>,
-}
-
-/// A reply to a clarification question. Depending on the question type,
-/// different fields will be used. For `single`, the `single` field should
-/// contain the selected option. For `multi`, the `multi` vector should
-/// contain all selected options. For `text`, the `text` field holds the
-/// free-form response.
-#[derive(Clone, Debug)]
-pub struct ClarifyAnswer {
-    pub id: String,
-    pub qtype: String,
-    pub single: String,
-    pub multi: Vec<String>,
-    pub text: String,
-}
-
-/// Structured output returned by the model. The `kind` field determines
-/// whether the model is asking clarification questions or providing a patch.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "kind")]
-enum ModelJson {
-    #[serde(rename = "clarify")]
-    Clarify { questions: Vec<ClarifyQuestion> },
-    #[serde(rename = "patch")]
-    Patch { summary: String, diff: String },
-}
 
 /// Run the agent loop. This function listens for requests from the UI and
 /// interacts with the DeepSeek API, applying patches and evaluating the
@@ -198,71 +117,6 @@ pub async fn agent_loop(rx_req: Receiver<AgentRequest>, tx_evt: Sender<AgentEven
     // Read stop_flag to avoid unused assignment warnings. This has no
     // functional effect but ensures the compiler treats the variable as used.
     let _ = stop_flag;
-}
-
-#[derive(Clone)]
-struct SessionCfg {
-    api_key: String,
-    base_url: String,
-    model: String,
-    language: String,
-    auto_revert_profile: String,
-    unattended_mode: bool,
-    resume_from_checkpoint: bool,
-    workspace: PathBuf,
-    goal: String,
-    eval_cmd: String,
-    success_regex: String,
-}
-
-/// Persisted session state for resuming an interrupted coding session. This
-/// state is saved to a JSON file in the workspace directory after each
-/// iteration. When starting a new session, if a matching state file is
-/// present and its `goal` matches the current goal, the message history
-/// stored here will be loaded so that the agent can resume conversations
-/// with the model from the previous state. Only the message history and
-/// goal are persisted; other runtime state (e.g. clarify answers) is
-/// reconstructed at runtime.
-#[derive(Serialize, Deserialize)]
-pub(crate) struct SessionState {
-    #[serde(default = "default_schema_version")]
-    schema_version: u32,
-    goal: String,
-    #[serde(default)]
-    model: String,
-    #[serde(default)]
-    eval_cmd: String,
-    #[serde(default)]
-    iteration: u32,
-    #[serde(default)]
-    last_status: String,
-    #[serde(default)]
-    updated_at_unix: u64,
-    #[serde(default)]
-    message_count: usize,
-    #[serde(default)]
-    messages: Vec<deepseek_api::ChatMessage>,
-}
-
-fn default_schema_version() -> u32 {
-    2
-}
-
-#[derive(Default)]
-struct RepairHeuristics {
-    total_patches: u32,
-    consecutive_eval_failures: u32,
-    consecutive_same_failure: u32,
-    last_failure_signature: String,
-    last_failure_severity: u8,
-    last_failure_category: String,
-    last_auto_revert_iter: u32,
-}
-
-#[derive(Clone)]
-struct EvalPipelineReport {
-    result: runner::EvalResult,
-    stage: String,
 }
 
 /// The core loop for a single coding session. It communicates with the DeepSeek API

@@ -4,6 +4,7 @@ mod protocol;
 mod protocol_auto_revert;
 mod protocol_failure;
 mod protocol_history;
+mod protocol_models;
 mod protocol_patch;
 mod protocol_repair_prompt;
 mod protocol_session_state;
