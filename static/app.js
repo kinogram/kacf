@@ -55,6 +55,8 @@ let sidebarMobileOpen = false;
 let globalOptions = {
     auto_resume_attempts: '',
     stop_after_minutes: '',
+    history_max_messages: '40',
+    history_max_chars: '70000',
     log_max_chars: String(DEFAULT_LOG_MAX_CHARS),
     diff_max_chars: String(DEFAULT_DIFF_MAX_CHARS),
 };
@@ -698,6 +700,8 @@ async function fetchUiCacheFromServer() {
             globalOptions = {
                 auto_resume_attempts: String(data.global_options.auto_resume_attempts || ''),
                 stop_after_minutes: String(data.global_options.stop_after_minutes || ''),
+                history_max_messages: String(data.global_options.history_max_messages || '40'),
+                history_max_chars: String(data.global_options.history_max_chars || '70000'),
                 log_max_chars: String(data.global_options.log_max_chars || DEFAULT_LOG_MAX_CHARS),
                 diff_max_chars: String(data.global_options.diff_max_chars || DEFAULT_DIFF_MAX_CHARS),
             };
@@ -758,6 +762,8 @@ function updateGlobalOptionsFromInputs() {
     globalOptions = {
         auto_resume_attempts: String(document.getElementById('global_auto_resume_attempts')?.value || '').trim(),
         stop_after_minutes: String(document.getElementById('global_stop_after_minutes')?.value || '').trim(),
+        history_max_messages: String(document.getElementById('global_history_max_messages')?.value || '').trim(),
+        history_max_chars: String(document.getElementById('global_history_max_chars')?.value || '').trim(),
         log_max_chars: String(document.getElementById('global_log_max_chars')?.value || '').trim(),
         diff_max_chars: String(document.getElementById('global_diff_max_chars')?.value || '').trim(),
     };
@@ -768,6 +774,10 @@ function applyGlobalOptionsToInputs() {
     if (a) a.value = globalOptions.auto_resume_attempts || '';
     const s = document.getElementById('global_stop_after_minutes');
     if (s) s.value = globalOptions.stop_after_minutes || '';
+    const hm = document.getElementById('global_history_max_messages');
+    if (hm) hm.value = globalOptions.history_max_messages || '40';
+    const hc = document.getElementById('global_history_max_chars');
+    if (hc) hc.value = globalOptions.history_max_chars || '70000';
     const l = document.getElementById('global_log_max_chars');
     if (l) l.value = globalOptions.log_max_chars || String(DEFAULT_LOG_MAX_CHARS);
     const d = document.getElementById('global_diff_max_chars');
@@ -1329,6 +1339,8 @@ function applyStaticCopyToDom() {
         ['label_auto_revert_profile', 'label_auto_revert_profile'],
         ['label_precheck_cmd', 'label_precheck_cmd'],
         ['label_release_gate_threshold', 'label_release_gate_threshold'],
+        ['label_history_max_messages', 'label_history_max_messages'],
+        ['label_history_max_chars', 'label_history_max_chars'],
         ['label_goal', 'label_goal'],
         ['label_eval_cmd', 'label_eval_cmd'],
         ['label_success_regex', 'label_success_regex'],
@@ -1396,6 +1408,8 @@ function applyStaticCopyToDom() {
         ['release_gate_threshold', 'ph_release_gate_threshold'],
         ['global_auto_resume_attempts', 'ph_global_auto_resume_attempts'],
         ['global_stop_after_minutes', 'ph_global_stop_after_minutes'],
+        ['global_history_max_messages', 'ph_history_max_messages'],
+        ['global_history_max_chars', 'ph_history_max_chars'],
         ['global_log_max_chars', 'ph_global_log_max_chars'],
         ['global_diff_max_chars', 'ph_global_diff_max_chars'],
         ['goal', 'ph_goal'],
@@ -2725,6 +2739,14 @@ function bindEvents() {
         scheduleUiCacheSave();
     });
     document.getElementById('global_stop_after_minutes').addEventListener('input', () => {
+        updateGlobalOptionsFromInputs();
+        scheduleUiCacheSave();
+    });
+    document.getElementById('global_history_max_messages').addEventListener('input', () => {
+        updateGlobalOptionsFromInputs();
+        scheduleUiCacheSave();
+    });
+    document.getElementById('global_history_max_chars').addEventListener('input', () => {
         updateGlobalOptionsFromInputs();
         scheduleUiCacheSave();
     });

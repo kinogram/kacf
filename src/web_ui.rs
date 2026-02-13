@@ -360,6 +360,10 @@ pub(crate) struct GlobalOptions {
     #[serde(default)]
     pub(crate) stop_after_minutes: String,
     #[serde(default)]
+    pub(crate) history_max_messages: String,
+    #[serde(default)]
+    pub(crate) history_max_chars: String,
+    #[serde(default)]
     pub(crate) log_max_chars: String,
     #[serde(default)]
     pub(crate) diff_max_chars: String,
@@ -507,6 +511,8 @@ fn read_resume_info(workspace: &str, goal: &str) -> Option<ResumeInfo> {
 fn start_from_payload(
     data: &web::Data<AppState>,
     payload: StartPayload,
+    global_history_max_messages: &str,
+    global_history_max_chars: &str,
     resume_from_checkpoint: bool,
 ) -> Result<(), String> {
     if payload.api_key.trim().is_empty() {
@@ -522,6 +528,8 @@ fn start_from_payload(
     let workspace_full = require_managed_workspace(&payload.workspace)?;
     web_ui_runtime_env::apply_runtime_config_envs(
         &payload.precheck_cmd,
+        global_history_max_messages,
+        global_history_max_chars,
         &payload.release_gate_threshold,
     );
     let req = AgentRequest::Start {
@@ -560,7 +568,25 @@ fn start_from_payload(
 
 async fn start_session(data: web::Data<AppState>, body: web::Json<StartPayload>) -> impl Responder {
     let payload = body.into_inner();
-    match start_from_payload(&data, payload, false) {
+    let (history_max_messages, history_max_chars) = {
+        let _guard = data.projects_lock.lock().unwrap();
+        let cache = read_ui_cache();
+        if let Some(opts) = cache.global_options {
+            (
+                opts.history_max_messages.trim().to_string(),
+                opts.history_max_chars.trim().to_string(),
+            )
+        } else {
+            (String::new(), String::new())
+        }
+    };
+    match start_from_payload(
+        &data,
+        payload,
+        &history_max_messages,
+        &history_max_chars,
+        false,
+    ) {
         Ok(_) => HttpResponse::Ok().body("started"),
         Err(e) => {
             if e.contains("api_key is empty") {
@@ -689,9 +715,19 @@ async fn resume_session(
     if payload.project_id.trim().is_empty() {
         return HttpResponse::BadRequest().body("project_id is empty");
     }
-    let mut draft: DraftPayload = {
+    let (mut draft, history_max_messages, history_max_chars): (DraftPayload, String, String) = {
         let _guard = data.projects_lock.lock().unwrap();
-        let mut cache = read_ui_cache();
+        let cache = read_ui_cache();
+        let history_max_messages = cache
+            .global_options
+            .as_ref()
+            .map(|x| x.history_max_messages.trim().to_string())
+            .unwrap_or_default();
+        let history_max_chars = cache
+            .global_options
+            .as_ref()
+            .map(|x| x.history_max_chars.trim().to_string())
+            .unwrap_or_default();
         let Some(project) = cache
             .projects
             .into_iter()
@@ -700,10 +736,10 @@ async fn resume_session(
             return HttpResponse::NotFound().body("project not found");
         };
         let mut snapshot = project.snapshot;
-        if let Some(cfg) = cache.shared_config.as_mut() {
+        if let Some(cfg) = cache.shared_config.as_ref() {
             merge_shared_config_into_draft(&mut snapshot, cfg);
         }
-        snapshot
+        (snapshot, history_max_messages, history_max_chars)
     };
     normalize_resume_draft_defaults(&mut draft);
     draft.unattended_mode = payload.unattended_mode;
@@ -712,7 +748,13 @@ async fn resume_session(
     }
     let resume = read_resume_info(&draft.workspace, &draft.goal);
     if resume.as_ref().map(|x| x.resumable).unwrap_or(false) {
-        match start_from_payload(&data, draft.into_start(), true) {
+        match start_from_payload(
+            &data,
+            draft.into_start(),
+            &history_max_messages,
+            &history_max_chars,
+            true,
+        ) {
             Ok(_) => HttpResponse::Ok().body("resumed"),
             Err(e) => {
                 if e.contains("already running") {
