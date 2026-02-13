@@ -10,7 +10,6 @@ use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer, Responder};
 use async_stream::stream;
 use crossbeam_channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -18,6 +17,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::deepseek_api;
 use crate::protocol::{AgentEvent, AgentRequest, ClarifyAnswer, ClarifyQuestion};
+use crate::web_ui_analytics::{self, CategoryCount, TimePoint};
+use crate::web_ui_languages;
 
 /// Index HTML page embedded at compile time.
 const INDEX_HTML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/index.html"));
@@ -29,9 +30,6 @@ const PROJECT_CONFIG_FILENAME: &str = ".autocoding_project.json";
 const UI_CACHE_FILENAME: &str = ".autocoding_webui_cache.json";
 const MANAGED_ROOT_DIR: &str = "autocoding_data";
 const MANAGED_WORKSPACES_DIR: &str = "workspaces";
-const LANGUAGES_DIR: &str = "static/languages";
-const LANGUAGE_INPUTER_VERSION: &str = "00001";
-const LANGUAGE_PACK_PREFIX: &str = "KACF_";
 const API_KEY_SECRET_FILENAME: &str = ".kacf_api_key_secret.bin";
 const API_KEY_ENC_PREFIX: &str = "kacfenc:v1:";
 const MAX_EVENT_BUFFER: usize = 5000;
@@ -191,16 +189,16 @@ struct SlugSuggestResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
-struct RuntimeStatus {
-    running: bool,
+pub(crate) struct RuntimeStatus {
+    pub(crate) running: bool,
     last_start_unix: u64,
     last_workspace: String,
     last_goal: String,
     total_events: u64,
     total_logs: u64,
-    total_done_ok: u64,
-    total_done_fail: u64,
-    last_error: String,
+    pub(crate) total_done_ok: u64,
+    pub(crate) total_done_fail: u64,
+    pub(crate) last_error: String,
     #[serde(skip_serializing)]
     api_ms_samples: Vec<u32>,
     #[serde(skip_serializing)]
@@ -247,14 +245,6 @@ struct LanguageListResponse {
     languages: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
-struct LoadedLanguagePack {
-    code: String,
-    path: PathBuf,
-    content: String,
-    keys: BTreeSet<String>,
-}
-
 #[derive(Debug, Serialize)]
 struct HealthResponse {
     ok: bool,
@@ -291,18 +281,6 @@ struct MetricsResponse {
     digest_5m: Vec<CategoryCount>,
     root_causes_5m: Vec<CategoryCount>,
     success_rate_series_5m: Vec<TimePoint>,
-}
-
-#[derive(Debug, Serialize)]
-struct CategoryCount {
-    category: String,
-    count: u64,
-}
-
-#[derive(Debug, Serialize)]
-struct TimePoint {
-    minute_ago: u32,
-    success_rate: Option<f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -705,192 +683,20 @@ fn ui_cache_path() -> PathBuf {
     managed_root_path().join(UI_CACHE_FILENAME)
 }
 
-fn languages_dir_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(LANGUAGES_DIR)
-}
-
 fn sanitize_language_code(raw: &str) -> Option<String> {
-    let code = raw.trim();
-    if code.is_empty() || code.len() > 32 {
-        return None;
-    }
-    if code
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
-    {
-        Some(code.to_string())
-    } else {
-        None
-    }
-}
-
-fn parse_language_pack_filename(name: &str) -> Option<(String, String)> {
-    if !name.ends_with(".json") || !name.starts_with(LANGUAGE_PACK_PREFIX) {
-        return None;
-    }
-    let stem = &name[LANGUAGE_PACK_PREFIX.len()..name.len() - 5];
-    let (code_raw, ver_raw) = stem.rsplit_once('_')?;
-    let code = sanitize_language_code(code_raw)?;
-    if ver_raw.len() != 5 || !ver_raw.chars().all(|ch| ch.is_ascii_digit()) {
-        return None;
-    }
-    Some((code, ver_raw.to_string()))
-}
-
-fn validate_language_pack_file(
-    path: &Path,
-    code: &str,
-    ver: &str,
-) -> Result<LoadedLanguagePack, String> {
-    let content = fs::read_to_string(path)
-        .map_err(|e| format!("Language pack read failed: {} ({})", path.display(), e))?;
-    let value: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| format!("Language pack JSON invalid: {} ({})", path.display(), e))?;
-    let obj = value
-        .as_object()
-        .ok_or_else(|| format!("Language pack root must be object: {}", path.display()))?;
-    let meta = obj
-        .get("__meta")
-        .and_then(|v| v.as_object())
-        .ok_or_else(|| format!("Language pack missing __meta object: {}", path.display()))?;
-
-    let app = meta.get("app").and_then(|v| v.as_str()).unwrap_or_default();
-    let meta_code = meta
-        .get("language_code")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default();
-    let meta_pack_ver = meta
-        .get("pack_version")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default();
-    let meta_inputer_ver = meta
-        .get("inputer_version")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default();
-
-    if app != "KACF" {
-        return Err(format!(
-            "Language pack app mismatch: {} (expected KACF)",
-            path.display()
-        ));
-    }
-    if meta_code != code {
-        return Err(format!(
-            "Language pack code mismatch between filename and __meta: {}",
-            path.display()
-        ));
-    }
-    if meta_pack_ver != ver {
-        return Err(format!(
-            "Language pack version mismatch between filename and __meta: {}",
-            path.display()
-        ));
-    }
-    if meta_inputer_ver != LANGUAGE_INPUTER_VERSION {
-        return Err(format!(
-            "Language inputer version mismatch: pack={} software={} file={}",
-            meta_inputer_ver,
-            LANGUAGE_INPUTER_VERSION,
-            path.display()
-        ));
-    }
-    if meta_pack_ver != LANGUAGE_INPUTER_VERSION {
-        return Err(format!(
-            "Language pack version mismatch: pack={} software={} file={}",
-            meta_pack_ver,
-            LANGUAGE_INPUTER_VERSION,
-            path.display()
-        ));
-    }
-
-    let mut keys = BTreeSet::new();
-    for (k, v) in obj {
-        if k == "__meta" {
-            continue;
-        }
-        if !v.is_string() {
-            return Err(format!(
-                "Language pack key must be string: file={} key={}",
-                path.display(),
-                k
-            ));
-        }
-        keys.insert(k.to_string());
-    }
-    if keys.is_empty() {
-        return Err(format!(
-            "Language pack has no translation keys: {}",
-            path.display()
-        ));
-    }
-
-    Ok(LoadedLanguagePack {
-        code: code.to_string(),
-        path: path.to_path_buf(),
-        content,
-        keys,
-    })
-}
-
-fn load_language_packs_checked() -> Result<Vec<LoadedLanguagePack>, String> {
-    let mut items = Vec::new();
-    let mut seen_codes = BTreeSet::new();
-    let Ok(entries) = fs::read_dir(languages_dir_path()) else {
-        return Err("Language pack directory missing".to_string());
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-        let Some(name) = path.file_name().and_then(|x| x.to_str()) else {
-            continue;
-        };
-        if !name.ends_with(".json") {
-            continue;
-        }
-        let Some((code, ver)) = parse_language_pack_filename(name) else {
-            return Err(format!(
-                "Language pack filename invalid (expected KACF_<code>_<ver>.json): {}",
-                name
-            ));
-        };
-        if !seen_codes.insert(code.clone()) {
-            return Err(format!("Duplicate language code pack found: {}", code));
-        }
-        items.push(validate_language_pack_file(&path, &code, &ver)?);
-    }
-    if items.is_empty() {
-        return Err("No valid language packs found".to_string());
-    }
-    let Some(base) = items.iter().find(|p| p.code == "en").cloned() else {
-        return Err("Language packs must include English pack: code=en".to_string());
-    };
-    for pack in &items {
-        if pack.keys != base.keys {
-            return Err(format!(
-                "Language pack keys incomplete or mismatched: {}",
-                pack.path.display()
-            ));
-        }
-    }
-    items.sort_by(|a, b| a.code.cmp(&b.code));
-    Ok(items)
+    web_ui_languages::sanitize_language_code(raw)
 }
 
 fn list_language_packs() -> Result<Vec<String>, String> {
-    let packs = load_language_packs_checked()?;
-    Ok(packs.into_iter().map(|p| p.code).collect())
+    web_ui_languages::list_language_packs()
 }
 
 fn read_language_pack(code: &str) -> Result<String, String> {
-    let clean = sanitize_language_code(code).ok_or_else(|| "invalid language code".to_string())?;
-    let packs = load_language_packs_checked()?;
-    packs
-        .into_iter()
-        .find(|p| p.code == clean)
-        .map(|p| p.content)
-        .ok_or_else(|| "language not found".to_string())
+    web_ui_languages::read_language_pack(code)
+}
+
+fn load_language_packs_checked() -> Result<(), String> {
+    web_ui_languages::ensure_language_packs_checked()
 }
 
 fn read_ui_cache() -> UiCachePayload {
@@ -1615,126 +1421,47 @@ fn spawn_event_collector(state: AppState) {
 }
 
 fn parse_perf_ms(line: &str, prefix: &str) -> Option<u32> {
-    let tail = line.strip_prefix(prefix)?;
-    let n = tail.strip_suffix("ms")?;
-    n.trim().parse::<u32>().ok()
+    web_ui_analytics::parse_perf_ms(line, prefix)
 }
 
 fn parse_eval_ms(line: &str) -> Option<u32> {
-    if !line.starts_with("[Perf] eval_") {
-        return None;
-    }
-    let idx = line.find('=')?;
-    let tail = &line[idx + 1..];
-    let n = tail.strip_suffix("ms")?;
-    n.trim().parse::<u32>().ok()
+    web_ui_analytics::parse_eval_ms(line)
 }
 
 fn push_sample(samples: &mut Vec<u32>, value: u32, max_len: usize) {
-    samples.push(value);
-    if samples.len() > max_len {
-        let drop_n = samples.len() - max_len;
-        samples.drain(0..drop_n);
-    }
+    web_ui_analytics::push_sample(samples, value, max_len)
 }
 
 fn percentile_ms(samples: &[u32], p: usize) -> Option<u32> {
-    if samples.is_empty() || p == 0 {
-        return None;
-    }
-    let mut v = samples.to_vec();
-    v.sort_unstable();
-    let idx = ((v.len() - 1) * p.min(100)) / 100;
-    v.get(idx).copied()
+    web_ui_analytics::percentile_ms(samples, p)
 }
 
 fn parse_eval_digest_category(line: &str) -> Option<String> {
-    let prefix = "[Eval-Digest] category=";
-    let tail = line.strip_prefix(prefix)?;
-    let category = tail.split_whitespace().next()?.trim();
-    if category.is_empty() {
-        return None;
-    }
-    Some(category.to_string())
+    web_ui_analytics::parse_eval_digest_category(line)
 }
 
 fn parse_eval_digest_signature(line: &str) -> Option<String> {
-    let key = " signature=";
-    let idx = line.find(key)?;
-    let sig = line[idx + key.len()..].trim();
-    if sig.is_empty() {
-        return None;
-    }
-    Some(sig.chars().take(120).collect::<String>())
+    web_ui_analytics::parse_eval_digest_signature(line)
 }
 
 fn push_digest(history: &mut Vec<(u64, String)>, ts: u64, category: String, max_len: usize) {
-    history.push((ts, category));
-    if history.len() > max_len {
-        let drop_n = history.len() - max_len;
-        history.drain(0..drop_n);
-    }
+    web_ui_analytics::push_digest(history, ts, category, max_len)
 }
 
 fn digest_recent_counts(history: &[(u64, String)], window_secs: u64) -> Vec<CategoryCount> {
-    let now = now_unix();
-    let mut map: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
-    for (ts, cat) in history {
-        if now.saturating_sub(*ts) <= window_secs {
-            *map.entry(cat.clone()).or_insert(0) += 1;
-        }
-    }
-    let mut out = map
-        .into_iter()
-        .map(|(category, count)| CategoryCount { category, count })
-        .collect::<Vec<_>>();
-    out.sort_by(|a, b| {
-        b.count
-            .cmp(&a.count)
-            .then_with(|| a.category.cmp(&b.category))
-    });
-    out.truncate(8);
-    out
+    web_ui_analytics::digest_recent_counts(history, window_secs)
 }
 
 fn push_done_history(history: &mut Vec<(u64, bool)>, ts: u64, ok: bool, max_len: usize) {
-    history.push((ts, ok));
-    if history.len() > max_len {
-        let drop_n = history.len() - max_len;
-        history.drain(0..drop_n);
-    }
+    web_ui_analytics::push_done_history(history, ts, ok, max_len)
 }
 
 fn done_recent_counts(history: &[(u64, bool)], window_secs: u64) -> (u64, u64) {
-    let now = now_unix();
-    let mut ok = 0u64;
-    let mut fail = 0u64;
-    for (ts, is_ok) in history.iter().copied() {
-        if now.saturating_sub(ts) <= window_secs {
-            if is_ok {
-                ok += 1;
-            } else {
-                fail += 1;
-            }
-        }
-    }
-    (ok, fail)
+    web_ui_analytics::done_recent_counts(history, window_secs)
 }
 
 fn readiness_level(runtime: &RuntimeStatus, done_5m_ok: u64, done_5m_fail: u64) -> &'static str {
-    if runtime.running {
-        return "running";
-    }
-    if done_5m_fail > 0 {
-        return "red";
-    }
-    if done_5m_ok > 0 {
-        return "green";
-    }
-    if runtime.total_done_fail > runtime.total_done_ok {
-        return "yellow";
-    }
-    "idle"
+    web_ui_analytics::readiness_level(runtime, done_5m_ok, done_5m_fail)
 }
 
 fn readiness_score(
@@ -1745,37 +1472,14 @@ fn readiness_score(
     api_p95_ms: Option<u32>,
     eval_p95_ms: Option<u32>,
 ) -> u8 {
-    let mut score: i32 = 100;
-    if runtime.running {
-        score -= 10;
-    }
-    if done_5m_fail > 0 {
-        score -= 30;
-    }
-    if let Some(rate) = done_5m_success_rate {
-        if rate < 60.0 {
-            score -= 25;
-        } else if rate < 85.0 {
-            score -= 10;
-        }
-    }
-    if done_5m_ok == 0 && done_5m_fail == 0 {
-        score -= 5;
-    }
-    if let Some(v) = api_p95_ms {
-        if v > 60_000 {
-            score -= 10;
-        }
-    }
-    if let Some(v) = eval_p95_ms {
-        if v > 120_000 {
-            score -= 15;
-        }
-    }
-    if !runtime.last_error.trim().is_empty() {
-        score -= 5;
-    }
-    score.clamp(0, 100) as u8
+    web_ui_analytics::readiness_score(
+        runtime,
+        done_5m_ok,
+        done_5m_fail,
+        done_5m_success_rate,
+        api_p95_ms,
+        eval_p95_ms,
+    )
 }
 
 fn release_blockers(
@@ -1784,24 +1488,7 @@ fn release_blockers(
     done_5m_success_rate: Option<f64>,
     eval_p95_ms: Option<u32>,
 ) -> Vec<String> {
-    let mut out = Vec::new();
-    if done_5m_fail > 0 {
-        out.push("最近5分钟存在失败结果".to_string());
-    }
-    if let Some(rate) = done_5m_success_rate {
-        if rate < 80.0 {
-            out.push(format!("最近5分钟成功率偏低: {:.1}%", rate));
-        }
-    }
-    if let Some(v) = eval_p95_ms {
-        if v > 120_000 {
-            out.push(format!("评测耗时 p95 过高: {}ms", v));
-        }
-    }
-    if runtime.last_error.to_lowercase().contains("session error") {
-        out.push("最近会话出现 Session error".to_string());
-    }
-    out
+    web_ui_analytics::release_blockers(runtime, done_5m_fail, done_5m_success_rate, eval_p95_ms)
 }
 
 fn release_actions(
@@ -1809,53 +1496,11 @@ fn release_actions(
     api_p95_ms: Option<u32>,
     eval_p95_ms: Option<u32>,
 ) -> Vec<String> {
-    let mut out = Vec::new();
-    if let Some(v) = api_p95_ms {
-        if v > 60_000 {
-            out.push("检查网络质量，或提高 AUTOCODING_API_TIMEOUT_SECS".to_string());
-        }
-    }
-    if let Some(v) = eval_p95_ms {
-        if v > 120_000 {
-            out.push("检查评测脚本性能，必要时提高 AUTOCODING_EVAL_TIMEOUT_SECS".to_string());
-        }
-    }
-    if !runtime.last_error.trim().is_empty() {
-        out.push("根据 last_error 优先修复根因，再继续迭代".to_string());
-    }
-    if out.is_empty() {
-        out.push("当前无明显阻断，可进行灰度发布".to_string());
-    }
-    out
+    web_ui_analytics::release_actions(runtime, api_p95_ms, eval_p95_ms)
 }
 
 fn success_rate_series(history: &[(u64, bool)], minutes: u32, bucket_secs: u64) -> Vec<TimePoint> {
-    let now = now_unix();
-    let mut out = Vec::new();
-    for i in (0..minutes).rev() {
-        let start = now.saturating_sub((i as u64 + 1) * bucket_secs);
-        let end = now.saturating_sub((i as u64) * bucket_secs);
-        let mut ok = 0u64;
-        let mut total = 0u64;
-        for (ts, is_ok) in history.iter().copied() {
-            if ts >= start && ts < end {
-                total += 1;
-                if is_ok {
-                    ok += 1;
-                }
-            }
-        }
-        let success_rate = if total == 0 {
-            None
-        } else {
-            Some((ok as f64) * 100.0 / (total as f64))
-        };
-        out.push(TimePoint {
-            minute_ago: i + 1,
-            success_rate,
-        });
-    }
-    out
+    web_ui_analytics::success_rate_series(history, minutes, bucket_secs)
 }
 
 fn read_gate_threshold() -> u8 {
@@ -1872,22 +1517,7 @@ fn release_gate(
     blockers: &[String],
     running: bool,
 ) -> (bool, String) {
-    if running {
-        return (false, "任务仍在运行中".to_string());
-    }
-    if !blockers.is_empty() {
-        return (false, blockers.join("；"));
-    }
-    if readiness_score < gate_threshold {
-        return (
-            false,
-            format!(
-                "readiness_score={} 低于阈值 {}",
-                readiness_score, gate_threshold
-            ),
-        );
-    }
-    (true, "通过发布门禁".to_string())
+    web_ui_analytics::release_gate(readiness_score, gate_threshold, blockers, running)
 }
 
 pub async fn run_web_server(

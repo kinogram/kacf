@@ -3,6 +3,8 @@ mod git_utils;
 mod protocol;
 mod runner;
 mod web_ui;
+mod web_ui_analytics;
+mod web_ui_languages;
 mod workspace;
 
 use crossbeam_channel::unbounded;
