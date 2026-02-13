@@ -545,7 +545,7 @@ fn decrypt_api_key(enc: &str) -> Option<String> {
 
 fn decrypt_shared_config_for_response(cfg: &mut SharedConfig) {
     cfg.api_key_is_masked = false;
-    if cfg.encrypt_api_key && is_encrypted_api_key(&cfg.api_key) {
+    if is_encrypted_api_key(&cfg.api_key) {
         match decrypt_api_key(&cfg.api_key) {
             Some(plain) => cfg.api_key = plain,
             None => {
