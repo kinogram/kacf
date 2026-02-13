@@ -206,6 +206,7 @@
   "alert_task_stopped": "Task stopped.",
   "status_start_failed_prefix": "Start failed: ",
   "status_resume_failed_prefix": "Resume failed: save first and ensure current goal matches checkpoint. ",
+  "status_stop_failed": "Stop request failed: {message}",
   "status_stop_failed_prefix": "Stop request failed: please check backend connectivity and retry. ",
   "status_revert_failed_prefix": "Revert failed: ",
   "status_push_failed_prefix": "Push failed: ",

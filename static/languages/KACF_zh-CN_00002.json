@@ -206,6 +206,7 @@
   "alert_task_stopped": "任务已停止。",
   "status_start_failed_prefix": "启动失败: ",
   "status_resume_failed_prefix": "恢复失败：请先保存并确保当前目标与历史断点一致。",
+  "status_stop_failed": "停止请求失败：{message}",
   "status_stop_failed_prefix": "停止请求失败：请检查服务连接后重试。",
   "status_revert_failed_prefix": "回滚失败: ",
   "status_push_failed_prefix": "推送失败: ",

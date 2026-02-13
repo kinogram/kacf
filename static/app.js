@@ -1249,8 +1249,11 @@ function markBackendFailure(source, immediate) {
     const runningLike = isRunStateActive(state);
     if (runningLike) {
         syncStoppedStateIfNeeded(fmt('sync_reason_backend_disconnected', '', { source }), true);
-        setRunState('interrupted', txt('run_interrupted', ''));
-        setStatus(txt('status_backend_disconnected', ''), 'status-danger');
+        applyInterruptedTerminalState({
+            runTextKey: 'run_interrupted',
+            statusKey: 'status_backend_disconnected',
+            statusClass: 'status-danger',
+        });
     } else {
         setStatus(txt('status_backend_offline', ''), 'status-danger');
     }
@@ -1691,6 +1694,38 @@ function applyDoneOutcome(outcome, message) {
     if (!autoResumed) {
         showAlertOnce(fmt(cfg.alertKey, '', { message }));
     }
+}
+
+function applyInterruptedTerminalState(options) {
+    const cfg = options || {};
+    setRunStateAndStatus(
+        'interrupted',
+        cfg.runTextKey || 'run_interrupted',
+        cfg.statusKey || 'status_done_interrupted',
+        cfg.statusClass || 'status-warn',
+        cfg.message
+    );
+    if (cfg.alertKey) {
+        showAlertOnce(
+            typeof cfg.message === 'string'
+                ? fmt(cfg.alertKey, '', { message: cfg.message })
+                : txt(cfg.alertKey, '')
+        );
+    }
+}
+
+const STOP_ACCEPTED_STATUS_CONFIG = {
+    accepted: { key: 'status_stop_waiting_ack', className: 'status-warn' },
+    channel_unavailable: { key: 'status_stop_backend_done', className: 'status-warn' },
+};
+
+function applyStopAcceptedStatus(ack) {
+    const cfg = ack.includes('channel unavailable')
+        ? STOP_ACCEPTED_STATUS_CONFIG.channel_unavailable
+        : STOP_ACCEPTED_STATUS_CONFIG.accepted;
+    setRunState('stopping', txt('run_stopping', ''));
+    setStatus(txt(cfg.key, ''), cfg.className);
+    setRunActionButtons(false);
 }
 
 function setProjectDraftState() {
@@ -2606,19 +2641,20 @@ async function stopSession() {
         clearStopAckTimer();
         stopAckTimer = setTimeout(() => {
             if (!stopRequested) return;
-            setRunState('interrupted', txt('run_interrupted_timeout', ''));
-            setStatus(txt('status_stop_ack_timeout', ''), 'status-warn');
+            applyInterruptedTerminalState({
+                runTextKey: 'run_interrupted_timeout',
+                statusKey: 'status_stop_ack_timeout',
+                statusClass: 'status-warn',
+            });
         }, 6000);
-        setRunState('stopping', txt('run_stopping', ''));
-        if (ack.includes('channel unavailable')) {
-            setStatus(txt('status_stop_backend_done', ''), 'status-warn');
-        } else {
-            setStatus(txt('status_stop_waiting_ack', ''), 'status-warn');
-        }
-        setRunActionButtons(false);
+        applyStopAcceptedStatus(ack);
     } catch (e) {
-        setRunState('interrupted', txt('run_interrupted', ''));
-        setStatus(`${txt('status_stop_failed_prefix', '')}${e}`, 'status-danger');
+        applyInterruptedTerminalState({
+            runTextKey: 'run_interrupted',
+            statusKey: 'status_stop_failed',
+            statusClass: 'status-danger',
+            message: String(e),
+        });
     }
 }
 
