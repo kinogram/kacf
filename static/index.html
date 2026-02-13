@@ -1395,14 +1395,15 @@ async function fetchUiCacheFromServer() {
         cacheProjectLogs = (data.project_logs && typeof data.project_logs === 'object') ? data.project_logs : {};
         cacheProjectUiState = (data.project_ui_state && typeof data.project_ui_state === 'object') ? data.project_ui_state : {};
         if (data.shared_config && typeof data.shared_config === 'object') {
+            const maskedFlag = !!data.shared_config.api_key_is_masked;
             sharedConfig = {
                 api_key: data.shared_config.api_key || '',
                 base_url: data.shared_config.base_url || 'https://api.deepseek.com',
                 model: data.shared_config.model || 'deepseek-reasoner',
                 language: normalizeLanguageCode(data.shared_config.language || ''),
                 encrypt_api_key: !!data.shared_config.encrypt_api_key,
-                mask_api_key: !!data.shared_config.mask_api_key,
-                api_key_is_masked: !!data.shared_config.api_key_is_masked,
+                mask_api_key: maskedFlag ? true : !!data.shared_config.mask_api_key,
+                api_key_is_masked: maskedFlag,
             };
             apiKeyEditMode = false;
         }
