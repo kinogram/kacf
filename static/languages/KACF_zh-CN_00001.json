@@ -52,6 +52,7 @@
   "status_started_new_task": "已开始运行当前项目。系统将自动写代码并执行评测。",
   "status_resumed": "已从断点恢复运行。",
   "status_global_saved": "全局配置已保存。",
+  "status_global_save_failed": "全局配置保存失败，请稍后重试。",
   "status_need_select_project": "请先选择一个可加载的项目。",
   "status_need_delete_project": "请先选择要删除的项目。",
   "status_new_project": "已切换到新项目，请继续编辑，系统会自动保存。",

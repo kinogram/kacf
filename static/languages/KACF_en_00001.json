@@ -52,6 +52,7 @@
   "status_started_new_task": "Current project run started. The system will generate code and run evaluations automatically.",
   "status_resumed": "Resumed from checkpoint.",
   "status_global_saved": "Global settings saved.",
+  "status_global_save_failed": "Failed to save global settings. Please retry.",
   "status_need_select_project": "Please select a project to load.",
   "status_need_delete_project": "Please select a project to delete.",
   "status_new_project": "Switched to a new project. Keep editing and it will auto-save.",

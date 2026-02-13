@@ -1860,8 +1860,11 @@ async function saveGlobalConfig() {
     if (wantedLanguage && wantedLanguage !== currentLanguage) {
         await switchLanguage(wantedLanguage, false);
     }
-    updateSharedConfigFromInputs();
-    scheduleUiCacheSave();
+    const ok = await persistSharedConfigNow();
+    if (!ok) {
+        setStatus(txt('status_global_save_failed', ''), 'status-danger');
+        return;
+    }
     closeGlobalConfigModal();
     setStatus(txt('status_global_saved', ''), 'status-warn');
 }
