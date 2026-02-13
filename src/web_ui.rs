@@ -37,7 +37,17 @@ const APP_JS: &str = concat!(
     "\n",
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/static/js/app_config.js"
+        "/static/js/app_ui_cache.js"
+    )),
+    "\n",
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/static/js/app_log_pipeline.js"
+    )),
+    "\n",
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/static/js/app_runtime_state.js"
     )),
     "\n",
     include_str!(concat!(
@@ -47,7 +57,12 @@ const APP_JS: &str = concat!(
     "\n",
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/static/js/app_runtime.js"
+        "/static/js/app_runtime_sync.js"
+    )),
+    "\n",
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/static/js/app_runtime_actions.js"
     ))
 );
 
