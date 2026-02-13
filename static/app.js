@@ -29,6 +29,22 @@ const SSE_CONNECT_GRACE_MS = 10000;
 const DEFAULT_LOG_MAX_CHARS = 50000;
 const DEFAULT_DIFF_MAX_CHARS = 50000;
 const LARGE_CHAR_LIMIT_WARNING_THRESHOLD = 50000;
+const GLOBAL_OPTION_DEFAULTS = {
+    auto_resume_attempts: '',
+    stop_after_minutes: '',
+    history_max_messages: '40',
+    history_max_chars: '70000',
+    log_max_chars: String(DEFAULT_LOG_MAX_CHARS),
+    diff_max_chars: String(DEFAULT_DIFF_MAX_CHARS),
+};
+const GLOBAL_OPTION_INPUT_ID_BY_KEY = {
+    auto_resume_attempts: 'global_auto_resume_attempts',
+    stop_after_minutes: 'global_stop_after_minutes',
+    history_max_messages: 'global_history_max_messages',
+    history_max_chars: 'global_history_max_chars',
+    log_max_chars: 'global_log_max_chars',
+    diff_max_chars: 'global_diff_max_chars',
+};
 let activeRunLogBucket = '';
 let activeRunProjectLabel = '';
 let runSessionActive = false;
@@ -52,14 +68,7 @@ let projectSearchKeyword = '';
 let projectDraftDirty = false;
 let sidebarCollapsed = false;
 let sidebarMobileOpen = false;
-let globalOptions = {
-    auto_resume_attempts: '',
-    stop_after_minutes: '',
-    history_max_messages: '40',
-    history_max_chars: '70000',
-    log_max_chars: String(DEFAULT_LOG_MAX_CHARS),
-    diff_max_chars: String(DEFAULT_DIFF_MAX_CHARS),
-};
+let globalOptions = { ...GLOBAL_OPTION_DEFAULTS };
 let unattendedAutoResumeRemaining = 0;
 let unattendedAutoResumeTimer = null;
 let activeRunUnattendedMode = false;
@@ -115,6 +124,15 @@ function parseBoundedInt(raw, min, max, fallback) {
     if (n < min) return min;
     if (n > max) return max;
     return n;
+}
+
+function normalizeGlobalOptions(raw) {
+    const out = { ...GLOBAL_OPTION_DEFAULTS };
+    if (!raw || typeof raw !== 'object') return out;
+    Object.keys(GLOBAL_OPTION_DEFAULTS).forEach((key) => {
+        out[key] = String(raw[key] ?? GLOBAL_OPTION_DEFAULTS[key]).trim();
+    });
+    return out;
 }
 
 function logMaxCharsSetting() {
@@ -697,14 +715,7 @@ async function fetchUiCacheFromServer() {
             };
         }
         if (data.global_options && typeof data.global_options === 'object') {
-            globalOptions = {
-                auto_resume_attempts: String(data.global_options.auto_resume_attempts || ''),
-                stop_after_minutes: String(data.global_options.stop_after_minutes || ''),
-                history_max_messages: String(data.global_options.history_max_messages || '40'),
-                history_max_chars: String(data.global_options.history_max_chars || '70000'),
-                log_max_chars: String(data.global_options.log_max_chars || DEFAULT_LOG_MAX_CHARS),
-                diff_max_chars: String(data.global_options.diff_max_chars || DEFAULT_DIFF_MAX_CHARS),
-            };
+            globalOptions = normalizeGlobalOptions(data.global_options);
         }
         cacheProjectLogs = sanitizeProjectLogsMap(
             (data.project_logs && typeof data.project_logs === 'object') ? data.project_logs : {}
@@ -759,29 +770,31 @@ async function persistSharedConfigNow() {
 }
 
 function updateGlobalOptionsFromInputs() {
-    globalOptions = {
-        auto_resume_attempts: String(document.getElementById('global_auto_resume_attempts')?.value || '').trim(),
-        stop_after_minutes: String(document.getElementById('global_stop_after_minutes')?.value || '').trim(),
-        history_max_messages: String(document.getElementById('global_history_max_messages')?.value || '').trim(),
-        history_max_chars: String(document.getElementById('global_history_max_chars')?.value || '').trim(),
-        log_max_chars: String(document.getElementById('global_log_max_chars')?.value || '').trim(),
-        diff_max_chars: String(document.getElementById('global_diff_max_chars')?.value || '').trim(),
-    };
+    const next = { ...GLOBAL_OPTION_DEFAULTS };
+    Object.entries(GLOBAL_OPTION_INPUT_ID_BY_KEY).forEach(([key, inputId]) => {
+        const el = document.getElementById(inputId);
+        next[key] = String(el?.value ?? GLOBAL_OPTION_DEFAULTS[key]).trim();
+    });
+    globalOptions = next;
 }
 
 function applyGlobalOptionsToInputs() {
-    const a = document.getElementById('global_auto_resume_attempts');
-    if (a) a.value = globalOptions.auto_resume_attempts || '';
-    const s = document.getElementById('global_stop_after_minutes');
-    if (s) s.value = globalOptions.stop_after_minutes || '';
-    const hm = document.getElementById('global_history_max_messages');
-    if (hm) hm.value = globalOptions.history_max_messages || '40';
-    const hc = document.getElementById('global_history_max_chars');
-    if (hc) hc.value = globalOptions.history_max_chars || '70000';
-    const l = document.getElementById('global_log_max_chars');
-    if (l) l.value = globalOptions.log_max_chars || String(DEFAULT_LOG_MAX_CHARS);
-    const d = document.getElementById('global_diff_max_chars');
-    if (d) d.value = globalOptions.diff_max_chars || String(DEFAULT_DIFF_MAX_CHARS);
+    const normalized = normalizeGlobalOptions(globalOptions);
+    globalOptions = normalized;
+    Object.entries(GLOBAL_OPTION_INPUT_ID_BY_KEY).forEach(([key, inputId]) => {
+        const el = document.getElementById(inputId);
+        if (el) el.value = normalized[key];
+    });
+}
+
+function bindGlobalOptionInput(inputId, onAfterUpdate) {
+    const el = document.getElementById(inputId);
+    if (!el) return;
+    el.addEventListener('input', () => {
+        updateGlobalOptionsFromInputs();
+        if (typeof onAfterUpdate === 'function') onAfterUpdate();
+        scheduleUiCacheSave();
+    });
 }
 
 function loadProjectUiStateMap() {
@@ -2734,33 +2747,17 @@ function bindEvents() {
         updateSharedConfigFromInputs();
         scheduleUiCacheSave();
     });
-    document.getElementById('global_auto_resume_attempts').addEventListener('input', () => {
-        updateGlobalOptionsFromInputs();
-        scheduleUiCacheSave();
-    });
-    document.getElementById('global_stop_after_minutes').addEventListener('input', () => {
-        updateGlobalOptionsFromInputs();
-        scheduleUiCacheSave();
-    });
-    document.getElementById('global_history_max_messages').addEventListener('input', () => {
-        updateGlobalOptionsFromInputs();
-        scheduleUiCacheSave();
-    });
-    document.getElementById('global_history_max_chars').addEventListener('input', () => {
-        updateGlobalOptionsFromInputs();
-        scheduleUiCacheSave();
-    });
-    document.getElementById('global_log_max_chars').addEventListener('input', () => {
-        updateGlobalOptionsFromInputs();
+    bindGlobalOptionInput('global_auto_resume_attempts');
+    bindGlobalOptionInput('global_stop_after_minutes');
+    bindGlobalOptionInput('global_history_max_messages');
+    bindGlobalOptionInput('global_history_max_chars');
+    bindGlobalOptionInput('global_log_max_chars', () => {
         maybeWarnLargeCharLimit(txt('label_global_log_max_chars', ''));
         renderCurrentLogView();
-        scheduleUiCacheSave();
     });
-    document.getElementById('global_diff_max_chars').addEventListener('input', () => {
-        updateGlobalOptionsFromInputs();
+    bindGlobalOptionInput('global_diff_max_chars', () => {
         maybeWarnLargeCharLimit(txt('label_global_diff_max_chars', ''));
         renderUiForViewBucket();
-        scheduleUiCacheSave();
     });
     document.getElementById('language_select').addEventListener('change', async () => {
         const next = normalizeLanguageCode(document.getElementById('language_select').value);

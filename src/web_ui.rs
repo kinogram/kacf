@@ -484,6 +484,16 @@ fn write_ui_cache(payload: &UiCachePayload) -> std::io::Result<()> {
     web_ui_store::write_ui_cache(MANAGED_ROOT_DIR, UI_CACHE_FILENAME, payload)
 }
 
+fn read_global_history_limits(opts: Option<&GlobalOptions>) -> (String, String) {
+    let Some(opts) = opts else {
+        return (String::new(), String::new());
+    };
+    (
+        opts.history_max_messages.trim().to_string(),
+        opts.history_max_chars.trim().to_string(),
+    )
+}
+
 fn read_resume_info(workspace: &str, goal: &str) -> Option<ResumeInfo> {
     let path = require_managed_workspace(workspace)
         .ok()?
@@ -571,14 +581,7 @@ async fn start_session(data: web::Data<AppState>, body: web::Json<StartPayload>)
     let (history_max_messages, history_max_chars) = {
         let _guard = data.projects_lock.lock().unwrap();
         let cache = read_ui_cache();
-        if let Some(opts) = cache.global_options {
-            (
-                opts.history_max_messages.trim().to_string(),
-                opts.history_max_chars.trim().to_string(),
-            )
-        } else {
-            (String::new(), String::new())
-        }
+        read_global_history_limits(cache.global_options.as_ref())
     };
     match start_from_payload(
         &data,
@@ -718,16 +721,8 @@ async fn resume_session(
     let (mut draft, history_max_messages, history_max_chars): (DraftPayload, String, String) = {
         let _guard = data.projects_lock.lock().unwrap();
         let cache = read_ui_cache();
-        let history_max_messages = cache
-            .global_options
-            .as_ref()
-            .map(|x| x.history_max_messages.trim().to_string())
-            .unwrap_or_default();
-        let history_max_chars = cache
-            .global_options
-            .as_ref()
-            .map(|x| x.history_max_chars.trim().to_string())
-            .unwrap_or_default();
+        let (history_max_messages, history_max_chars) =
+            read_global_history_limits(cache.global_options.as_ref());
         let Some(project) = cache
             .projects
             .into_iter()
