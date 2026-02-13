@@ -2934,7 +2934,7 @@ function bindEvents() {
     document.getElementById('api_key').addEventListener('blur', reMaskApiKeyIfNeeded);
     document.getElementById('mask_api_key').addEventListener('change', async () => {
         updateSharedConfigFromInputs();
-        if (!sharedConfig.mask_api_key && sharedConfig.api_key_is_masked) {
+        if (!sharedConfig.mask_api_key && (sharedConfig.api_key_is_masked || looksLikeMaskedApiKey(sharedConfig.api_key))) {
             const apiReady = await resolveApiKeyForRequest();
             if (!apiReady) {
                 sharedConfig.mask_api_key = true;
