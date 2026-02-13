@@ -21,6 +21,8 @@ use crate::protocol::{AgentEvent, AgentRequest, ClarifyAnswer, ClarifyQuestion};
 
 /// Index HTML page embedded at compile time.
 const INDEX_HTML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/index.html"));
+const APP_CSS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/app.css"));
+const APP_JS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/app.js"));
 
 const SESSION_STATE_FILENAME: &str = ".autocoding_state.json";
 const PROJECT_CONFIG_FILENAME: &str = ".autocoding_project.json";
@@ -1495,6 +1497,18 @@ async fn index_page() -> impl Responder {
         .body(INDEX_HTML)
 }
 
+async fn app_css() -> impl Responder {
+    HttpResponse::Ok()
+        .content_type("text/css; charset=utf-8")
+        .body(APP_CSS)
+}
+
+async fn app_js() -> impl Responder {
+    HttpResponse::Ok()
+        .content_type("application/javascript; charset=utf-8")
+        .body(APP_JS)
+}
+
 async fn list_languages() -> impl Responder {
     match list_language_packs() {
         Ok(languages) => HttpResponse::Ok().json(LanguageListResponse { languages }),
@@ -1904,6 +1918,8 @@ pub async fn run_web_server(
         App::new()
             .app_data(web::Data::new(state.clone()))
             .route("/", web::get().to(index_page))
+            .route("/assets/app.css", web::get().to(app_css))
+            .route("/assets/app.js", web::get().to(app_js))
             .route("/assets/languages/list", web::get().to(list_languages))
             .route(
                 "/assets/languages/{code}.json",
