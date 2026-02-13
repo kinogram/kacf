@@ -61,6 +61,7 @@
   "status_resume_alloc_workspace_failed": "Resume failed: unable to assign a workspace directory. Save the project first.",
   "status_start_alloc_workspace_failed": "Start failed: unable to assign a workspace directory. Save the project first.",
   "status_start_api_key_empty": "Start failed: API Key is empty.",
+  "status_shared_config_sync_failed": "Resume failed: unable to sync global settings. Please retry.",
   "status_api_key_fetch_failed": "Failed to load API Key. Please try again.",
   "status_api_key_edit_failed": "Failed to enter API Key edit mode. Please try again.",
   "status_need_clarify": "Action required: the model asked clarification questions. Please answer and submit.",

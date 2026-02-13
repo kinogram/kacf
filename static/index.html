@@ -1430,6 +1430,20 @@ function scheduleUiCacheSave() {
     }, 250);
 }
 
+async function persistSharedConfigNow() {
+    updateSharedConfigFromInputs();
+    try {
+        const resp = await fetch('/ui_cache', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ shared_config: sharedConfig }),
+        });
+        return resp.ok;
+    } catch (_e) {
+        return false;
+    }
+}
+
 function loadProjectUiStateMap() {
     return cacheProjectUiState || {};
 }
@@ -2657,6 +2671,11 @@ async function resumeSession() {
         ensureWorkspaceForCurrentProject();
         if (isReadOnlyView()) {
             setStatus(txt('status_readonly_view', ''), 'status-danger');
+            return;
+        }
+        const synced = await persistSharedConfigNow();
+        if (!synced) {
+            setStatus(txt('status_shared_config_sync_failed', ''), 'status-danger');
             return;
         }
         let body = getFormData();

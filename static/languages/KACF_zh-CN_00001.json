@@ -61,6 +61,7 @@
   "status_resume_alloc_workspace_failed": "恢复失败：无法为项目分配目录，请先保存项目。",
   "status_start_alloc_workspace_failed": "启动失败：无法为项目分配目录，请先保存项目。",
   "status_start_api_key_empty": "启动失败：API Key 为空，请先填写。",
+  "status_shared_config_sync_failed": "恢复失败：全局配置同步失败，请稍后重试。",
   "status_api_key_fetch_failed": "读取 API Key 失败，请稍后重试。",
   "status_api_key_edit_failed": "进入 API Key 编辑失败，请稍后重试。",
   "status_need_clarify": "需要你确认：模型提出了澄清问题，请填写后提交。",
