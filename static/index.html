@@ -1668,16 +1668,13 @@ function markBackendFailure(source, immediate) {
     const state = currentRunState();
     const runningLike = state === 'running' || state === 'stopping';
     if (runningLike) {
-        syncStoppedStateIfNeeded(fmt('sync_reason_backend_disconnected', '', { source }));
+        syncStoppedStateIfNeeded(fmt('sync_reason_backend_disconnected', '', { source }), true);
         setRunState('interrupted', txt('run_interrupted', ''));
         setStatus(txt('status_backend_disconnected', ''), 'status-danger');
     } else {
         setStatus(txt('status_backend_offline', ''), 'status-danger');
     }
-    if (!completionAlertShown) {
-        completionAlertShown = true;
-        alert(txt(runningLike ? 'alert_backend_disconnected' : 'alert_backend_offline', ''));
-    }
+    alert(txt(runningLike ? 'alert_backend_disconnected' : 'alert_backend_offline', ''));
 }
 
 async function checkBackendHealth() {
@@ -1690,7 +1687,7 @@ async function checkBackendHealth() {
     }
 }
 
-function syncStoppedStateIfNeeded(reason) {
+function syncStoppedStateIfNeeded(reason, suppressStoppedAlert) {
     const state = currentRunState();
     if (state !== 'running' && state !== 'stopping') return;
     clearStopAckTimer();
@@ -1704,7 +1701,7 @@ function syncStoppedStateIfNeeded(reason) {
     setRunState('idle', txt('run_idle', ''));
     document.getElementById('start_btn').disabled = false;
     document.getElementById('stop_btn').disabled = true;
-    if (!completionAlertShown) {
+    if (!suppressStoppedAlert && !completionAlertShown) {
         completionAlertShown = true;
         alert(txt('alert_task_stopped', ''));
     }
