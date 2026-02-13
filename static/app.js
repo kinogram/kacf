@@ -278,6 +278,16 @@ function getApiKeyInputValue() {
     return el.value.trim();
 }
 
+function isMaskedApiEchoState() {
+    const el = document.getElementById('api_key');
+    if (!el) return false;
+    if (el.dataset.masked !== '1') return false;
+    const shown = (el.value || '').trim();
+    const stored = (sharedConfig.api_key || '').trim();
+    // Strong signal of masked echo from cache: shown value equals stored value in masked view.
+    return !!shown && shown === stored;
+}
+
 function renderApiKeyInput() {
     const el = document.getElementById('api_key');
     const editBtn = document.getElementById('api_key_edit_btn');
@@ -312,7 +322,7 @@ async function fetchPlainApiKeyFromServer() {
 async function beginEditApiKey() {
     if (!sharedConfig.mask_api_key) return;
     try {
-        const mustFetchPlain = sharedConfig.api_key_is_masked;
+        const mustFetchPlain = sharedConfig.api_key_is_masked || isMaskedApiEchoState();
         if (mustFetchPlain) {
             const prevMaskedValue = (sharedConfig.api_key || '').trim();
             const plain = await fetchPlainApiKeyFromServer();
@@ -340,7 +350,7 @@ async function resolveApiKeyForRequest(forceResolve, silent) {
     const quiet = silent === true;
     const shouldResolve = force || (
         !!sharedConfig.mask_api_key
-        && sharedConfig.api_key_is_masked
+        && (sharedConfig.api_key_is_masked || isMaskedApiEchoState())
     );
     if (!shouldResolve) return true;
     try {
@@ -2285,7 +2295,7 @@ function bindEvents() {
     document.getElementById('api_key').addEventListener('blur', reMaskApiKeyIfNeeded);
     document.getElementById('mask_api_key').addEventListener('change', async () => {
         updateSharedConfigFromInputs();
-        if (!sharedConfig.mask_api_key && sharedConfig.api_key_is_masked) {
+        if (!sharedConfig.mask_api_key && (sharedConfig.api_key_is_masked || isMaskedApiEchoState())) {
             const apiReady = await resolveApiKeyForRequest(true);
             if (!apiReady) {
                 sharedConfig.mask_api_key = true;
