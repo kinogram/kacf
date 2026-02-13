@@ -1356,13 +1356,19 @@ function renderUnattendedState() {
     const configuredUnattendedMode = !!document.getElementById('unattended_mode')?.checked;
     const unattendedMode = runSessionActive ? activeRunUnattendedMode : configuredUnattendedMode;
     const mins = stopAfterMinutesSetting();
-    const stopText = mins <= 0
-        ? txt('unattended_stop_disabled', '')
-        : (manualRunStopExpired
-            ? txt('unattended_stop_expired', '')
-            : fmt('unattended_stop_left_minutes', '', {
-                minutes: Math.max(0, Math.ceil((manualRunStopDeadlineMs - Date.now()) / 60000)),
-            }));
+    let stopText = txt('unattended_stop_disabled', '');
+    if (mins > 0) {
+        if (!runSessionActive) {
+            stopText = fmt('unattended_stop_left_minutes', '', { minutes: mins });
+        } else if (manualRunStopExpired) {
+            stopText = txt('unattended_stop_expired', '');
+        } else {
+            const remaining = manualRunStopDeadlineMs > 0
+                ? Math.max(0, Math.ceil((manualRunStopDeadlineMs - Date.now()) / 60000))
+                : mins;
+            stopText = fmt('unattended_stop_left_minutes', '', { minutes: remaining });
+        }
+    }
     el.textContent = fmt('unattended_state_line', '', {
         mode: unattendedMode ? txt('unattended_mode_on', '') : txt('unattended_mode_off', ''),
         resume_left: String(Math.max(0, unattendedAutoResumeRemaining)),
@@ -1920,6 +1926,14 @@ async function refreshUiState() {
         const data = await resp.json();
         renderResumeBanner(data);
         if (data.runtime && data.runtime.running) {
+            const mins = stopAfterMinutesSetting();
+            const serverStartMs = Number(data.runtime.last_start_unix || 0) * 1000;
+            if (mins > 0 && serverStartMs > 0) {
+                manualRunStopDeadlineMs = serverStartMs + mins * 60 * 1000;
+                manualRunStopExpired = Date.now() >= manualRunStopDeadlineMs;
+            } else if (mins > 0 && manualRunStopDeadlineMs <= 0) {
+                manualRunStopDeadlineMs = Date.now() + mins * 60 * 1000;
+            }
             const label = (data.runtime.last_workspace || '').trim() || txt('running_backend_task', '');
             if (!activeRunLogBucket) {
                 activeRunLogBucket = `runtime:${label}`;
@@ -2322,9 +2336,11 @@ async function resumeSession(opts) {
         if (!isAuto) {
             activeRunUnattendedMode = !!body.unattended_mode;
         }
-        if (manualRunStopDeadlineMs > 0 && Date.now() >= manualRunStopDeadlineMs) {
-            manualRunStopExpired = true;
+        const mins = stopAfterMinutesSetting();
+        if (mins > 0 && manualRunStopDeadlineMs <= 0) {
+            manualRunStopDeadlineMs = Date.now() + mins * 60 * 1000;
         }
+        manualRunStopExpired = manualRunStopDeadlineMs > 0 && Date.now() >= manualRunStopDeadlineMs;
         renderUnattendedState();
         applyReadOnlyMode();
         setRunState('running', txt('run_running', ''));

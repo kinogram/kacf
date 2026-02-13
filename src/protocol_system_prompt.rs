@@ -44,7 +44,7 @@ pub(crate) fn system_prompt(language: &str, unattended_mode: bool) -> String {
                 )
             );
             if unattended_mode {
-                text.push_str("\n11) Unattended mode is ON: if clarification is needed, raise all questions once before the first coding round, then immediately continue with your own reasonable assumptions. After that, do not output `kind=clarify` again; keep self-iterating with `kind=patch` until convergence.");
+                text.push_str("\n11) Unattended mode is ON: do not output `kind=clarify` at all. Always proceed with reasonable defaults and keep self-iterating with `kind=patch` until convergence.");
             }
             return text;
         }
@@ -85,7 +85,7 @@ pub(crate) fn system_prompt(language: &str, unattended_mode: bool) -> String {
         lang_rule
     );
     if unattended_mode {
-        text.push_str("\n11) 无人值守模式已开启：如需澄清，必须仅在第一轮写代码前一次性提出全部问题，并立即基于合理默认假设继续。此后禁止再输出 `kind=clarify`，必须持续输出 `kind=patch` 自我迭代直至收敛。");
+        text.push_str("\n11) 无人值守模式已开启：禁止输出 `kind=clarify`。必须直接基于合理默认假设持续输出 `kind=patch` 自我迭代直至收敛。");
     }
     text
 }
