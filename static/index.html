@@ -1656,20 +1656,37 @@ function markBackendAlive() {
     backendOfflineNotified = false;
 }
 
-function markBackendFailure(source) {
-    backendFailureCount += 1;
+function markBackendFailure(source, immediate) {
+    if (immediate) {
+        backendFailureCount = BACKEND_FAILURE_THRESHOLD;
+    } else {
+        backendFailureCount += 1;
+    }
     if (backendFailureCount < BACKEND_FAILURE_THRESHOLD) return;
     if (backendOfflineNotified) return;
     backendOfflineNotified = true;
     const state = currentRunState();
-    if (state === 'running' || state === 'stopping') {
+    const runningLike = state === 'running' || state === 'stopping';
+    if (runningLike) {
         syncStoppedStateIfNeeded(fmt('sync_reason_backend_disconnected', '', { source }));
         setRunState('interrupted', txt('run_interrupted', ''));
         setStatus(txt('status_backend_disconnected', ''), 'status-danger');
-        if (!completionAlertShown) {
-            completionAlertShown = true;
-            alert(txt('alert_backend_disconnected', ''));
-        }
+    } else {
+        setStatus(txt('status_backend_offline', ''), 'status-danger');
+    }
+    if (!completionAlertShown) {
+        completionAlertShown = true;
+        alert(txt(runningLike ? 'alert_backend_disconnected' : 'alert_backend_offline', ''));
+    }
+}
+
+async function checkBackendHealth() {
+    try {
+        const resp = await fetch('/health', { cache: 'no-store' });
+        if (!resp.ok) throw new Error(`health ${resp.status}`);
+        markBackendAlive();
+    } catch (_e) {
+        markBackendFailure('health', true);
     }
 }
 
@@ -2549,6 +2566,7 @@ function startEventStream(force) {
 }
 
 function monitorRealtimeChannel() {
+    checkBackendHealth();
     if (!eventSource) {
         startEventStream();
         return;
