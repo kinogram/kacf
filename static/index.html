@@ -845,6 +845,7 @@ let lastRealtimeFallbackAt = 0;
 let backendFailureCount = 0;
 let backendOfflineNotified = false;
 let backendOffline = false;
+let backendReconnectReloading = false;
 const POLL_MS_ACTIVE = 1000;
 const POLL_MS_IDLE = 3000;
 const UI_STATE_SYNC_MS = 3000;
@@ -1728,6 +1729,10 @@ function markBackendAlive() {
     if (backendOffline) {
         backendOffline = false;
         applyReadOnlyMode();
+        if (!backendReconnectReloading) {
+            backendReconnectReloading = true;
+            setTimeout(() => window.location.reload(), 120);
+        }
     }
 }
 
@@ -2643,6 +2648,7 @@ function startEventStream(force) {
 
 function monitorRealtimeChannel() {
     checkBackendHealth();
+    if (backendOffline) return;
     if (!eventSource) {
         startEventStream();
         return;
