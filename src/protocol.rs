@@ -332,7 +332,9 @@ async fn run_session(
     }
     // 如果没有历史消息，则初始化系统 prompt 和首条用户消息。
     if messages.is_empty() {
-        messages.push(deepseek_api::ChatMessage::system(system_prompt(&cfg.language)));
+        messages.push(deepseek_api::ChatMessage::system(system_prompt(
+            &cfg.language,
+        )));
         messages.push(deepseek_api::ChatMessage::user(format!(
             "用户的需求如下：\n{}\n\n你需要作为自编程代理，根据该需求制定项目计划和目标，选择合适的技术栈并创建项目目录结构，编写代码，编译运行程序，分析并修复错误，如此往复循环，直至项目满足需求。为此，你应在项目目录中维护一个自动评测脚本（如 scripts/run_tests.sh），该脚本必须能够编译并运行程序、自动操作程序以执行必要的功能，并检测是否存在错误或未满足的目标。每次生成补丁后，你都需要更新这个评测脚本以反映新的需求。\n首先，请输出 JSON（kind=clarify 或 kind=patch）：如需澄清问题，请用 kind=clarify，并提出关键问题；如无需澄清，请用 kind=patch，并给出包含完整文件内容的补丁，补丁可以先生成项目计划、评测脚本或基本代码使项目能够编译运行。",
             cfg.goal

@@ -165,11 +165,7 @@ async fn parse_streaming_response(
     Ok(merged)
 }
 
-fn handle_sse_line(
-    line: &str,
-    merged: &mut String,
-    on_delta: &mut dyn FnMut(&str),
-) -> Result<()> {
+fn handle_sse_line(line: &str, merged: &mut String, on_delta: &mut dyn FnMut(&str)) -> Result<()> {
     let trimmed = line.trim();
     if trimmed.is_empty() || trimmed.starts_with(':') {
         return Ok(());

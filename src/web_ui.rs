@@ -10,8 +10,8 @@ use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer, Responder};
 use async_stream::stream;
 use crossbeam_channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
-use std::fs;
 use std::collections::BTreeSet;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -567,7 +567,12 @@ fn mask_api_key_for_display(raw: &str) -> String {
     }
     let head: String = chars[..4].iter().collect();
     let tail: String = chars[chars.len() - 4..].iter().collect();
-    format!("{}{}{}", head, "*".repeat(std::cmp::max(4, chars.len() - 8)), tail)
+    format!(
+        "{}{}{}",
+        head,
+        "*".repeat(std::cmp::max(4, chars.len() - 8)),
+        tail
+    )
 }
 
 fn encrypt_shared_config_for_storage(cfg: &mut SharedConfig) {
@@ -589,6 +594,30 @@ fn encrypt_shared_config_for_storage(cfg: &mut SharedConfig) {
         cfg.api_key = enc;
     } else {
         eprintln!("[KACF] WARN: failed to encrypt api_key; storing plaintext this round");
+    }
+}
+
+fn merge_shared_config_into_draft(draft: &mut DraftPayload, cfg: &SharedConfig) {
+    if !cfg.api_key.trim().is_empty() {
+        draft.api_key = cfg.api_key.trim().to_string();
+    }
+    if !cfg.base_url.trim().is_empty() {
+        draft.base_url = cfg.base_url.trim().to_string();
+    }
+    if !cfg.model.trim().is_empty() {
+        draft.model = cfg.model.trim().to_string();
+    }
+    if !cfg.language.trim().is_empty() {
+        draft.language = cfg.language.trim().to_string();
+    }
+}
+
+fn normalize_resume_draft_defaults(draft: &mut DraftPayload) {
+    if draft.base_url.trim().is_empty() {
+        draft.base_url = default_base_url();
+    }
+    if draft.model.trim().is_empty() {
+        draft.model = default_model_name();
     }
 }
 
@@ -706,23 +735,24 @@ fn parse_language_pack_filename(name: &str) -> Option<(String, String)> {
     Some((code, ver_raw.to_string()))
 }
 
-fn validate_language_pack_file(path: &Path, code: &str, ver: &str) -> Result<LoadedLanguagePack, String> {
+fn validate_language_pack_file(
+    path: &Path,
+    code: &str,
+    ver: &str,
+) -> Result<LoadedLanguagePack, String> {
     let content = fs::read_to_string(path)
         .map_err(|e| format!("Language pack read failed: {} ({})", path.display(), e))?;
     let value: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| format!("Language pack JSON invalid: {} ({})", path.display(), e))?;
-    let obj = value.as_object().ok_or_else(|| {
-        format!("Language pack root must be object: {}", path.display())
-    })?;
+    let obj = value
+        .as_object()
+        .ok_or_else(|| format!("Language pack root must be object: {}", path.display()))?;
     let meta = obj
         .get("__meta")
         .and_then(|v| v.as_object())
         .ok_or_else(|| format!("Language pack missing __meta object: {}", path.display()))?;
 
-    let app = meta
-        .get("app")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default();
+    let app = meta.get("app").and_then(|v| v.as_str()).unwrap_or_default();
     let meta_code = meta
         .get("language_code")
         .and_then(|v| v.as_str())
@@ -786,7 +816,10 @@ fn validate_language_pack_file(path: &Path, code: &str, ver: &str) -> Result<Loa
         keys.insert(k.to_string());
     }
     if keys.is_empty() {
-        return Err(format!("Language pack has no translation keys: {}", path.display()));
+        return Err(format!(
+            "Language pack has no translation keys: {}",
+            path.display()
+        ));
     }
 
     Ok(LoadedLanguagePack {
@@ -851,7 +884,8 @@ fn list_language_packs() -> Result<Vec<String>, String> {
 fn read_language_pack(code: &str) -> Result<String, String> {
     let clean = sanitize_language_code(code).ok_or_else(|| "invalid language code".to_string())?;
     let packs = load_language_packs_checked()?;
-    packs.into_iter()
+    packs
+        .into_iter()
         .find(|p| p.code == clean)
         .map(|p| p.content)
         .ok_or_else(|| "language not found".to_string())
@@ -900,7 +934,9 @@ fn set_or_clear_env(key: &str, value: &str) {
 }
 
 fn read_resume_info(workspace: &str, goal: &str) -> Option<ResumeInfo> {
-    let path = require_managed_workspace(workspace).ok()?.join(SESSION_STATE_FILENAME);
+    let path = require_managed_workspace(workspace)
+        .ok()?
+        .join(SESSION_STATE_FILENAME);
     let content = fs::read_to_string(path).ok()?;
     let meta: ResumeMeta = serde_json::from_str(&content).ok()?;
     if !goal.trim().is_empty() && !meta.goal.trim().is_empty() && meta.goal.trim() != goal.trim() {
@@ -1074,10 +1110,7 @@ async fn get_ui_cache_api_key_plain(data: web::Data<AppState>) -> impl Responder
     })
 }
 
-async fn put_ui_cache(
-    data: web::Data<AppState>,
-    body: web::Json<UiCachePatch>,
-) -> impl Responder {
+async fn put_ui_cache(data: web::Data<AppState>, body: web::Json<UiCachePatch>) -> impl Responder {
     let _guard = data.projects_lock.lock().unwrap();
     let patch = body.into_inner();
     let mut payload = read_ui_cache();
@@ -1177,7 +1210,11 @@ async fn suggest_project_slug(body: web::Json<SlugSuggestPayload>) -> impl Respo
     {
         Ok(text) => {
             let s = normalize_slug(text.trim());
-            if s.is_empty() { fallback.clone() } else { s }
+            if s.is_empty() {
+                fallback.clone()
+            } else {
+                s
+            }
         }
         Err(_) => fallback.clone(),
     };
@@ -1198,41 +1235,21 @@ async fn resume_session(
     let mut draft: DraftPayload = {
         let _guard = data.projects_lock.lock().unwrap();
         let mut cache = read_ui_cache();
-        let Some(project) = cache.projects.into_iter().find(|p| p.id == payload.project_id) else {
+        let Some(project) = cache
+            .projects
+            .into_iter()
+            .find(|p| p.id == payload.project_id)
+        else {
             return HttpResponse::NotFound().body("project not found");
         };
         let mut snapshot = project.snapshot;
         if let Some(cfg) = cache.shared_config.as_mut() {
             decrypt_shared_config_for_response(cfg);
-            if !cfg.api_key.trim().is_empty() {
-                snapshot.api_key = cfg.api_key.trim().to_string();
-            } else if snapshot.api_key.trim().is_empty() {
-                snapshot.api_key = cfg.api_key.trim().to_string();
-            }
-            if !cfg.base_url.trim().is_empty() {
-                snapshot.base_url = cfg.base_url.trim().to_string();
-            } else if snapshot.base_url.trim().is_empty() {
-                snapshot.base_url = cfg.base_url.trim().to_string();
-            }
-            if !cfg.model.trim().is_empty() {
-                snapshot.model = cfg.model.trim().to_string();
-            } else if snapshot.model.trim().is_empty() {
-                snapshot.model = cfg.model.trim().to_string();
-            }
-            if !cfg.language.trim().is_empty() {
-                snapshot.language = cfg.language.trim().to_string();
-            } else if snapshot.language.trim().is_empty() {
-                snapshot.language = cfg.language.trim().to_string();
-            }
+            merge_shared_config_into_draft(&mut snapshot, cfg);
         }
         snapshot
     };
-    if draft.base_url.trim().is_empty() {
-        draft.base_url = default_base_url();
-    }
-    if draft.model.trim().is_empty() {
-        draft.model = default_model_name();
-    }
+    normalize_resume_draft_defaults(&mut draft);
     if draft.api_key.trim().is_empty() {
         return HttpResponse::BadRequest().body("api_key is empty in snapshot");
     }
@@ -1260,10 +1277,7 @@ async fn get_ui_state(data: web::Data<AppState>) -> impl Responder {
     } else {
         read_resume_info(&runtime.last_workspace, &runtime.last_goal)
     };
-    HttpResponse::Ok().json(UiStateResponse {
-        runtime,
-        resume,
-    })
+    HttpResponse::Ok().json(UiStateResponse { runtime, resume })
 }
 
 async fn health() -> impl Responder {
@@ -1891,7 +1905,10 @@ pub async fn run_web_server(
             .app_data(web::Data::new(state.clone()))
             .route("/", web::get().to(index_page))
             .route("/assets/languages/list", web::get().to(list_languages))
-            .route("/assets/languages/{code}.json", web::get().to(get_language_pack))
+            .route(
+                "/assets/languages/{code}.json",
+                web::get().to(get_language_pack),
+            )
             .route("/start", web::post().to(start_session))
             .route("/stop", web::post().to(stop_session))
             .route("/resume", web::post().to(resume_session))
@@ -1899,10 +1916,16 @@ pub async fn run_web_server(
             .route("/projects", web::get().to(list_projects))
             .route("/projects", web::post().to(upsert_project))
             .route("/projects/{id}", web::delete().to(delete_project))
-            .route("/projects/suggest_slug", web::post().to(suggest_project_slug))
+            .route(
+                "/projects/suggest_slug",
+                web::post().to(suggest_project_slug),
+            )
             .route("/ui_cache", web::get().to(get_ui_cache))
             .route("/ui_cache", web::put().to(put_ui_cache))
-            .route("/ui_cache/api_key_plain", web::get().to(get_ui_cache_api_key_plain))
+            .route(
+                "/ui_cache/api_key_plain",
+                web::get().to(get_ui_cache_api_key_plain),
+            )
             .route("/ui_state", web::get().to(get_ui_state))
             .route("/health", web::get().to(health))
             .route("/metrics", web::get().to(metrics))

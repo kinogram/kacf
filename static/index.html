@@ -900,6 +900,20 @@ const BACKEND_COMM_BUTTON_IDS = [
     'preset_desktop_btn',
     'reset_form_btn',
 ];
+const PROJECT_CONTROL_IDS = [
+    'project_name',
+    'project_new_btn',
+    'project_save_btn',
+    'project_load_btn',
+    'project_delete_btn',
+];
+const CONFIG_EDIT_IDS = [
+    'api_key', 'model', 'base_url', 'workspace', 'auto_revert_profile',
+    'precheck_cmd', 'history_max_messages', 'history_max_chars', 'release_gate_threshold',
+    'goal', 'eval_cmd', 'success_regex', 'remote', 'remote_url', 'branch',
+    'preset_webapp_btn', 'preset_cli_btn', 'preset_desktop_btn', 'reset_form_btn',
+    'open_global_config_btn', 'language_select', 'encrypt_api_key', 'mask_api_key',
+];
 
 function normalizeLanguageCode(raw) {
     const v = (raw || '').trim();
@@ -1295,14 +1309,7 @@ function setRunningProjectIndicator(label) {
     renderProjectAccordion();
 }
 
-function setProjectControlsDisabled(disabled) {
-    const ids = [
-        'project_name',
-        'project_new_btn',
-        'project_save_btn',
-        'project_load_btn',
-        'project_delete_btn',
-    ];
+function setElementsDisabled(ids, disabled) {
     ids.forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
@@ -1310,19 +1317,12 @@ function setProjectControlsDisabled(disabled) {
     });
 }
 
+function setProjectControlsDisabled(disabled) {
+    setElementsDisabled(PROJECT_CONTROL_IDS, disabled);
+}
+
 function setConfigInputsDisabled(disabled) {
-    const ids = [
-        'api_key', 'model', 'base_url', 'workspace', 'auto_revert_profile',
-        'precheck_cmd', 'history_max_messages', 'history_max_chars', 'release_gate_threshold',
-        'goal', 'eval_cmd', 'success_regex', 'remote', 'remote_url', 'branch',
-        'preset_webapp_btn', 'preset_cli_btn', 'preset_desktop_btn', 'reset_form_btn',
-        'open_global_config_btn', 'language_select', 'encrypt_api_key', 'mask_api_key',
-    ];
-    ids.forEach(id => {
-        const el = document.getElementById(id);
-        if (!el) return;
-        el.disabled = !!disabled;
-    });
+    setElementsDisabled(CONFIG_EDIT_IDS, disabled);
 }
 
 function applyBackendOfflineMode() {
@@ -1370,25 +1370,28 @@ function isReadOnlyView() {
 
 function applyReadOnlyMode() {
     setOfflineInputLock(false);
-    const readonly = backendOffline || isReadOnlyView();
+    const viewReadOnly = isReadOnlyView();
+    const readOnly = backendOffline || viewReadOnly;
+    const lockConfigInputs = backendOffline || runSessionActive || viewReadOnly;
+    const lockProjectControls = backendOffline || runSessionActive;
     const hint = document.getElementById('readonly_mode_text');
     if (hint) {
         if (backendOffline) {
             hint.textContent = txt('readonly_backend_offline', 'Read-only mode: backend offline.');
         } else {
-            hint.textContent = readonly
+            hint.textContent = readOnly
                 ? txt('readonly_on', '')
                 : txt('readonly_off', '');
         }
     }
-    setConfigInputsDisabled(backendOffline || readonly || runSessionActive);
-    document.getElementById('start_btn').disabled = backendOffline || readonly || runSessionActive;
-    document.getElementById('resume_btn').disabled = backendOffline || readonly || runSessionActive;
-    document.getElementById('stop_btn').disabled = backendOffline || readonly || !runSessionActive;
-    document.getElementById('revert_btn').disabled = backendOffline || readonly || !runSessionActive;
-    document.getElementById('push_btn').disabled = backendOffline || readonly;
-    document.getElementById('clarify_submit_btn').disabled = backendOffline || readonly;
-    setProjectControlsDisabled(backendOffline || runSessionActive);
+    setConfigInputsDisabled(lockConfigInputs);
+    document.getElementById('start_btn').disabled = readOnly || runSessionActive;
+    document.getElementById('resume_btn').disabled = readOnly || runSessionActive;
+    document.getElementById('stop_btn').disabled = readOnly || !runSessionActive;
+    document.getElementById('revert_btn').disabled = readOnly || !runSessionActive;
+    document.getElementById('push_btn').disabled = readOnly;
+    document.getElementById('clarify_submit_btn').disabled = readOnly;
+    setProjectControlsDisabled(lockProjectControls);
     applyBackendOfflineMode();
     setOfflineInputLock(backendOffline);
     const offlineBanner = document.getElementById('backend_offline_banner');
@@ -1726,17 +1729,29 @@ function hasPendingClarify(bucket) {
     return Array.isArray(state.clarify_questions) && state.clarify_questions.length > 0;
 }
 
+function isRunStateActive(state) {
+    return state === 'running' || state === 'stopping';
+}
+
+function setBackendOfflineState(nextOffline) {
+    if (backendOffline === !!nextOffline) return;
+    backendOffline = !!nextOffline;
+    if (backendOffline) {
+        closeGlobalConfigModal();
+        applyReadOnlyMode();
+        return;
+    }
+    applyReadOnlyMode();
+    if (!backendReconnectReloading) {
+        backendReconnectReloading = true;
+        setTimeout(() => window.location.reload(), 120);
+    }
+}
+
 function markBackendAlive() {
     backendFailureCount = 0;
     backendOfflineNotified = false;
-    if (backendOffline) {
-        backendOffline = false;
-        applyReadOnlyMode();
-        if (!backendReconnectReloading) {
-            backendReconnectReloading = true;
-            setTimeout(() => window.location.reload(), 120);
-        }
-    }
+    setBackendOfflineState(false);
 }
 
 function markBackendFailure(source, immediate) {
@@ -1748,11 +1763,9 @@ function markBackendFailure(source, immediate) {
     if (backendFailureCount < BACKEND_FAILURE_THRESHOLD) return;
     if (backendOfflineNotified) return;
     backendOfflineNotified = true;
-    backendOffline = true;
-    closeGlobalConfigModal();
-    applyReadOnlyMode();
+    setBackendOfflineState(true);
     const state = currentRunState();
-    const runningLike = state === 'running' || state === 'stopping';
+    const runningLike = isRunStateActive(state);
     if (runningLike) {
         syncStoppedStateIfNeeded(fmt('sync_reason_backend_disconnected', '', { source }), true);
         setRunState('interrupted', txt('run_interrupted', ''));
@@ -1775,7 +1788,7 @@ async function checkBackendHealth() {
 
 function syncStoppedStateIfNeeded(reason, suppressStoppedAlert) {
     const state = currentRunState();
-    if (state !== 'running' && state !== 'stopping') return;
+    if (!isRunStateActive(state)) return;
     clearStopAckTimer();
     stopRequested = false;
     activeRunLogBucket = '';
