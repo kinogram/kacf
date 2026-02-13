@@ -953,6 +953,27 @@ function normalizeBucketUiStateForRender(state) {
     return { normalized, shouldPersist };
 }
 
+function resetBucketRuntimeUiState(bucket) {
+    if (!bucket) return;
+    const cur = readBucketUiState(bucket);
+    if (
+        (cur.run_state || 'idle') === 'idle'
+        && (cur.run_text || txt('run_idle', '')) === txt('run_idle', '')
+        && (cur.status_text || txt('status_waiting', '')) === txt('status_waiting', '')
+        && (cur.status_class || '') === ''
+        && (!Array.isArray(cur.clarify_questions) || cur.clarify_questions.length === 0)
+    ) {
+        return;
+    }
+    writeBucketUiState(bucket, {
+        run_state: 'idle',
+        run_text: txt('run_idle', ''),
+        status_text: txt('status_waiting', ''),
+        status_class: '',
+        clarify_questions: [],
+    });
+}
+
 function renderUiForViewBucket() {
     const bucket = viewLogBucket();
     const state = readBucketUiState(bucket);
@@ -2065,7 +2086,7 @@ async function refreshUiState() {
             }
         } else {
             syncStoppedStateIfNeeded(txt('sync_reason_backend_stopped', ''));
-            writeBucketUiState(currentLogBucket(), { clarify_questions: [] });
+            resetBucketRuntimeUiState(currentLogBucket());
             if (viewLogBucket() === currentLogBucket()) renderClarifyQuestions([], currentLogBucket(), true);
             setProjectControlsDisabled(false);
             setRunningProjectIndicator(txt('running_project_none', ''));
@@ -2905,6 +2926,7 @@ async function init() {
     markProjectClean();
     applySharedConfigToInputs();
     autoOpenLatestProject();
+    resetBucketRuntimeUiState(viewLogBucket());
     renderCurrentLogView();
     renderUiForViewBucket();
     await loadProjectConfigForWorkspace();
