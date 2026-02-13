@@ -927,23 +927,44 @@ function renderClarifyQuestions(questions, bucket, force) {
     form.dataset.lockBucket = bucketKey;
 }
 
+function shouldAllowClarifyInteraction() {
+    return runSessionActive && !activeRunUnattendedMode;
+}
+
+function normalizeBucketUiStateForRender(state) {
+    const normalized = { ...(state || defaultBucketUiState()) };
+    let shouldPersist = false;
+    if (!runSessionActive) {
+        if (normalized.run_state !== 'idle') {
+            normalized.run_state = 'idle';
+            normalized.run_text = txt('run_idle', '');
+            shouldPersist = true;
+        }
+        if ((normalized.status_class || '') !== '' || (normalized.status_text || '') !== txt('status_waiting', '')) {
+            normalized.status_text = txt('status_waiting', '');
+            normalized.status_class = '';
+            shouldPersist = true;
+        }
+    }
+    if (!shouldAllowClarifyInteraction() && Array.isArray(normalized.clarify_questions) && normalized.clarify_questions.length > 0) {
+        normalized.clarify_questions = [];
+        shouldPersist = true;
+    }
+    return { normalized, shouldPersist };
+}
+
 function renderUiForViewBucket() {
     const bucket = viewLogBucket();
     const state = readBucketUiState(bucket);
-    const normalized = { ...state };
-    if (!runSessionActive) {
-        normalized.run_state = 'idle';
-        normalized.run_text = txt('run_idle', '');
-        normalized.status_text = txt('status_waiting', '');
-        normalized.status_class = '';
-        if (Array.isArray(normalized.clarify_questions) && normalized.clarify_questions.length > 0) {
-            writeBucketUiState(bucket, { clarify_questions: [] });
-            normalized.clarify_questions = [];
-        }
-    }
-    if (activeRunUnattendedMode && Array.isArray(normalized.clarify_questions) && normalized.clarify_questions.length > 0) {
-        writeBucketUiState(bucket, { clarify_questions: [] });
-        normalized.clarify_questions = [];
+    const { normalized, shouldPersist } = normalizeBucketUiStateForRender(state);
+    if (shouldPersist) {
+        writeBucketUiState(bucket, {
+            status_text: normalized.status_text,
+            status_class: normalized.status_class,
+            run_state: normalized.run_state,
+            run_text: normalized.run_text,
+            clarify_questions: normalized.clarify_questions,
+        });
     }
     const status = document.getElementById('status');
     status.textContent = normalized.status_text || txt('status_waiting', '');
@@ -953,11 +974,8 @@ function renderUiForViewBucket() {
     document.getElementById('runbar_text').textContent = fmt('runbar_line', '', { state: normalized.run_text || txt('run_idle', '') });
     document.getElementById('diagnostics').textContent = normalized.diagnostics_text || txt('diagnostics_none', '');
     renderDiffPanel(normalized.diff_text || '');
-    const shouldShowClarify = runSessionActive && !activeRunUnattendedMode && hasPendingClarify(bucket);
+    const shouldShowClarify = shouldAllowClarifyInteraction() && Array.isArray(normalized.clarify_questions) && normalized.clarify_questions.length > 0;
     renderClarifyQuestions(shouldShowClarify ? (normalized.clarify_questions || []) : [], bucket, false);
-    if (!shouldShowClarify && hasPendingClarify(bucket)) {
-        writeBucketUiState(bucket, { clarify_questions: [] });
-    }
 }
 
 function loadProjectLogs() {
@@ -1138,8 +1156,7 @@ function currentRunState() {
 }
 
 function hasPendingClarify(bucket) {
-    if (!runSessionActive) return false;
-    if (activeRunUnattendedMode) return false;
+    if (!shouldAllowClarifyInteraction()) return false;
     const state = readBucketUiState(bucket || currentLogBucket());
     return Array.isArray(state.clarify_questions) && state.clarify_questions.length > 0;
 }
