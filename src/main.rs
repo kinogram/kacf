@@ -7,6 +7,7 @@ mod protocol_history;
 mod protocol_patch;
 mod protocol_repair_prompt;
 mod protocol_session_state;
+mod protocol_system_prompt;
 mod runner;
 mod web_ui;
 mod web_ui_analytics;
