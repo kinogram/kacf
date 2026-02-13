@@ -1270,14 +1270,10 @@ async function checkBackendHealth() {
 function syncStoppedStateIfNeeded(reason, suppressStoppedAlert) {
     const state = currentRunState();
     if (!isRunStateActive(state)) return;
-    clearStopAckTimer();
-    stopRequested = false;
-    resetRunSessionUiState();
+    finishRunSessionUi();
     setRunState('idle', txt('run_idle', ''));
-    setRunActionButtons(false);
-    if (!suppressStoppedAlert && !completionAlertShown) {
-        completionAlertShown = true;
-        alert(txt('alert_task_stopped', ''));
+    if (!suppressStoppedAlert) {
+        showAlertOnce(txt('alert_task_stopped', ''));
     }
     if (reason) {
         appendLog(fmt('log_runtime_sync', '', { reason }));
@@ -1616,6 +1612,29 @@ function resetRunSessionUiState() {
     applyReadOnlyMode();
 }
 
+function showAlertOnce(message) {
+    if (completionAlertShown) return false;
+    completionAlertShown = true;
+    alert(message);
+    return true;
+}
+
+function setRunStateAndStatus(runState, runTextKey, statusKey, statusClass, message) {
+    setRunState(runState, txt(runTextKey, ''));
+    if (typeof message === 'string') {
+        setStatus(fmt(statusKey, '', { message }), statusClass);
+    } else {
+        setStatus(txt(statusKey, ''), statusClass);
+    }
+}
+
+function finishRunSessionUi() {
+    clearStopAckTimer();
+    stopRequested = false;
+    resetRunSessionUiState();
+    setRunActionButtons(false);
+}
+
 function markRunSessionStarted(label, resetFlags) {
     setRunningProjectIndicator(label);
     setProjectControlsDisabled(true);
@@ -1626,6 +1645,51 @@ function markRunSessionStarted(label, resetFlags) {
     if (resetFlags) {
         stopRequested = false;
         completionAlertShown = false;
+    }
+}
+
+const DONE_OUTCOME_CONFIG = {
+    success: {
+        runState: 'success',
+        runTextKey: 'run_success',
+        statusKey: 'status_done_success',
+        statusClass: 'status-ok',
+        alertKey: 'alert_done_success',
+        resetUnattended: true,
+        allowAutoResume: false,
+    },
+    interrupted: {
+        runState: 'interrupted',
+        runTextKey: 'run_interrupted',
+        statusKey: 'status_done_interrupted',
+        statusClass: 'status-warn',
+        alertKey: 'alert_done_interrupted',
+        resetUnattended: true,
+        allowAutoResume: false,
+    },
+    failed: {
+        runState: 'failed',
+        runTextKey: 'run_failed',
+        statusKey: 'status_done_failed',
+        statusClass: 'status-danger',
+        alertKey: 'alert_done_failed',
+        resetUnattended: false,
+        allowAutoResume: true,
+    },
+};
+
+function applyDoneOutcome(outcome, message) {
+    const cfg = DONE_OUTCOME_CONFIG[outcome] || DONE_OUTCOME_CONFIG.failed;
+    setRunStateAndStatus(cfg.runState, cfg.runTextKey, cfg.statusKey, cfg.statusClass, message);
+    if (cfg.resetUnattended) {
+        resetUnattendedRunState();
+    }
+    let autoResumed = false;
+    if (cfg.allowAutoResume) {
+        autoResumed = scheduleUnattendedAutoResume();
+    }
+    if (!autoResumed) {
+        showAlertOnce(fmt(cfg.alertKey, '', { message }));
     }
 }
 
@@ -2378,41 +2442,18 @@ function handleNeedClarifyEvent(evt) {
 }
 
 function handleDoneEvent(evt) {
-    clearStopAckTimer();
-    resetRunSessionUiState();
-    if (evt.success) {
-        setRunState('success', txt('run_success', ''));
-        setStatus(fmt('status_done_success', '', { message: evt.message }), 'status-ok');
-        if (!completionAlertShown) {
-            completionAlertShown = true;
-            alert(fmt('alert_done_success', '', { message: evt.message }));
-        }
-        resetUnattendedRunState();
-    } else if (stopRequested || isInterruptedMessage(evt.message)) {
-        setRunState('interrupted', txt('run_interrupted', ''));
-        setStatus(fmt('status_done_interrupted', '', { message: evt.message }), 'status-warn');
-        if (!completionAlertShown) {
-            completionAlertShown = true;
-            alert(fmt('alert_done_interrupted', '', { message: evt.message }));
-        }
-        resetUnattendedRunState();
-    } else {
-        setRunState('failed', txt('run_failed', ''));
-        setStatus(fmt('status_done_failed', '', { message: evt.message }), 'status-danger');
-        const autoResumed = scheduleUnattendedAutoResume();
-        if (!completionAlertShown && !autoResumed) {
-            completionAlertShown = true;
-            alert(fmt('alert_done_failed', '', { message: evt.message }));
-        }
-    }
+    const wasStopRequested = stopRequested;
+    const outcome = evt.success
+        ? 'success'
+        : ((wasStopRequested || isInterruptedMessage(evt.message)) ? 'interrupted' : 'failed');
+    finishRunSessionUi();
+    applyDoneOutcome(outcome, evt.message);
     if (!runSessionActive && unattendedAutoResumeRemaining <= 0) {
         resetStopTimerState();
         renderUnattendedState();
     }
     uiCacheLastHeavySyncMs = 0;
     scheduleUiCacheSave();
-    stopRequested = false;
-    setRunActionButtons(false);
 }
 
 const EVENT_HANDLERS = {
