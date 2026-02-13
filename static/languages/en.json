@@ -139,6 +139,7 @@
   "running_backend_task": "Backend task running",
   "sync_reason_backend_stopped": "Backend has stopped",
   "sync_reason_backend_disconnected": "Backend disconnected ({source})",
+  "interrupt_keywords": "stopped by user|interrupted|stop requested|cancelled|canceled|aborted|terminated|中断|停止|已停止|detenido|interrumpido|arrete|annule",
   "metrics_line": "Metrics: score={score} {gate} events={events} logs={logs} done_ok={done_ok} done_fail={done_fail} buffer={buffer} | 5m ok/fail={done_5m_ok}/{done_5m_fail} ({success5}) trend={trend} | api p50/p95={api_p50_ms}ms/{api_p95_ms}ms | eval p50/p95={eval_p50_ms}ms/{eval_p95_ms}ms",
   "none_text": "None",
   "digest_dist_line": "Digest distribution (5m): {dist}",

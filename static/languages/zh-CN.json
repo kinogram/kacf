@@ -139,6 +139,7 @@
   "running_backend_task": "后端任务运行中",
   "sync_reason_backend_stopped": "后端已停止运行",
   "sync_reason_backend_disconnected": "后端连接中断（{source}）",
+  "interrupt_keywords": "stopped by user|interrupted|stop requested|cancelled|canceled|aborted|terminated|中断|停止|已停止|detenido|interrumpido|arrete|annule",
   "metrics_line": "运行指标：score={score} {gate} events={events} logs={logs} done_ok={done_ok} done_fail={done_fail} buffer={buffer} | 5m ok/fail={done_5m_ok}/{done_5m_fail} ({success5}) trend={trend} | api p50/p95={api_p50_ms}ms/{api_p95_ms}ms | eval p50/p95={eval_p50_ms}ms/{eval_p95_ms}ms",
   "none_text": "暂无",
   "digest_dist_line": "错误分布(5m)：{dist}",

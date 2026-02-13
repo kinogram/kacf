@@ -1265,11 +1265,15 @@ function syncStoppedStateIfNeeded(reason) {
 
 function isInterruptedMessage(msg) {
     const text = (msg || '').toLowerCase();
-    return text.includes('stopped by user')
-        || text.includes('interrupted')
-        || text.includes('stop requested')
-        || text.includes('中断')
-        || text.includes('停止');
+    const raw = txt(
+        'interrupt_keywords',
+        'stopped by user|interrupted|stop requested|cancelled|canceled|aborted|terminated|中断|停止|已停止|detenido|interrumpido|arrete|annule'
+    );
+    const keywords = raw
+        .split('|')
+        .map(x => x.trim().toLowerCase())
+        .filter(Boolean);
+    return keywords.some(k => text.includes(k));
 }
 
 function getFormData() {
