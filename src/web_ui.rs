@@ -353,6 +353,8 @@ struct SharedConfig {
     encrypt_api_key: bool,
     #[serde(default)]
     mask_api_key: bool,
+    #[serde(default)]
+    api_key_is_masked: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -542,6 +544,7 @@ fn decrypt_api_key(enc: &str) -> Option<String> {
 }
 
 fn decrypt_shared_config_for_response(cfg: &mut SharedConfig) {
+    cfg.api_key_is_masked = false;
     if cfg.encrypt_api_key && is_encrypted_api_key(&cfg.api_key) {
         match decrypt_api_key(&cfg.api_key) {
             Some(plain) => cfg.api_key = plain,
@@ -551,6 +554,20 @@ fn decrypt_shared_config_for_response(cfg: &mut SharedConfig) {
             }
         }
     }
+}
+
+fn mask_api_key_for_display(raw: &str) -> String {
+    let v = raw.trim();
+    if v.is_empty() {
+        return String::new();
+    }
+    let chars: Vec<char> = v.chars().collect();
+    if chars.len() <= 8 {
+        return "*".repeat(chars.len());
+    }
+    let head: String = chars[..4].iter().collect();
+    let tail: String = chars[chars.len() - 4..].iter().collect();
+    format!("{}{}{}", head, "*".repeat(std::cmp::max(4, chars.len() - 8)), tail)
 }
 
 fn encrypt_shared_config_for_storage(cfg: &mut SharedConfig) {
@@ -1030,8 +1047,31 @@ async fn get_ui_cache(data: web::Data<AppState>) -> impl Responder {
     let mut payload = read_ui_cache();
     if let Some(cfg) = payload.shared_config.as_mut() {
         decrypt_shared_config_for_response(cfg);
+        if cfg.mask_api_key && !cfg.api_key.trim().is_empty() {
+            cfg.api_key = mask_api_key_for_display(&cfg.api_key);
+            cfg.api_key_is_masked = true;
+        }
     }
     HttpResponse::Ok().json(payload)
+}
+
+#[derive(Debug, Serialize)]
+struct ApiKeyPlainResp {
+    api_key: String,
+}
+
+async fn get_ui_cache_api_key_plain(data: web::Data<AppState>) -> impl Responder {
+    let _guard = data.projects_lock.lock().unwrap();
+    let mut payload = read_ui_cache();
+    if let Some(cfg) = payload.shared_config.as_mut() {
+        decrypt_shared_config_for_response(cfg);
+        return HttpResponse::Ok().json(ApiKeyPlainResp {
+            api_key: cfg.api_key.clone(),
+        });
+    }
+    HttpResponse::Ok().json(ApiKeyPlainResp {
+        api_key: String::new(),
+    })
 }
 
 async fn put_ui_cache(
@@ -1046,6 +1086,14 @@ async fn put_ui_cache(
     }
     if let Some(v) = patch.shared_config {
         let mut cfg = v;
+        if cfg.api_key_is_masked {
+            if let Some(prev) = payload.shared_config.as_ref() {
+                cfg.api_key = prev.api_key.clone();
+            } else {
+                cfg.api_key.clear();
+            }
+        }
+        cfg.api_key_is_masked = false;
         encrypt_shared_config_for_storage(&mut cfg);
         payload.shared_config = Some(cfg);
     }
@@ -1824,6 +1872,7 @@ pub async fn run_web_server(
             .route("/projects/suggest_slug", web::post().to(suggest_project_slug))
             .route("/ui_cache", web::get().to(get_ui_cache))
             .route("/ui_cache", web::put().to(put_ui_cache))
+            .route("/ui_cache/api_key_plain", web::get().to(get_ui_cache_api_key_plain))
             .route("/ui_state", web::get().to(get_ui_state))
             .route("/health", web::get().to(health))
             .route("/metrics", web::get().to(metrics))
