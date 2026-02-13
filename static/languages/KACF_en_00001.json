@@ -8,6 +8,7 @@
   "app_title": "KACF - Kevin AutoCoding Framework",
   "app_header": "KACF - Kevin AutoCoding Framework",
   "hero_sub": "After you enter requirements, the system writes code, runs tests, and fixes issues automatically. Inputs, checkpoints, and templates are remembered to reduce setup friction.",
+  "banner_backend_offline": "Backend offline: communication actions are hidden, and all input fields are read-only.",
   "section_projects_title": "Projects",
   "section_projects_sub": "Manage and switch projects quickly from the sidebar.",
   "section_config_title": "1. Configuration",

@@ -648,6 +648,7 @@
                     <button class="btn-ghost" id="sidebar_mobile_btn"></button>
                 </div>
                 <div class="banner" id="resume_banner"></div>
+                <div class="banner" id="backend_offline_banner" style="display:none;background:#ffe9e7;border-color:#ffb8b2;color:#8a1f17;"></div>
             </section>
 
             <div class="grid">
@@ -1332,6 +1333,34 @@ function applyBackendOfflineMode() {
     });
 }
 
+function setOfflineInputLock(locked) {
+    const fields = document.querySelectorAll('input, textarea, select');
+    fields.forEach(el => {
+        if (el.id === 'workspace') return;
+        if (locked) {
+            if (el.dataset.offlineLocked !== '1') {
+                el.dataset.offlinePrevDisabled = el.disabled ? '1' : '0';
+                if ('readOnly' in el) {
+                    el.dataset.offlinePrevReadonly = el.readOnly ? '1' : '0';
+                }
+                el.dataset.offlineLocked = '1';
+            }
+            if ('readOnly' in el) el.readOnly = true;
+            el.disabled = true;
+            return;
+        }
+        if (el.dataset.offlineLocked === '1') {
+            if ('readOnly' in el) {
+                el.readOnly = el.dataset.offlinePrevReadonly === '1';
+            }
+            el.disabled = el.dataset.offlinePrevDisabled === '1';
+            delete el.dataset.offlineLocked;
+            delete el.dataset.offlinePrevDisabled;
+            delete el.dataset.offlinePrevReadonly;
+        }
+    });
+}
+
 function isReadOnlyView() {
     if (!runSessionActive) return false;
     if (!activeRunLogBucket) return false;
@@ -1339,6 +1368,7 @@ function isReadOnlyView() {
 }
 
 function applyReadOnlyMode() {
+    setOfflineInputLock(false);
     const readonly = backendOffline || isReadOnlyView();
     const hint = document.getElementById('readonly_mode_text');
     if (hint) {
@@ -1359,6 +1389,12 @@ function applyReadOnlyMode() {
     document.getElementById('clarify_submit_btn').disabled = backendOffline || readonly;
     setProjectControlsDisabled(backendOffline || runSessionActive);
     applyBackendOfflineMode();
+    setOfflineInputLock(backendOffline);
+    const offlineBanner = document.getElementById('backend_offline_banner');
+    if (offlineBanner) {
+        offlineBanner.textContent = txt('banner_backend_offline', '');
+        offlineBanner.style.display = backendOffline ? 'block' : 'none';
+    }
     updateGoRunningProjectButton();
 }
 
@@ -1806,6 +1842,7 @@ function applyStaticCopyToDom() {
     if (h1) h1.textContent = txt('app_header', h1.textContent);
     const staticMap = [
         ['hero_sub', 'hero_sub'],
+        ['backend_offline_banner', 'banner_backend_offline'],
         ['section_projects_title', 'section_projects_title'],
         ['section_projects_sub', 'section_projects_sub'],
         ['section_config_title', 'section_config_title'],
