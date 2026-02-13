@@ -2312,67 +2312,79 @@ function monitorRealtimeChannel() {
     startEventStream(true);
 }
 
-function handleEvent(evt) {
-    switch (evt.type) {
-        case 'log':
-            if (currentRunState() === 'waiting_clarify' && !hasPendingClarify(currentLogBucket())) {
-                setRunState('running', txt('run_running', ''));
-            }
-            appendLog(evt.line);
-            maybeStopOnRoundBoundary(evt.line);
-            updateDiagnosticsFromLog(evt.line);
-            break;
-        case 'diff':
-            renderDiff(evt.diff);
-            break;
-        case 'need_clarify':
-            if (activeRunUnattendedMode) {
-                appendLog(txt('log_unattended_clarify_ignored', ''));
-                writeBucketUiState(currentLogBucket(), { clarify_questions: [] });
-                if (viewLogBucket() === currentLogBucket()) renderUiForViewBucket();
-            } else {
-                showClarify(evt.questions);
-            }
-            break;
-        case 'done':
-            clearStopAckTimer();
-            resetRunSessionUiState();
-            if (evt.success) {
-                setRunState('success', txt('run_success', ''));
-                setStatus(fmt('status_done_success', '', { message: evt.message }), 'status-ok');
-                if (!completionAlertShown) {
-                    completionAlertShown = true;
-                    alert(fmt('alert_done_success', '', { message: evt.message }));
-                }
-                resetUnattendedRunState();
-            } else if (stopRequested || isInterruptedMessage(evt.message)) {
-                setRunState('interrupted', txt('run_interrupted', ''));
-                setStatus(fmt('status_done_interrupted', '', { message: evt.message }), 'status-warn');
-                if (!completionAlertShown) {
-                    completionAlertShown = true;
-                    alert(fmt('alert_done_interrupted', '', { message: evt.message }));
-                }
-                resetUnattendedRunState();
-            } else {
-                setRunState('failed', txt('run_failed', ''));
-                setStatus(fmt('status_done_failed', '', { message: evt.message }), 'status-danger');
-                const autoResumed = scheduleUnattendedAutoResume();
-                if (!completionAlertShown && !autoResumed) {
-                    completionAlertShown = true;
-                    alert(fmt('alert_done_failed', '', { message: evt.message }));
-                }
-            }
-            if (!runSessionActive && unattendedAutoResumeRemaining <= 0) {
-                resetStopTimerState();
-                renderUnattendedState();
-            }
-            uiCacheLastHeavySyncMs = 0;
-            scheduleUiCacheSave();
-            stopRequested = false;
-            document.getElementById('start_btn').disabled = false;
-            document.getElementById('stop_btn').disabled = true;
-            break;
+function handleLogEvent(evt) {
+    if (currentRunState() === 'waiting_clarify' && !hasPendingClarify(currentLogBucket())) {
+        setRunState('running', txt('run_running', ''));
     }
+    appendLog(evt.line);
+    maybeStopOnRoundBoundary(evt.line);
+    updateDiagnosticsFromLog(evt.line);
+}
+
+function handleDiffEvent(evt) {
+    renderDiff(evt.diff);
+}
+
+function handleNeedClarifyEvent(evt) {
+    if (activeRunUnattendedMode) {
+        appendLog(txt('log_unattended_clarify_ignored', ''));
+        writeBucketUiState(currentLogBucket(), { clarify_questions: [] });
+        if (viewLogBucket() === currentLogBucket()) renderUiForViewBucket();
+        return;
+    }
+    showClarify(evt.questions);
+}
+
+function handleDoneEvent(evt) {
+    clearStopAckTimer();
+    resetRunSessionUiState();
+    if (evt.success) {
+        setRunState('success', txt('run_success', ''));
+        setStatus(fmt('status_done_success', '', { message: evt.message }), 'status-ok');
+        if (!completionAlertShown) {
+            completionAlertShown = true;
+            alert(fmt('alert_done_success', '', { message: evt.message }));
+        }
+        resetUnattendedRunState();
+    } else if (stopRequested || isInterruptedMessage(evt.message)) {
+        setRunState('interrupted', txt('run_interrupted', ''));
+        setStatus(fmt('status_done_interrupted', '', { message: evt.message }), 'status-warn');
+        if (!completionAlertShown) {
+            completionAlertShown = true;
+            alert(fmt('alert_done_interrupted', '', { message: evt.message }));
+        }
+        resetUnattendedRunState();
+    } else {
+        setRunState('failed', txt('run_failed', ''));
+        setStatus(fmt('status_done_failed', '', { message: evt.message }), 'status-danger');
+        const autoResumed = scheduleUnattendedAutoResume();
+        if (!completionAlertShown && !autoResumed) {
+            completionAlertShown = true;
+            alert(fmt('alert_done_failed', '', { message: evt.message }));
+        }
+    }
+    if (!runSessionActive && unattendedAutoResumeRemaining <= 0) {
+        resetStopTimerState();
+        renderUnattendedState();
+    }
+    uiCacheLastHeavySyncMs = 0;
+    scheduleUiCacheSave();
+    stopRequested = false;
+    document.getElementById('start_btn').disabled = false;
+    document.getElementById('stop_btn').disabled = true;
+}
+
+const EVENT_HANDLERS = {
+    log: handleLogEvent,
+    diff: handleDiffEvent,
+    need_clarify: handleNeedClarifyEvent,
+    done: handleDoneEvent,
+};
+
+function handleEvent(evt) {
+    const handler = EVENT_HANDLERS[evt?.type];
+    if (!handler) return;
+    handler(evt);
 }
 
 function showClarify(questions) {
