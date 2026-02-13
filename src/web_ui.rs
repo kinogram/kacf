@@ -87,10 +87,6 @@ struct StartPayload {
     history_max_chars: String,
     #[serde(default)]
     release_gate_threshold: String,
-    #[serde(default)]
-    session_retry_max: String,
-    #[serde(default)]
-    session_retry_base_ms: String,
     workspace: String,
     goal: String,
     eval_cmd: String,
@@ -116,10 +112,6 @@ struct DraftPayload {
     history_max_chars: String,
     #[serde(default)]
     release_gate_threshold: String,
-    #[serde(default)]
-    session_retry_max: String,
-    #[serde(default)]
-    session_retry_base_ms: String,
     workspace: String,
     goal: String,
     eval_cmd: String,
@@ -153,8 +145,6 @@ impl DraftPayload {
             history_max_messages: self.history_max_messages,
             history_max_chars: self.history_max_chars,
             release_gate_threshold: self.release_gate_threshold,
-            session_retry_max: self.session_retry_max,
-            session_retry_base_ms: self.session_retry_base_ms,
             workspace: self.workspace,
             goal: self.goal,
             eval_cmd: self.eval_cmd,
@@ -315,10 +305,6 @@ pub(crate) struct ProjectConfig {
     history_max_chars: String,
     #[serde(default)]
     release_gate_threshold: String,
-    #[serde(default)]
-    session_retry_max: String,
-    #[serde(default)]
-    session_retry_base_ms: String,
     updated_at_unix: u64,
 }
 
@@ -433,8 +419,6 @@ fn save_project_config(
     history_max_messages: &str,
     history_max_chars: &str,
     release_gate_threshold: &str,
-    session_retry_max: &str,
-    session_retry_base_ms: &str,
 ) -> std::io::Result<()> {
     let cfg = ProjectConfig {
         auto_revert_profile: profile.to_string(),
@@ -443,8 +427,6 @@ fn save_project_config(
         history_max_messages: history_max_messages.to_string(),
         history_max_chars: history_max_chars.to_string(),
         release_gate_threshold: release_gate_threshold.to_string(),
-        session_retry_max: session_retry_max.to_string(),
-        session_retry_base_ms: session_retry_base_ms.to_string(),
         updated_at_unix: now_unix(),
     };
     web_ui_store::save_project_config(
@@ -534,8 +516,6 @@ fn start_from_payload(
         &payload.history_max_messages,
         &payload.history_max_chars,
         &payload.release_gate_threshold,
-        &payload.session_retry_max,
-        &payload.session_retry_base_ms,
     );
     let req = AgentRequest::Start {
         api_key: payload.api_key,
@@ -558,8 +538,6 @@ fn start_from_payload(
         &payload.history_max_messages,
         &payload.history_max_chars,
         &payload.release_gate_threshold,
-        &payload.session_retry_max,
-        &payload.session_retry_base_ms,
     ) {
         eprintln!("save project config failed: {}", e);
     }

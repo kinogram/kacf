@@ -88,7 +88,6 @@ const PROJECT_CONTROL_IDS = [
 const CONFIG_EDIT_IDS = [
     'api_key', 'model', 'base_url', 'workspace', 'auto_revert_profile',
     'precheck_cmd', 'history_max_messages', 'history_max_chars', 'release_gate_threshold',
-    'session_retry_max', 'session_retry_base_ms',
     'unattended_mode',
     'goal', 'eval_cmd', 'success_regex', 'remote', 'remote_url', 'branch',
     'preset_webapp_btn', 'preset_cli_btn', 'preset_desktop_btn', 'reset_form_btn',
@@ -349,8 +348,6 @@ function defaultFormData() {
         history_max_messages: '',
         history_max_chars: '',
         release_gate_threshold: '',
-        session_retry_max: '',
-        session_retry_base_ms: '',
         unattended_mode: false,
         workspace: '',
         goal: '',
@@ -1066,8 +1063,6 @@ function getFormData() {
         history_max_messages: document.getElementById('history_max_messages').value.trim(),
         history_max_chars: document.getElementById('history_max_chars').value.trim(),
         release_gate_threshold: document.getElementById('release_gate_threshold').value.trim(),
-        session_retry_max: document.getElementById('session_retry_max').value.trim(),
-        session_retry_base_ms: document.getElementById('session_retry_base_ms').value.trim(),
         unattended_mode: !!document.getElementById('unattended_mode')?.checked,
         workspace: document.getElementById('workspace').value.trim(),
         goal: document.getElementById('goal').value.trim(),
@@ -1081,7 +1076,7 @@ function getFormData() {
 
 function applyFormData(d) {
     if (!d) return;
-    const fields = ['api_key', 'base_url', 'model', 'auto_revert_profile', 'precheck_cmd', 'history_max_messages', 'history_max_chars', 'release_gate_threshold', 'session_retry_max', 'session_retry_base_ms', 'workspace', 'goal', 'eval_cmd', 'success_regex', 'remote', 'remote_url', 'branch'];
+    const fields = ['api_key', 'base_url', 'model', 'auto_revert_profile', 'precheck_cmd', 'history_max_messages', 'history_max_chars', 'release_gate_threshold', 'workspace', 'goal', 'eval_cmd', 'success_regex', 'remote', 'remote_url', 'branch'];
     fields.forEach(k => {
         if (typeof d[k] === 'string' && document.getElementById(k)) {
             document.getElementById(k).value = d[k];
@@ -1116,8 +1111,6 @@ function applyStaticCopyToDom() {
         ['label_release_gate_threshold', 'label_release_gate_threshold'],
         ['label_history_max_messages', 'label_history_max_messages'],
         ['label_history_max_chars', 'label_history_max_chars'],
-        ['label_session_retry_max', 'label_session_retry_max'],
-        ['label_session_retry_base_ms', 'label_session_retry_base_ms'],
         ['label_goal', 'label_goal'],
         ['label_eval_cmd', 'label_eval_cmd'],
         ['label_success_regex', 'label_success_regex'],
@@ -1187,8 +1180,6 @@ function applyStaticCopyToDom() {
         ['release_gate_threshold', 'ph_release_gate_threshold'],
         ['history_max_messages', 'ph_history_max_messages'],
         ['history_max_chars', 'ph_history_max_chars'],
-        ['session_retry_max', 'ph_session_retry_max'],
-        ['session_retry_base_ms', 'ph_session_retry_base_ms'],
         ['global_auto_resume_attempts', 'ph_global_auto_resume_attempts'],
         ['global_stop_after_minutes', 'ph_global_stop_after_minutes'],
         ['goal', 'ph_goal'],
@@ -1785,12 +1776,6 @@ async function loadProjectConfigForWorkspace() {
         }
         if (cfg && typeof cfg.release_gate_threshold === 'string') {
             document.getElementById('release_gate_threshold').value = cfg.release_gate_threshold;
-        }
-        if (cfg && typeof cfg.session_retry_max === 'string') {
-            document.getElementById('session_retry_max').value = cfg.session_retry_max;
-        }
-        if (cfg && typeof cfg.session_retry_base_ms === 'string') {
-            document.getElementById('session_retry_base_ms').value = cfg.session_retry_base_ms;
         }
         if (cfg && typeof cfg.unattended_mode === 'boolean') {
             document.getElementById('unattended_mode').checked = cfg.unattended_mode;
@@ -2413,7 +2398,7 @@ function resetForm() {
 }
 
 function bindAutoSave() {
-    const ids = ['auto_revert_profile', 'precheck_cmd', 'history_max_messages', 'history_max_chars', 'release_gate_threshold', 'session_retry_max', 'session_retry_base_ms', 'unattended_mode', 'goal', 'eval_cmd', 'success_regex', 'remote', 'remote_url', 'branch'];
+    const ids = ['auto_revert_profile', 'precheck_cmd', 'history_max_messages', 'history_max_chars', 'release_gate_threshold', 'unattended_mode', 'goal', 'eval_cmd', 'success_regex', 'remote', 'remote_url', 'branch'];
     ids.forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
