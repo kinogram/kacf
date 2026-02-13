@@ -2605,13 +2605,13 @@ function showClarify(questions) {
 
 async function startSession() {
     ensureWorkspaceForCurrentProject();
-    const apiReady = await resolveApiKeyForRequest();
-    if (!apiReady) return;
-    let body = getFormData();
     if (isReadOnlyView()) {
         setStatus(txt('status_readonly_view', ''), 'status-danger');
         return;
     }
+    const apiReady = await resolveApiKeyForRequest();
+    if (!apiReady) return;
+    let body = getFormData();
     if (!body.workspace) {
         const ok = await saveCurrentProject();
         ensureWorkspaceForCurrentProject();
