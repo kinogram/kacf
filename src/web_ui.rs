@@ -29,7 +29,17 @@ use crate::web_ui_store;
 /// Index HTML page embedded at compile time.
 const INDEX_HTML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/index.html"));
 const APP_CSS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/app.css"));
-const APP_JS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/app.js"));
+const APP_JS: &str = concat!(
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/static/js/app_core.js"
+    )),
+    "\n",
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/static/js/app_runtime.js"
+    ))
+);
 
 const SESSION_STATE_FILENAME: &str = ".autocoding_state.json";
 const PROJECT_CONFIG_FILENAME: &str = ".autocoding_project.json";
