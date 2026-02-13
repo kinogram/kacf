@@ -134,7 +134,14 @@ KACF_<language_code>_<pack_version>.json
 ├── static/
 │   ├── index.html
 │   ├── app.css
-│   ├── app.js
+│   ├── js/
+│   │   ├── app_state.js
+│   │   ├── app_ui_cache.js
+│   │   ├── app_log_pipeline.js
+│   │   ├── app_runtime_state.js
+│   │   ├── app_projects.js
+│   │   ├── app_runtime_sync.js
+│   │   └── app_runtime_actions.js
 │   └── languages/
 ├── scripts/
 │   ├── release_check.sh
@@ -142,6 +149,24 @@ KACF_<language_code>_<pack_version>.json
 │   └── smoke_web.sh
 └── autocoding_data/
 ```
+
+## 前端模块依赖（Web UI）
+
+后端路由 `/assets/app.js` 会按固定顺序拼接以下文件：
+
+1. `static/js/app_state.js`
+2. `static/js/app_ui_cache.js`
+3. `static/js/app_log_pipeline.js`
+4. `static/js/app_runtime_state.js`
+5. `static/js/app_projects.js`
+6. `static/js/app_runtime_sync.js`
+7. `static/js/app_runtime_actions.js`
+
+依赖约束：
+
+- `app_runtime_actions.js` 通过 `window.KACF.runtimeSync` 调用同步层能力（如 `refreshUiState/startEventStream`）。
+- `app_runtime_sync.js` 负责注册 `window.KACF.runtimeSync`。
+- 禁止回退到隐式全局 fallback 调用，以避免模块耦合失控。
 
 ## 常用脚本
 

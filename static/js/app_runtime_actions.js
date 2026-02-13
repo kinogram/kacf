@@ -2,10 +2,12 @@ function runtimeSyncApi() {
     return (window.KACF && window.KACF.runtimeSync) || {};
 }
 
-function runtimeSyncCall(name, fallback, ...args) {
+function runtimeSyncCall(name, ...args) {
     const api = runtimeSyncApi();
-    const fn = typeof api[name] === 'function' ? api[name] : fallback;
-    return fn(...args);
+    if (typeof api[name] !== 'function') {
+        throw new Error(`KACF.runtimeSync.${name} is not available`);
+    }
+    return api[name](...args);
 }
 
 async function startSession() {
@@ -14,14 +16,10 @@ async function startSession() {
         setStatus(txt('status_readonly_view', ''), 'status-danger');
         return;
     }
-    if (!(await runtimeSyncCall('syncSharedConfigForRun', syncSharedConfigForRun, 'status_start_shared_config_sync_failed'))) {
+    if (!(await runtimeSyncCall('syncSharedConfigForRun', 'status_start_shared_config_sync_failed'))) {
         return;
     }
-    const body = await runtimeSyncCall(
-        'prepareFormDataWithWorkspace',
-        prepareFormDataWithWorkspace,
-        'status_start_alloc_workspace_failed'
-    );
+    const body = await runtimeSyncCall('prepareFormDataWithWorkspace', 'status_start_alloc_workspace_failed');
     if (!body) {
         return;
     }
@@ -34,7 +32,7 @@ async function startSession() {
         if (!proceed) return;
     }
     try {
-        runtimeSyncCall('primeRunRequestContext', primeRunRequestContext);
+        runtimeSyncCall('primeRunRequestContext');
         const resp = await fetch('/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -75,18 +73,14 @@ async function resumeSession(opts) {
             setStatus(txt('status_need_select_project', ''), 'status-danger');
             return;
         }
-        if (!(await runtimeSyncCall('syncSharedConfigForRun', syncSharedConfigForRun, 'status_shared_config_sync_failed'))) {
+        if (!(await runtimeSyncCall('syncSharedConfigForRun', 'status_shared_config_sync_failed'))) {
             return;
         }
-        const body = await runtimeSyncCall(
-            'prepareFormDataWithWorkspace',
-            prepareFormDataWithWorkspace,
-            'status_resume_alloc_workspace_failed'
-        );
+        const body = await runtimeSyncCall('prepareFormDataWithWorkspace', 'status_resume_alloc_workspace_failed');
         if (!body) {
             return;
         }
-        runtimeSyncCall('primeRunRequestContext', primeRunRequestContext);
+        runtimeSyncCall('primeRunRequestContext');
         const resp = await fetch('/resume', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -133,7 +127,7 @@ async function stopSession() {
         const ack = (await resp.text()).trim();
         if (!resp.ok) throw new Error(`stop error ${resp.status}`);
         stopRequested = true;
-        runtimeSyncCall('clearStopAckTimer', clearStopAckTimer);
+        runtimeSyncCall('clearStopAckTimer');
         stopAckTimer = setTimeout(() => {
             if (!stopRequested) return;
             applyInterruptedTerminalState({
@@ -519,19 +513,19 @@ async function init() {
     renderCurrentLogView();
     renderUiForViewBucket();
     await loadProjectConfigForWorkspace();
-    await runtimeSyncCall('refreshUiState', refreshUiState);
-    await runtimeSyncCall('refreshMetrics', refreshMetrics);
-    await runtimeSyncCall('bootstrapEventCursor', bootstrapEventCursor);
+    await runtimeSyncCall('refreshUiState');
+    await runtimeSyncCall('refreshMetrics');
+    await runtimeSyncCall('bootstrapEventCursor');
     renderUnattendedState();
     renderUiForViewBucket();
-    setInterval(() => runtimeSyncCall('refreshUiState', refreshUiState), UI_STATE_SYNC_MS);
-    setInterval(() => runtimeSyncCall('refreshMetrics', refreshMetrics), 5000);
+    setInterval(() => runtimeSyncCall('refreshUiState'), UI_STATE_SYNC_MS);
+    setInterval(() => runtimeSyncCall('refreshMetrics'), 5000);
     setInterval(renderUnattendedState, 1000);
-    setInterval(() => runtimeSyncCall('monitorRealtimeChannel', monitorRealtimeChannel), 2000);
+    setInterval(() => runtimeSyncCall('monitorRealtimeChannel'), 2000);
     // Prefer SSE for low-latency updates, fallback to long-polling only on failure.
-    runtimeSyncCall('startEventStream', startEventStream);
+    runtimeSyncCall('startEventStream');
     window.addEventListener('beforeunload', () =>
-        runtimeSyncCall('closeEventStream', closeEventStream)
+        runtimeSyncCall('closeEventStream')
     );
 }
 
