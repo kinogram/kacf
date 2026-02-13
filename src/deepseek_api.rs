@@ -71,6 +71,11 @@ pub async fn chat_complete_streaming(
             "API key is empty. 请先在界面填写 DeepSeek API Key（或设置环境变量 DEEPSEEK_API_KEY）。"
         ));
     }
+    if looks_like_masked_api_key(api_key) {
+        return Err(anyhow!(
+            "API key appears masked. 请先获取 API Key 明文后再发起请求。"
+        ));
+    }
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let client = shared_client();
     let req = ChatCompletionReq {
@@ -132,6 +137,21 @@ pub async fn chat_complete_streaming(
         }
     }
     Err(last_err.unwrap_or_else(|| anyhow!("chat completion streaming failed")))
+}
+
+fn looks_like_masked_api_key(raw: &str) -> bool {
+    let v = raw.trim();
+    if v.is_empty() {
+        return false;
+    }
+    if v.chars().all(|c| c == '*') {
+        return true;
+    }
+    let chars: Vec<char> = v.chars().collect();
+    if chars.len() < 12 {
+        return false;
+    }
+    chars[4..chars.len() - 4].iter().all(|c| *c == '*')
 }
 
 async fn parse_streaming_response(
@@ -256,5 +276,18 @@ fn status_hint(code: u16) -> &'static str {
         429 => "429 Too Many Requests：请求过于频繁或额度限制，将自动重试。",
         500 | 502 | 503 | 504 => "服务端暂时异常，将自动重试。",
         _ => "请求失败，请检查 API Key、Base URL、模型名和网络环境。",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::looks_like_masked_api_key;
+
+    #[test]
+    fn masked_api_key_detector_matches_generated_patterns() {
+        assert!(looks_like_masked_api_key("****************"));
+        assert!(looks_like_masked_api_key("sk-1************9abc"));
+        assert!(!looks_like_masked_api_key("sk-real-key-without-mask"));
+        assert!(!looks_like_masked_api_key(""));
     }
 }

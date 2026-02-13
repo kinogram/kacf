@@ -299,7 +299,6 @@ function isStrictGeneratedMaskedApiKey(raw) {
 }
 
 function shouldResolveMaskedApiKey() {
-    if (!sharedConfig.mask_api_key) return false;
     return sharedConfig.api_key_is_masked
         || isMaskedApiEchoState()
         || isStrictGeneratedMaskedApiKey(sharedConfig.api_key);
