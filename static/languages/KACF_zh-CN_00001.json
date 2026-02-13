@@ -88,6 +88,7 @@
   "status_go_running_ok": "已切回运行项目：{name}",
   "readonly_off": "只读模式：关闭",
   "readonly_on": "只读模式：当前正在运行其他项目。你可以查看本项目，但不能编辑或执行会影响运行任务的操作。",
+  "readonly_backend_offline": "只读模式：后端离线。已隐藏所有通信按钮，仅保留查看与导出。",
   "log_project_saved": "[UI] 项目已保存：{name}{suffix}",
   "log_project_loaded": "[UI] 已载入项目：{name}",
   "log_project_deleted": "[UI] 已删除项目：{name}{suffix}",

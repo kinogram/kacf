@@ -88,6 +88,7 @@
   "status_go_running_ok": "Switched back to running project: {name}",
   "readonly_off": "Read-only mode: off",
   "readonly_on": "Read-only mode: another project is currently running. You can view this project, but cannot edit or trigger actions that may affect the running task.",
+  "readonly_backend_offline": "Read-only mode: backend offline. Communication buttons are hidden; only view/export actions are available.",
   "log_project_saved": "[UI] Project saved: {name}{suffix}",
   "log_project_loaded": "[UI] Project loaded: {name}",
   "log_project_deleted": "[UI] Project deleted: {name}{suffix}",

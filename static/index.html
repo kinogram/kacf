@@ -843,6 +843,7 @@ let lastRealtimeFallbackReason = '';
 let lastRealtimeFallbackAt = 0;
 let backendFailureCount = 0;
 let backendOfflineNotified = false;
+let backendOffline = false;
 const POLL_MS_ACTIVE = 1000;
 const POLL_MS_IDLE = 3000;
 const UI_STATE_SYNC_MS = 3000;
@@ -878,6 +879,25 @@ let sharedConfig = {
     api_key_is_masked: false,
 };
 let COPY = {};
+const BACKEND_COMM_BUTTON_IDS = [
+    'start_btn',
+    'resume_btn',
+    'stop_btn',
+    'revert_btn',
+    'push_btn',
+    'clarify_submit_btn',
+    'project_new_btn',
+    'project_save_btn',
+    'project_load_btn',
+    'project_delete_btn',
+    'open_global_config_btn',
+    'save_global_config_btn',
+    'api_key_edit_btn',
+    'preset_webapp_btn',
+    'preset_cli_btn',
+    'preset_desktop_btn',
+    'reset_form_btn',
+];
 
 function normalizeLanguageCode(raw) {
     const v = (raw || '').trim();
@@ -1303,6 +1323,15 @@ function setConfigInputsDisabled(disabled) {
     });
 }
 
+function applyBackendOfflineMode() {
+    BACKEND_COMM_BUTTON_IDS.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.style.display = backendOffline ? 'none' : '';
+        el.disabled = backendOffline ? true : !!el.disabled;
+    });
+}
+
 function isReadOnlyView() {
     if (!runSessionActive) return false;
     if (!activeRunLogBucket) return false;
@@ -1310,20 +1339,26 @@ function isReadOnlyView() {
 }
 
 function applyReadOnlyMode() {
-    const readonly = isReadOnlyView();
+    const readonly = backendOffline || isReadOnlyView();
     const hint = document.getElementById('readonly_mode_text');
     if (hint) {
-        hint.textContent = readonly
-            ? txt('readonly_on', '')
-            : txt('readonly_off', '');
+        if (backendOffline) {
+            hint.textContent = txt('readonly_backend_offline', '');
+        } else {
+            hint.textContent = readonly
+                ? txt('readonly_on', '')
+                : txt('readonly_off', '');
+        }
     }
-    setConfigInputsDisabled(readonly || runSessionActive);
-    document.getElementById('start_btn').disabled = readonly || runSessionActive;
-    document.getElementById('resume_btn').disabled = readonly || runSessionActive;
-    document.getElementById('stop_btn').disabled = readonly || !runSessionActive;
-    document.getElementById('revert_btn').disabled = readonly || !runSessionActive;
-    document.getElementById('push_btn').disabled = readonly;
-    document.getElementById('clarify_submit_btn').disabled = readonly;
+    setConfigInputsDisabled(backendOffline || readonly || runSessionActive);
+    document.getElementById('start_btn').disabled = backendOffline || readonly || runSessionActive;
+    document.getElementById('resume_btn').disabled = backendOffline || readonly || runSessionActive;
+    document.getElementById('stop_btn').disabled = backendOffline || readonly || !runSessionActive;
+    document.getElementById('revert_btn').disabled = backendOffline || readonly || !runSessionActive;
+    document.getElementById('push_btn').disabled = backendOffline || readonly;
+    document.getElementById('clarify_submit_btn').disabled = backendOffline || readonly;
+    setProjectControlsDisabled(backendOffline || runSessionActive);
+    applyBackendOfflineMode();
     updateGoRunningProjectButton();
 }
 
@@ -1654,6 +1689,10 @@ function hasPendingClarify(bucket) {
 function markBackendAlive() {
     backendFailureCount = 0;
     backendOfflineNotified = false;
+    if (backendOffline) {
+        backendOffline = false;
+        applyReadOnlyMode();
+    }
 }
 
 function markBackendFailure(source, immediate) {
@@ -1665,6 +1704,9 @@ function markBackendFailure(source, immediate) {
     if (backendFailureCount < BACKEND_FAILURE_THRESHOLD) return;
     if (backendOfflineNotified) return;
     backendOfflineNotified = true;
+    backendOffline = true;
+    closeGlobalConfigModal();
+    applyReadOnlyMode();
     const state = currentRunState();
     const runningLike = state === 'running' || state === 'stopping';
     if (runningLike) {
