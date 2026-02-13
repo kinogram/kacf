@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use crate::protocol_auto_revert;
 use crate::protocol_repair_prompt;
+use crate::protocol_retry;
 use crate::protocol_system_prompt;
 use crate::{deepseek_api, git_utils, runner, workspace};
 use crate::{protocol_failure, protocol_patch};
@@ -149,15 +150,13 @@ pub async fn agent_loop(rx_req: Receiver<AgentRequest>, tx_evt: Sender<AgentEven
                 });
                 clarify_answers.clear();
                 let _ = tx_evt.send(AgentEvent::Log("[Agent] Start received".into()));
-                if let Err(e) = run_session(
+                if let Err(e) = run_session_with_retries(
                     cfg.as_ref().unwrap(),
                     &mut clarify_answers,
                     &rx_req,
                     &tx_evt,
                     &mut stop_flag,
-                )
-                .await
-                {
+                ).await {
                     let _ = tx_evt.send(AgentEvent::Done {
                         success: false,
                         message: format!("Session error: {:#}", e),
@@ -221,6 +220,37 @@ pub async fn agent_loop(rx_req: Receiver<AgentRequest>, tx_evt: Sender<AgentEven
     // Read stop_flag to avoid unused assignment warnings. This has no
     // functional effect but ensures the compiler treats the variable as used.
     let _ = stop_flag;
+}
+
+async fn run_session_with_retries(
+    cfg: &SessionCfg,
+    clarify_answers: &mut Vec<ClarifyAnswer>,
+    rx_req: &Receiver<AgentRequest>,
+    tx_evt: &Sender<AgentEvent>,
+    stop_flag: &mut bool,
+) -> Result<()> {
+    let max_retries = protocol_retry::session_retry_max_attempts();
+    let mut attempt = 0u32;
+    loop {
+        match run_session(cfg, clarify_answers, rx_req, tx_evt, stop_flag).await {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                if *stop_flag || attempt >= max_retries || !protocol_retry::should_retry_session_error(&e) {
+                    return Err(e);
+                }
+                attempt += 1;
+                let wait = protocol_retry::session_retry_delay(attempt);
+                let _ = tx_evt.send(AgentEvent::Log(format!(
+                    "[Agent-Retry] 会话错误可重试，{}/{}，{}ms 后重试：{:#}",
+                    attempt,
+                    max_retries,
+                    wait.as_millis(),
+                    e
+                )));
+                tokio::time::sleep(wait).await;
+            }
+        }
+    }
 }
 
 #[derive(Clone)]
