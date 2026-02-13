@@ -1195,14 +1195,36 @@ async fn resume_session(
     if payload.project_id.trim().is_empty() {
         return HttpResponse::BadRequest().body("project_id is empty");
     }
-    let draft: DraftPayload = {
+    let mut draft: DraftPayload = {
         let _guard = data.projects_lock.lock().unwrap();
-        let cache = read_ui_cache();
+        let mut cache = read_ui_cache();
         let Some(project) = cache.projects.into_iter().find(|p| p.id == payload.project_id) else {
             return HttpResponse::NotFound().body("project not found");
         };
-        project.snapshot
+        let mut snapshot = project.snapshot;
+        if let Some(cfg) = cache.shared_config.as_mut() {
+            decrypt_shared_config_for_response(cfg);
+            if snapshot.api_key.trim().is_empty() {
+                snapshot.api_key = cfg.api_key.trim().to_string();
+            }
+            if snapshot.base_url.trim().is_empty() {
+                snapshot.base_url = cfg.base_url.trim().to_string();
+            }
+            if snapshot.model.trim().is_empty() {
+                snapshot.model = cfg.model.trim().to_string();
+            }
+            if snapshot.language.trim().is_empty() {
+                snapshot.language = cfg.language.trim().to_string();
+            }
+        }
+        snapshot
     };
+    if draft.base_url.trim().is_empty() {
+        draft.base_url = default_base_url();
+    }
+    if draft.model.trim().is_empty() {
+        draft.model = default_model_name();
+    }
     if draft.api_key.trim().is_empty() {
         return HttpResponse::BadRequest().body("api_key is empty in snapshot");
     }
