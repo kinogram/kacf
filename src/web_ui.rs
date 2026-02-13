@@ -1204,16 +1204,24 @@ async fn resume_session(
         let mut snapshot = project.snapshot;
         if let Some(cfg) = cache.shared_config.as_mut() {
             decrypt_shared_config_for_response(cfg);
-            if snapshot.api_key.trim().is_empty() {
+            if !cfg.api_key.trim().is_empty() {
+                snapshot.api_key = cfg.api_key.trim().to_string();
+            } else if snapshot.api_key.trim().is_empty() {
                 snapshot.api_key = cfg.api_key.trim().to_string();
             }
-            if snapshot.base_url.trim().is_empty() {
+            if !cfg.base_url.trim().is_empty() {
+                snapshot.base_url = cfg.base_url.trim().to_string();
+            } else if snapshot.base_url.trim().is_empty() {
                 snapshot.base_url = cfg.base_url.trim().to_string();
             }
-            if snapshot.model.trim().is_empty() {
+            if !cfg.model.trim().is_empty() {
+                snapshot.model = cfg.model.trim().to_string();
+            } else if snapshot.model.trim().is_empty() {
                 snapshot.model = cfg.model.trim().to_string();
             }
-            if snapshot.language.trim().is_empty() {
+            if !cfg.language.trim().is_empty() {
+                snapshot.language = cfg.language.trim().to_string();
+            } else if snapshot.language.trim().is_empty() {
                 snapshot.language = cfg.language.trim().to_string();
             }
         }
