@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>KACF - Kevin AutoCoding Framework</title>
     <style>
         :root {
@@ -23,11 +24,50 @@
             color: var(--text);
             font-family: "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
             background: radial-gradient(circle at 10% 10%, var(--bg-0), var(--bg-1) 45%, #ffffff 100%);
+            overflow-x: hidden;
         }
         .shell {
-            max-width: 1120px;
+            width: 100%;
+            max-width: none;
             margin: 0 auto;
-            padding: 24px 16px 40px;
+            padding: 12px clamp(10px, 2vw, 18px) 18px;
+        }
+        .app-shell {
+            display: grid;
+            grid-template-columns: 320px minmax(0, 1fr);
+            gap: 12px;
+            align-items: start;
+        }
+        .sidebar {
+            position: sticky;
+            top: 12px;
+            max-height: calc(100vh - 24px);
+            overflow: auto;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            background: #ffffff;
+            box-shadow: 0 8px 28px rgba(20, 60, 130, 0.08);
+            padding: 12px;
+            transition: width 0.2s ease, padding 0.2s ease;
+        }
+        .sidebar-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .sidebar-brand {
+            font-weight: 800;
+            font-size: 14px;
+            color: #24406d;
+            letter-spacing: 0.4px;
+        }
+        .main-column {
+            min-width: 0;
+        }
+        .sidebar-overlay {
+            display: none;
         }
         .hero {
             padding: 20px;
@@ -45,17 +85,23 @@
             color: var(--subtle);
             line-height: 1.55;
         }
+        .hero-actions {
+            margin-top: 12px;
+            display: none;
+        }
         .grid {
             display: grid;
             grid-template-columns: 1fr;
             gap: 14px;
             margin-top: 14px;
+            min-width: 0;
         }
         .card {
             background: var(--card);
             border: 1px solid var(--line);
             border-radius: 12px;
             padding: 16px;
+            min-width: 0;
         }
         .title {
             margin: 0 0 10px;
@@ -85,7 +131,7 @@
             padding: 9px 10px;
             background: #fbfdff;
             color: var(--text);
-            font-size: 14px;
+            font-size: 15px;
         }
         textarea {
             min-height: 92px;
@@ -98,25 +144,60 @@
             margin-top: 12px;
         }
         button {
+            appearance: none;
+            -webkit-appearance: none;
             border: none;
             border-radius: 8px;
-            padding: 9px 14px;
+            padding: 10px 14px;
             background: var(--primary);
             color: #fff;
             font-weight: 700;
+            font-size: 14px;
             cursor: pointer;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+            transition: background-color 0.12s ease, color 0.12s ease, filter 0.12s ease, box-shadow 0.12s ease;
         }
         button:hover:not(:disabled) { background: var(--primary-2); }
+        button:active:not(:disabled) { filter: brightness(0.96); }
+        button:focus-visible {
+            outline: 2px solid #2f6feb;
+            outline-offset: 2px;
+            box-shadow: 0 0 0 3px rgba(47, 111, 235, 0.18);
+        }
+        button:focus:not(:focus-visible) {
+            outline: none;
+            box-shadow: none;
+        }
         button:disabled {
             cursor: default;
             background: #9db3d6;
         }
         .btn-ghost { background: #edf3fd; color: #24406d; }
+        .btn-ghost:hover:not(:disabled),
+        .btn-ghost:focus-visible:not(:disabled),
+        .btn-ghost:active:not(:disabled) {
+            background: #dfeafb;
+            color: #17355f;
+            filter: none;
+        }
         .btn-warn { background: #dc7a13; }
+        .btn-warn:hover:not(:disabled),
+        .btn-warn:focus-visible:not(:disabled),
+        .btn-warn:active:not(:disabled) {
+            background: #bf670e;
+            filter: none;
+        }
         .btn-danger { background: var(--danger); }
+        .btn-danger:hover:not(:disabled),
+        .btn-danger:focus-visible:not(:disabled),
+        .btn-danger:active:not(:disabled) {
+            background: #98211a;
+            filter: none;
+        }
         .hint {
             margin-top: 10px;
-            font-size: 12px;
+            font-size: 13px;
             color: var(--subtle);
             line-height: 1.5;
         }
@@ -140,7 +221,7 @@
             padding: 10px;
             border-radius: 8px;
             white-space: pre-wrap;
-            font-size: 14px;
+            font-size: 15px;
         }
         .runbar {
             margin-top: 10px;
@@ -192,6 +273,19 @@
             background: #dc7a13;
             animation: none;
         }
+        .runbar[data-state="waiting_clarify"] .runbar-fill {
+            left: 0;
+            width: 100%;
+            opacity: 1;
+            background: repeating-linear-gradient(
+                -45deg,
+                #ffdb9b 0px,
+                #ffdb9b 10px,
+                #ffc870 10px,
+                #ffc870 20px
+            );
+            animation: none;
+        }
         @keyframes runbar-slide {
             0% { left: -36%; }
             100% { left: 100%; }
@@ -222,6 +316,27 @@
             font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
             font-size: 13px;
         }
+        .log-panel {
+            background: linear-gradient(180deg, #ffffff, #f8fbff);
+        }
+        #log {
+            background: #0f172a;
+            color: #dbe7ff;
+            border-color: #22345a;
+            min-height: 220px;
+            max-height: 420px;
+            line-height: 1.55;
+            box-shadow: inset 0 0 0 1px rgba(131, 169, 255, 0.14);
+            padding: 12px;
+        }
+        .log-toolbar {
+            margin-top: 10px;
+            align-items: center;
+        }
+        .log-toolbar .btn-ghost {
+            border: 1px solid #c9d8f4;
+            background: #f3f8ff;
+        }
         .diff-line-add { color: #0b7a2f; }
         .diff-line-del { color: #b3261e; }
         .diff-line-other { color: #2e3f5f; }
@@ -230,13 +345,15 @@
             position: fixed;
             inset: 0;
             background: rgba(10, 20, 40, 0.42);
-            z-index: 1000;
+            z-index: 2000;
             align-items: center;
             justify-content: center;
             padding: 16px;
         }
         .modal-card {
             width: min(760px, 96vw);
+            max-height: calc(100dvh - 32px);
+            overflow: auto;
             background: #fff;
             border: 1px solid var(--line);
             border-radius: 12px;
@@ -331,52 +448,212 @@
             margin-top: 6px;
             line-height: 1.5;
         }
-        @media (min-width: 900px) {
+        body.sidebar-collapsed .app-shell {
+            grid-template-columns: 64px minmax(0, 1fr);
+        }
+        body.sidebar-collapsed .sidebar {
+            padding: 10px 8px;
+        }
+        body.sidebar-collapsed .sidebar-brand,
+        body.sidebar-collapsed .sidebar-content {
+            display: none;
+        }
+        body.sidebar-collapsed #sidebar_toggle_btn {
+            width: 100%;
+            padding-left: 0;
+            padding-right: 0;
+        }
+        @media (min-width: 1024px) {
             .grid { grid-template-columns: 1.15fr 1fr; }
             .row.two { grid-template-columns: 1fr 1fr; }
             .row.three { grid-template-columns: 1fr 1fr 1fr; }
+        }
+        @media (max-width: 1365px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        @media (max-width: 1023px) {
+            .shell {
+                padding: 8px;
+            }
+            .hero {
+                padding: 14px;
+            }
+            .hero h1 {
+                font-size: 24px;
+            }
+            .hero p {
+                font-size: 14px;
+            }
+            .title {
+                font-size: 20px;
+            }
+            label {
+                font-size: 14px;
+            }
+            .card {
+                padding: 14px;
+                border-radius: 10px;
+            }
+            .row {
+                gap: 8px;
+            }
+            input, textarea, select {
+                font-size: 16px;
+            }
+            button {
+                font-size: 15px;
+                padding: 11px 14px;
+            }
+            .buttons {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 8px;
+            }
+            .buttons > button {
+                width: 100%;
+            }
+            .project-tools {
+                grid-template-columns: 1fr;
+            }
+            .project-goal {
+                white-space: normal;
+            }
+            .status-box {
+                font-size: 16px;
+            }
+            #log {
+                font-size: 14px;
+                max-height: 52dvh;
+                min-height: 200px;
+            }
+            #diff {
+                word-break: break-word;
+                overflow-wrap: anywhere;
+            }
+            pre {
+                overflow-wrap: anywhere;
+                word-break: break-word;
+            }
+            .app-shell {
+                grid-template-columns: 1fr;
+            }
+            .sidebar {
+                position: fixed;
+                left: 0;
+                top: 0;
+                bottom: 0;
+                width: min(90vw, 380px);
+                max-height: none;
+                z-index: 1200;
+                border-radius: 0 14px 14px 0;
+                transform: translateX(-108%);
+                transition: transform 0.2s ease;
+            }
+            .modal-mask {
+                align-items: flex-end;
+                justify-content: stretch;
+                padding: 0;
+            }
+            .modal-card {
+                width: 100%;
+                max-width: none;
+                max-height: 92dvh;
+                border-radius: 16px 16px 0 0;
+                border-left: none;
+                border-right: none;
+                border-bottom: none;
+                padding: 16px 14px 18px;
+            }
+            .modal-card .title {
+                font-size: 20px;
+            }
+            .modal-card label {
+                font-size: 14px;
+            }
+            .modal-card input,
+            .modal-card select {
+                font-size: 16px;
+            }
+            .modal-card .buttons {
+                grid-template-columns: 1fr;
+            }
+            body.sidebar-open .sidebar {
+                transform: translateX(0);
+            }
+            .hero-actions {
+                display: flex;
+            }
+            .sidebar-overlay {
+                position: fixed;
+                inset: 0;
+                background: rgba(13, 25, 48, 0.32);
+                z-index: 1100;
+            }
+            body.sidebar-open .sidebar-overlay {
+                display: block;
+            }
+        }
+        @media (max-width: 640px) {
+            .buttons {
+                grid-template-columns: 1fr;
+            }
+            .hero h1 {
+                font-size: 21px;
+            }
         }
     </style>
 </head>
 <body>
 <div class="shell">
-    <section class="hero">
-        <h1>KACF - Kevin AutoCoding Framework</h1>
-        <p id="hero_sub"></p>
-        <div class="banner" id="resume_banner"></div>
-    </section>
-
-    <div class="grid">
-        <section class="card">
-            <h2 class="title" id="section_config_title"></h2>
-            <p class="sub" id="section_config_sub"></p>
-
-            <div class="row two">
+    <div class="sidebar-overlay" id="sidebar_overlay"></div>
+    <div class="app-shell">
+        <aside class="sidebar" id="project_sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-brand">KACF</div>
+                <button class="btn-ghost" id="sidebar_toggle_btn"></button>
+            </div>
+            <div class="sidebar-content">
+                <h2 class="title" id="section_projects_title"></h2>
+                <p class="sub" id="section_projects_sub"></p>
                 <div>
                     <label for="project_name" id="label_project_name"></label>
                     <input id="project_name" type="text" placeholder="">
                 </div>
-                <div>
-                    <label id="label_global_config"></label>
-                    <div class="buttons" style="margin-top:0;">
-                        <button class="btn-ghost" id="open_global_config_btn"></button>
-                    </div>
+                <div class="buttons">
+                    <button class="btn-ghost" id="project_new_btn"></button>
+                    <button class="btn-ghost" id="project_save_btn"></button>
+                    <button class="btn-ghost" id="project_load_btn"></button>
+                    <button class="btn-ghost" id="project_delete_btn"></button>
                 </div>
+                <div class="buttons">
+                    <button class="btn-ghost" id="open_global_config_btn"></button>
+                </div>
+                <div class="hint" id="project_dirty_state"></div>
+                <input id="workspace" type="hidden" value="">
+                <select id="project_selector" style="display:none;"></select>
+                <div class="project-tools">
+                    <input id="project_search" type="text" placeholder="">
+                    <div class="project-summary" id="project_summary_text"></div>
+                </div>
+                <div id="project_accordion" class="project-list"></div>
             </div>
-            <div class="buttons">
-                <button class="btn-ghost" id="project_new_btn"></button>
-                <button class="btn-ghost" id="project_save_btn"></button>
-                <button class="btn-ghost" id="project_load_btn"></button>
-                <button class="btn-ghost" id="project_delete_btn"></button>
-            </div>
-            <div class="hint" id="project_dirty_state"></div>
-            <input id="workspace" type="hidden" value="">
-            <select id="project_selector" style="display:none;"></select>
-            <div class="project-tools">
-                <input id="project_search" type="text" placeholder="">
-                <div class="project-summary" id="project_summary_text"></div>
-            </div>
-            <div id="project_accordion" class="project-list"></div>
+        </aside>
+        <main class="main-column">
+            <section class="hero">
+                <h1>KACF - Kevin AutoCoding Framework</h1>
+                <p id="hero_sub"></p>
+                <div class="hero-actions">
+                    <button class="btn-ghost" id="sidebar_mobile_btn"></button>
+                </div>
+                <div class="banner" id="resume_banner"></div>
+            </section>
+
+            <div class="grid">
+                <section class="card">
+            <h2 class="title" id="section_config_title"></h2>
+            <p class="sub" id="section_config_sub"></p>
 
             <div class="row two">
                 <div>
@@ -462,9 +739,9 @@
                 <button class="btn-ghost" id="push_btn"></button>
             </div>
             <p class="hint" id="hint_run_new_round"></p>
-        </section>
+                </section>
 
-        <section class="card">
+                <section class="card">
             <h2 class="title" id="section_status_title"></h2>
             <div class="status-box" id="status"></div>
             <div class="runbar" id="runbar" data-state="idle"><div class="runbar-fill"></div></div>
@@ -483,24 +760,27 @@
             <div class="buttons">
                 <button id="clarify_submit_btn"></button>
             </div>
-        </section>
-    </div>
+                </section>
+            </div>
 
-    <section class="card" style="margin-top:14px;">
+            <section class="card log-panel" style="margin-top:14px;">
         <h2 class="title" id="section_log_title"></h2>
         <pre id="log"></pre>
-        <div class="buttons">
+        <div class="buttons log-toolbar">
             <button class="btn-ghost" id="clear_log_btn"></button>
             <button class="btn-ghost" id="export_log_btn"></button>
             <button class="btn-ghost" id="export_snapshot_btn"></button>
             <button class="btn-ghost" id="export_report_btn"></button>
         </div>
-    </section>
+        <div class="hint" id="hint_log_exports"></div>
+            </section>
 
-    <section class="card" id="diff_section" style="margin-top:14px;display:none;">
+            <section class="card" id="diff_section" style="margin-top:14px;display:none;">
         <h2 class="title" id="section_diff_title"></h2>
         <div id="diff" style="white-space:pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;"></div>
-    </section>
+            </section>
+        </main>
+    </div>
 </div>
 <div class="modal-mask" id="global_config_modal">
     <div class="modal-card">
@@ -582,6 +862,8 @@ let availableLanguages = [];
 let currentLanguage = '';
 let projectSearchKeyword = '';
 let projectDraftDirty = false;
+let sidebarCollapsed = false;
+let sidebarMobileOpen = false;
 let sharedConfig = {
     api_key: '',
     base_url: 'https://api.deepseek.com',
@@ -605,6 +887,42 @@ function languageLabel(code) {
     if (norm === 'zh-CN') return txt('language_name_zh_cn', '');
     if (norm === 'en') return txt('language_name_en', '');
     return norm;
+}
+
+function isNarrowViewport() {
+    return window.matchMedia('(max-width: 1023px)').matches;
+}
+
+function applySidebarLayout() {
+    const root = document.body;
+    const narrow = isNarrowViewport();
+    root.classList.toggle('sidebar-collapsed', !narrow && sidebarCollapsed);
+    root.classList.toggle('sidebar-open', narrow && sidebarMobileOpen);
+    const t = document.getElementById('sidebar_toggle_btn');
+    if (t) {
+        t.textContent = narrow
+            ? txt('btn_sidebar_close', '')
+            : (sidebarCollapsed ? txt('btn_sidebar_expand', '') : txt('btn_sidebar_collapse', ''));
+        t.title = t.textContent;
+    }
+    const m = document.getElementById('sidebar_mobile_btn');
+    if (m) m.textContent = txt('btn_sidebar_open', '');
+}
+
+function setSidebarCollapsed(next) {
+    sidebarCollapsed = !!next;
+    try { localStorage.setItem('kacf_sidebar_collapsed', sidebarCollapsed ? '1' : '0'); } catch (_e) {}
+    applySidebarLayout();
+}
+
+function setSidebarMobileOpen(next) {
+    sidebarMobileOpen = !!next;
+    applySidebarLayout();
+}
+
+function closeSidebarOnNarrow() {
+    if (!isNarrowViewport()) return;
+    setSidebarMobileOpen(false);
 }
 
 function choosePreferredLanguage(langs, savedLanguage) {
@@ -764,10 +1082,20 @@ function renderApiKeyInput() {
     }
 }
 
-function revealApiKeyForEdit() {
+function prepareMaskedApiKeyForInput(ev) {
     const el = document.getElementById('api_key');
     if (!el || el.dataset.masked !== '1') return;
-    el.value = sharedConfig.api_key || '';
+    const key = (ev && ev.key) ? ev.key : '';
+    const isEditableKey = key.length === 1 || key === 'Backspace' || key === 'Delete' || key === 'Enter';
+    if (!isEditableKey) return;
+    el.value = '';
+    el.dataset.masked = '0';
+}
+
+function prepareMaskedApiKeyForPaste() {
+    const el = document.getElementById('api_key');
+    if (!el || el.dataset.masked !== '1') return;
+    el.value = '';
     el.dataset.masked = '0';
 }
 
@@ -1176,10 +1504,24 @@ function renderCurrentLogView() {
     log.scrollTop = log.scrollHeight;
 }
 
+function normalizeLogLine(text) {
+    const raw = String(text || '');
+    if (!raw.startsWith('[Model-Stream]')) return raw;
+    const body = raw.slice('[Model-Stream]'.length).trim();
+    if (!body) return raw;
+    const compact = body
+        .replace(/\\n|\\r|\\t/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!compact) return '[Model-Stream]';
+    return `[Model-Stream] ${compact.length > 220 ? `${compact.slice(0, 220)}...` : compact}`;
+}
+
 function appendLog(text) {
+    const line = normalizeLogLine(text);
     const bucket = currentLogBucket();
     const existing = readLogForBucket(bucket);
-    writeLogForBucket(bucket, existing + text + "\n");
+    writeLogForBucket(bucket, existing + line + "\n");
     const log = document.getElementById('log');
     log.textContent = readLogForBucket(bucket);
     log.scrollTop = log.scrollHeight;
@@ -1216,6 +1558,11 @@ function setRunState(state, text) {
 
 function currentRunState() {
     return readBucketUiState(currentLogBucket()).run_state || 'idle';
+}
+
+function hasPendingClarify(bucket) {
+    const state = readBucketUiState(bucket || currentLogBucket());
+    return Array.isArray(state.clarify_questions) && state.clarify_questions.length > 0;
 }
 
 function markBackendAlive() {
@@ -1317,6 +1664,8 @@ function applyStaticCopyToDom() {
     if (h1) h1.textContent = txt('app_header', h1.textContent);
     const staticMap = [
         ['hero_sub', 'hero_sub'],
+        ['section_projects_title', 'section_projects_title'],
+        ['section_projects_sub', 'section_projects_sub'],
         ['section_config_title', 'section_config_title'],
         ['section_config_sub', 'section_config_sub'],
         ['label_project_name', 'label_project_name'],
@@ -1337,6 +1686,7 @@ function applyStaticCopyToDom() {
         ['section_status_title', 'section_status_title'],
         ['section_clarify_title', 'section_clarify_title'],
         ['section_log_title', 'section_log_title'],
+        ['hint_log_exports', 'hint_log_exports'],
         ['section_diff_title', 'section_diff_title'],
         ['section_global_title', 'section_global_title'],
         ['label_encrypt_api_key', 'label_encrypt_api_key'],
@@ -1374,6 +1724,15 @@ function applyStaticCopyToDom() {
         const el = document.getElementById(id);
         if (el) el.textContent = txt(key, '');
     });
+    const logBtnTips = [
+        ['export_log_btn', 'tip_export_log'],
+        ['export_snapshot_btn', 'tip_export_snapshot'],
+        ['export_report_btn', 'tip_export_report'],
+    ];
+    logBtnTips.forEach(([id, key]) => {
+        const el = document.getElementById(id);
+        if (el) el.title = txt(key, '');
+    });
     const placeholderMap = [
         ['project_name', 'ph_project_name'],
         ['precheck_cmd', 'ph_precheck_cmd'],
@@ -1397,9 +1756,11 @@ function applyStaticCopyToDom() {
     }
     setProjectDraftState();
     renderProjectAccordion();
+    applySidebarLayout();
 }
 
 function openGlobalConfigModal() {
+    closeSidebarOnNarrow();
     document.getElementById('global_config_modal').style.display = 'flex';
 }
 
@@ -1717,6 +2078,7 @@ async function saveCurrentProject(opts) {
         );
     }
     markProjectClean();
+    closeSidebarOnNarrow();
     return true;
 }
 
@@ -1750,6 +2112,7 @@ function loadSelectedProject(skipDirtyCheck) {
     renderCurrentLogView();
     renderUiForViewBucket();
     applyReadOnlyMode();
+    closeSidebarOnNarrow();
 }
 
 async function deleteSelectedProject() {
@@ -1793,6 +2156,7 @@ async function deleteSelectedProject() {
             .replace('{name}', (found.name || txt('project_unnamed', '')))
             .replace('{suffix}', serverOk ? '' : txt('log_fallback_suffix_unsynced', ''))
     );
+    closeSidebarOnNarrow();
 }
 
 function createNewProject() {
@@ -1815,6 +2179,7 @@ function createNewProject() {
     renderUiForViewBucket();
     applyReadOnlyMode();
     markProjectClean();
+    closeSidebarOnNarrow();
     setStatus(txt('status_new_project', ''), 'status-warn');
 }
 
@@ -1924,8 +2289,13 @@ async function refreshUiState() {
             document.getElementById('start_btn').disabled = true;
             document.getElementById('stop_btn').disabled = false;
             document.getElementById('revert_btn').disabled = false;
-            setStatus(txt('status_running_detected', ''), 'status-warn');
-            setRunState('running', txt('run_running', ''));
+            if (hasPendingClarify(currentLogBucket())) {
+                setStatus(txt('status_need_clarify', ''), 'status-warn');
+                setRunState('waiting_clarify', txt('run_waiting_clarify', ''));
+            } else {
+                setStatus(txt('status_running_detected', ''), 'status-warn');
+                setRunState('running', txt('run_running', ''));
+            }
         } else {
             syncStoppedStateIfNeeded(txt('sync_reason_backend_stopped', ''));
             setProjectControlsDisabled(false);
@@ -2103,6 +2473,9 @@ function monitorRealtimeChannel() {
 function handleEvent(evt) {
     switch (evt.type) {
         case 'log':
+            if (currentRunState() === 'waiting_clarify' && !hasPendingClarify(currentLogBucket())) {
+                setRunState('running', txt('run_running', ''));
+            }
             appendLog(evt.line);
             updateDiagnosticsFromLog(evt.line);
             break;
@@ -2151,7 +2524,13 @@ function handleEvent(evt) {
 
 function showClarify(questions) {
     const bucket = currentLogBucket();
-    writeBucketUiState(bucket, { clarify_questions: questions || [] });
+    const list = Array.isArray(questions) ? questions : [];
+    writeBucketUiState(bucket, { clarify_questions: list });
+    if (list.length > 0) {
+        setStatus(txt('status_need_clarify', ''), 'status-warn');
+        setRunState('waiting_clarify', txt('run_waiting_clarify', ''));
+        appendLog(txt('log_need_clarify', ''));
+    }
     if (viewLogBucket() === bucket) renderUiForViewBucket();
 }
 
@@ -2356,6 +2735,8 @@ async function submitClarify(e) {
         });
         if (!resp.ok) throw new Error(`clarify error ${resp.status}`);
         writeBucketUiState(currentLogBucket(), { clarify_questions: [] });
+        setRunState('running', txt('run_running', ''));
+        setStatus(txt('status_clarify_submitted_waiting', ''), 'status-warn');
         appendLog(txt('log_submit_clarify', ''));
         if (viewLogBucket() === currentLogBucket()) renderUiForViewBucket();
     } catch (err) {
@@ -2480,7 +2861,8 @@ function bindEvents() {
     document.getElementById('open_global_config_btn').addEventListener('click', openGlobalConfigModal);
     document.getElementById('save_global_config_btn').addEventListener('click', saveGlobalConfig);
     document.getElementById('close_global_config_btn').addEventListener('click', closeGlobalConfigModal);
-    document.getElementById('api_key').addEventListener('focus', revealApiKeyForEdit);
+    document.getElementById('api_key').addEventListener('keydown', prepareMaskedApiKeyForInput);
+    document.getElementById('api_key').addEventListener('paste', prepareMaskedApiKeyForPaste);
     document.getElementById('api_key').addEventListener('blur', reMaskApiKeyIfNeeded);
     document.getElementById('mask_api_key').addEventListener('change', () => {
         updateSharedConfigFromInputs();
@@ -2502,6 +2884,25 @@ function bindEvents() {
     });
     document.getElementById('global_config_modal').addEventListener('click', (e) => {
         if (e.target && e.target.id === 'global_config_modal') closeGlobalConfigModal();
+    });
+    document.getElementById('sidebar_toggle_btn').addEventListener('click', () => {
+        if (isNarrowViewport()) {
+            setSidebarMobileOpen(false);
+        } else {
+            setSidebarCollapsed(!sidebarCollapsed);
+        }
+    });
+    document.getElementById('sidebar_mobile_btn').addEventListener('click', () => {
+        setSidebarMobileOpen(true);
+    });
+    document.getElementById('sidebar_overlay').addEventListener('click', () => {
+        setSidebarMobileOpen(false);
+    });
+    window.addEventListener('resize', () => {
+        if (!isNarrowViewport()) {
+            sidebarMobileOpen = false;
+        }
+        applySidebarLayout();
     });
 }
 
@@ -2617,6 +3018,12 @@ async function exportReleaseReport() {
 async function init() {
     await fetchUiCacheFromServer();
     await initLanguagePack();
+    try {
+        sidebarCollapsed = localStorage.getItem('kacf_sidebar_collapsed') === '1';
+    } catch (_e) {
+        sidebarCollapsed = false;
+    }
+    sidebarMobileOpen = false;
     applyStaticCopyToDom();
     applySharedConfigToInputs();
     await refreshProjectsFromServer();
