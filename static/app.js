@@ -1592,6 +1592,29 @@ function scheduleUnattendedAutoResume() {
     return true;
 }
 
+function resetStopTimerState() {
+    clearManualRunStopTimer();
+    manualRunStopDeadlineMs = 0;
+    manualRunStopExpired = false;
+}
+
+function resetUnattendedRunState() {
+    activeRunUnattendedMode = false;
+    unattendedAutoResumeRemaining = 0;
+    clearUnattendedAutoResumeTimer();
+    resetStopTimerState();
+    renderUnattendedState();
+}
+
+function resetRunSessionUiState() {
+    activeRunLogBucket = '';
+    activeRunProjectLabel = '';
+    runSessionActive = false;
+    setRunningProjectIndicator(txt('running_project_none', ''));
+    setProjectControlsDisabled(false);
+    applyReadOnlyMode();
+}
+
 function setProjectDraftState() {
     const el = document.getElementById('project_dirty_state');
     if (!el) return;
@@ -2313,12 +2336,7 @@ function handleEvent(evt) {
             break;
         case 'done':
             clearStopAckTimer();
-            activeRunLogBucket = '';
-            activeRunProjectLabel = '';
-            runSessionActive = false;
-            setRunningProjectIndicator(txt('running_project_none', ''));
-            setProjectControlsDisabled(false);
-            applyReadOnlyMode();
+            resetRunSessionUiState();
             if (evt.success) {
                 setRunState('success', txt('run_success', ''));
                 setStatus(fmt('status_done_success', '', { message: evt.message }), 'status-ok');
@@ -2326,13 +2344,7 @@ function handleEvent(evt) {
                     completionAlertShown = true;
                     alert(fmt('alert_done_success', '', { message: evt.message }));
                 }
-                activeRunUnattendedMode = false;
-                unattendedAutoResumeRemaining = 0;
-                clearUnattendedAutoResumeTimer();
-                clearManualRunStopTimer();
-                manualRunStopDeadlineMs = 0;
-                manualRunStopExpired = false;
-                renderUnattendedState();
+                resetUnattendedRunState();
             } else if (stopRequested || isInterruptedMessage(evt.message)) {
                 setRunState('interrupted', txt('run_interrupted', ''));
                 setStatus(fmt('status_done_interrupted', '', { message: evt.message }), 'status-warn');
@@ -2340,13 +2352,7 @@ function handleEvent(evt) {
                     completionAlertShown = true;
                     alert(fmt('alert_done_interrupted', '', { message: evt.message }));
                 }
-                activeRunUnattendedMode = false;
-                unattendedAutoResumeRemaining = 0;
-                clearUnattendedAutoResumeTimer();
-                clearManualRunStopTimer();
-                manualRunStopDeadlineMs = 0;
-                manualRunStopExpired = false;
-                renderUnattendedState();
+                resetUnattendedRunState();
             } else {
                 setRunState('failed', txt('run_failed', ''));
                 setStatus(fmt('status_done_failed', '', { message: evt.message }), 'status-danger');
@@ -2357,9 +2363,7 @@ function handleEvent(evt) {
                 }
             }
             if (!runSessionActive && unattendedAutoResumeRemaining <= 0) {
-                clearManualRunStopTimer();
-                manualRunStopDeadlineMs = 0;
-                manualRunStopExpired = false;
+                resetStopTimerState();
                 renderUnattendedState();
             }
             uiCacheLastHeavySyncMs = 0;
@@ -2447,16 +2451,9 @@ async function startSession() {
         document.getElementById('stop_btn').disabled = false;
         document.getElementById('revert_btn').disabled = false;
     } catch (e) {
-        activeRunLogBucket = '';
-        activeRunProjectLabel = '';
-        runSessionActive = false;
-        setRunningProjectIndicator(txt('running_project_none', ''));
-        setProjectControlsDisabled(false);
-        clearManualRunStopTimer();
-        manualRunStopDeadlineMs = 0;
-        manualRunStopExpired = false;
+        resetRunSessionUiState();
+        resetStopTimerState();
         renderUnattendedState();
-        applyReadOnlyMode();
         setStatus(`${txt('status_start_failed_prefix', '')}${e}`, 'status-danger');
     }
 }
@@ -2509,6 +2506,7 @@ async function resumeSession(opts) {
         setRunningProjectIndicator(activeRunProjectLabel);
         setProjectControlsDisabled(true);
         runSessionActive = true;
+        clearUnattendedAutoResumeTimer();
         if (!isAuto) {
             activeRunUnattendedMode = !!body.unattended_mode;
             unattendedAutoResumeRemaining = autoResumeAttemptsSetting();
@@ -2529,12 +2527,7 @@ async function resumeSession(opts) {
         document.getElementById('start_btn').disabled = true;
         document.getElementById('stop_btn').disabled = false;
     } catch (e) {
-        activeRunLogBucket = '';
-        activeRunProjectLabel = '';
-        runSessionActive = false;
-        setRunningProjectIndicator(txt('running_project_none', ''));
-        setProjectControlsDisabled(false);
-        applyReadOnlyMode();
+        resetRunSessionUiState();
         setStatus(`${txt('status_resume_failed_prefix', '')}${e}`, 'status-danger');
         if (isAuto) {
             scheduleUnattendedAutoResume();
