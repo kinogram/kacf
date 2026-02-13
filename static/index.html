@@ -250,6 +250,77 @@
             margin-top: 8px;
             background: #fbfdff;
         }
+        .project-tools {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 8px;
+            margin-top: 8px;
+            margin-bottom: 8px;
+            align-items: center;
+        }
+        .project-summary {
+            font-size: 12px;
+            color: var(--subtle);
+        }
+        .project-card {
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 10px;
+            margin-top: 8px;
+            background: #fbfdff;
+        }
+        .project-card.active {
+            border-color: #2f6feb;
+            box-shadow: 0 0 0 1px rgba(47,111,235,0.25);
+            background: #f6f9ff;
+        }
+        .project-card.running {
+            border-color: #e9b949;
+            box-shadow: 0 0 0 1px rgba(233,185,73,0.25);
+        }
+        .project-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            align-items: center;
+        }
+        .project-title {
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .project-tags {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+        .tag {
+            font-size: 11px;
+            line-height: 1.2;
+            border-radius: 999px;
+            padding: 2px 7px;
+            background: #e9eef9;
+            color: #38507a;
+            border: 1px solid #d5def1;
+        }
+        .tag.active {
+            background: #dbeafe;
+            border-color: #93c5fd;
+            color: #1d4ed8;
+        }
+        .tag.running {
+            background: #fff6e0;
+            border-color: #f6d487;
+            color: #9a6b00;
+        }
+        .project-goal {
+            margin-top: 6px;
+            color: #42526b;
+            font-size: 12px;
+            line-height: 1.5;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
         .project-list summary {
             cursor: pointer;
             font-weight: 700;
@@ -298,8 +369,13 @@
                 <button class="btn-ghost" id="project_load_btn">载入当前项目</button>
                 <button class="btn-ghost" id="project_delete_btn">删除当前项目</button>
             </div>
+            <div class="hint" id="project_dirty_state"></div>
             <input id="workspace" type="hidden" value="">
             <select id="project_selector" style="display:none;"></select>
+            <div class="project-tools">
+                <input id="project_search" type="text" placeholder="">
+                <div class="project-summary" id="project_summary_text"></div>
+            </div>
             <div id="project_accordion" class="project-list"></div>
 
             <div class="row two">
@@ -502,6 +578,8 @@ let projectNameManualOverride = false;
 let lastAutoProjectName = '';
 let availableLanguages = [];
 let currentLanguage = '';
+let projectSearchKeyword = '';
+let projectDraftDirty = false;
 let sharedConfig = {
     api_key: '',
     base_url: 'https://api.deepseek.com',
@@ -614,6 +692,15 @@ async function initLanguagePack() {
 
 function txt(key, fallback) {
     return COPY[key] || fallback || key;
+}
+
+function fmt(key, fallback, vars) {
+    let out = txt(key, fallback);
+    const map = vars || {};
+    Object.keys(map).forEach(k => {
+        out = out.replaceAll(`{${k}}`, String(map[k]));
+    });
+    return out;
 }
 
 function inferProjectNameFromGoal(goal) {
@@ -784,6 +871,7 @@ function setRunningProjectIndicator(label) {
     const el = document.getElementById('running_project_text');
     if (!el) return;
     el.textContent = `当前运行项目：${label || txt('running_project_none', '无')}`;
+    renderProjectAccordion();
 }
 
 function setProjectControlsDisabled(disabled) {
@@ -1235,6 +1323,14 @@ function applyStaticCopyToDom() {
         const el = document.getElementById(id);
         if (el) el.textContent = txt(key, el.textContent);
     });
+    const search = document.getElementById('project_search');
+    if (search) search.placeholder = txt('project_search_placeholder', search.placeholder);
+    const summary = document.getElementById('project_summary_text');
+    if (summary) {
+        summary.textContent = fmt('project_summary_total', '项目数：{total}', { total: loadProjects().length });
+    }
+    setProjectDraftState();
+    renderProjectAccordion();
 }
 
 function openGlobalConfigModal() {
@@ -1260,6 +1356,33 @@ function setAutoSaveState(text) {
     document.getElementById('auto_save_state').textContent = text;
 }
 
+function setProjectDraftState() {
+    const el = document.getElementById('project_dirty_state');
+    if (!el) return;
+    el.textContent = projectDraftDirty
+        ? txt('project_draft_dirty', '项目草稿：有未保存修改')
+        : txt('project_draft_clean', '项目草稿：未修改');
+    el.style.color = projectDraftDirty ? '#9a6700' : '';
+}
+
+function markProjectDirty() {
+    if (projectDraftDirty) return;
+    projectDraftDirty = true;
+    setProjectDraftState();
+}
+
+function markProjectClean() {
+    projectDraftDirty = false;
+    setProjectDraftState();
+}
+
+function shouldProceedWithDirtyDraft(actionText) {
+    if (!projectDraftDirty) return true;
+    return window.confirm(
+        fmt('confirm_dirty_continue', '当前项目有未保存修改，确定继续{action}吗？', { action: actionText })
+    );
+}
+
 function loadProjects() {
     return Array.isArray(cachedProjects) ? cachedProjects : [];
 }
@@ -1282,21 +1405,54 @@ function ensureWorkspaceForCurrentProject() {
 function renderProjectAccordion() {
     const container = document.getElementById('project_accordion');
     if (!container) return;
-    const items = loadProjects();
+    const all = loadProjects()
+        .slice()
+        .sort((a, b) => Number(b?.updated_at || 0) - Number(a?.updated_at || 0));
+    const key = (projectSearchKeyword || '').trim().toLowerCase();
+    const items = key
+        ? all.filter(p => {
+            const name = (p?.name || '').toLowerCase();
+            const ws = (p?.workspace || '').toLowerCase();
+            const goal = (p?.goal || '').toLowerCase();
+            return name.includes(key) || ws.includes(key) || goal.includes(key);
+        })
+        : all;
     const selectedId = document.getElementById('project_selector')?.value || '';
-    if (!items.length) {
-        container.innerHTML = '<div class="hint">暂无项目，先输入项目名称后点击“保存当前项目”。</div>';
+    const summary = document.getElementById('project_summary_text');
+    if (summary) {
+        summary.textContent = key
+            ? fmt('project_summary_filtered', '项目数：{shown}/{total}', { shown: items.length, total: all.length })
+            : fmt('project_summary_total', '项目数：{total}', { total: all.length });
+    }
+    if (!all.length) {
+        container.innerHTML = `<div class="hint">${escapeHtml(txt('project_list_empty', '暂无项目，先输入项目名称后点击“保存当前项目”。'))}</div>`;
         return;
     }
+    if (!items.length) {
+        container.innerHTML = `<div class="hint">${escapeHtml(txt('project_list_no_match', '没有匹配的项目，换个关键词试试。'))}</div>`;
+        return;
+    }
+    const runningId = (runSessionActive && activeRunLogBucket.startsWith('project:'))
+        ? activeRunLogBucket.slice('project:'.length)
+        : '';
     container.innerHTML = items
         .map(p => {
             const active = p.id === selectedId;
+            const running = runningId && p.id === runningId;
             const dt = p.updated_at ? new Date(p.updated_at * 1000).toLocaleString() : '-';
             const snap = p.snapshot || {};
             const leaf = workspaceLeaf(p.workspace || '-');
+            const goalText = (p.goal || '').trim() || '-';
             return `
-<details ${active ? 'open' : ''}>
-  <summary>${active ? '● ' : ''}${escapeHtml(p.name || '未命名项目')} <span style="color:#5c6f8f">[${escapeHtml(leaf)}]</span></summary>
+<div class="project-card ${active ? 'active' : ''} ${running ? 'running' : ''}">
+  <div class="project-head">
+    <div class="project-title" onclick="selectProject('${p.id}', true)">${escapeHtml(p.name || '未命名项目')} <span style="color:#5c6f8f">[${escapeHtml(leaf)}]</span></div>
+    <div class="project-tags">
+      ${active ? `<span class="tag active">${escapeHtml(txt('tag_current', '当前'))}</span>` : ''}
+      ${running ? `<span class="tag running">${escapeHtml(txt('tag_running', '运行中'))}</span>` : ''}
+    </div>
+  </div>
+  <div class="project-goal" title="${escapeHtml(goalText)}">${escapeHtml(txt('project_goal_prefix', '目标：'))}${escapeHtml(goalText)}</div>
   <div class="meta">
     workspace: ${escapeHtml(p.workspace || '-')}<br>
     更新: ${escapeHtml(dt)}<br>
@@ -1304,20 +1460,21 @@ function renderProjectAccordion() {
     回滚: ${escapeHtml(snap.auto_revert_profile || '-')}
   </div>
   <div class="buttons">
-    <button class="btn-ghost" onclick="selectProject('${p.id}')">切换到此项目</button>
+    <button class="btn-ghost" onclick="selectProject('${p.id}', true)">${escapeHtml(txt('btn_project_open_card', '打开此项目'))}</button>
     <button class="btn-ghost" onclick="deleteProjectById('${p.id}')">删除此项目</button>
   </div>
-</details>`;
+</div>`;
         })
         .join('');
 }
 
-function selectProject(id) {
+function selectProject(id, autoLoad) {
     const sel = document.getElementById('project_selector');
     if (!sel) return;
+    if (autoLoad && !shouldProceedWithDirtyDraft(txt('action_open_project', '并打开该项目'))) return;
     sel.value = id;
     syncProjectNameFromSelection();
-    loadSelectedProject();
+    if (autoLoad) loadSelectedProject(true);
 }
 
 function deleteProjectById(id) {
@@ -1488,10 +1645,13 @@ async function saveCurrentProject() {
             .replace('{name}', project.name)
             .replace('{suffix}', serverOk ? '' : txt('log_fallback_suffix_unsynced', '（后端未同步）'))
     );
+    markProjectClean();
     return true;
 }
 
-function loadSelectedProject() {
+function loadSelectedProject(skipDirtyCheck) {
+    const bypass = skipDirtyCheck === true;
+    if (!bypass && !shouldProceedWithDirtyDraft(txt('action_load_project', '并载入选中项目'))) return;
     updateSharedConfigFromInputs();
     const sel = document.getElementById('project_selector');
     const items = loadProjects();
@@ -1513,6 +1673,7 @@ function loadSelectedProject() {
     lastAutoProjectName = '';
     ensureWorkspaceForCurrentProject();
     scheduleDraftSave();
+    markProjectClean();
     setStatus(`已载入项目：${found.name || '未命名'}`, 'status-warn');
     appendLog(txt('log_project_loaded', '[UI] 已载入项目：{name}').replace('{name}', (found.name || '未命名')));
     renderCurrentLogView();
@@ -1521,6 +1682,7 @@ function loadSelectedProject() {
 }
 
 async function deleteSelectedProject() {
+    if (!shouldProceedWithDirtyDraft(txt('action_delete_project', '并删除项目'))) return;
     const sel = document.getElementById('project_selector');
     const items = loadProjects();
     const found = items.find(x => x.id === sel.value);
@@ -1528,6 +1690,14 @@ async function deleteSelectedProject() {
         setStatus(txt('status_need_delete_project', '请先选择要删除的项目。'), 'status-danger');
         return;
     }
+    const confirmed = window.confirm(
+        fmt(
+            'confirm_delete_project',
+            '确定删除项目「{name}」吗？此操作不会删除磁盘目录。',
+            { name: found.name || txt('project_unnamed', '未命名') }
+        )
+    );
+    if (!confirmed) return;
     const next = items.filter(x => x.id !== found.id);
     saveProjects(next);
     const serverOk = await deleteProjectOnServer(found.id);
@@ -1538,6 +1708,7 @@ async function deleteSelectedProject() {
     document.getElementById('project_name').value = '';
     projectNameManualOverride = false;
     lastAutoProjectName = '';
+    markProjectClean();
     const logs = loadProjectLogs();
     delete logs[`project:${found.id}`];
     saveProjectLogs(logs);
@@ -1554,6 +1725,7 @@ async function deleteSelectedProject() {
 }
 
 function createNewProject() {
+    if (!shouldProceedWithDirtyDraft(txt('action_new_draft', '并新建草稿'))) return;
     const cur = getFormData();
     const defaults = defaultFormData();
     defaults.api_key = cur.api_key;
@@ -1571,6 +1743,7 @@ function createNewProject() {
     renderCurrentLogView();
     renderUiForViewBucket();
     applyReadOnlyMode();
+    markProjectClean();
     setStatus(txt('status_new_project_draft', '已切换到新项目草稿，请填写需求后保存项目。'), 'status-warn');
 }
 
@@ -2140,6 +2313,7 @@ function applyPreset(kind) {
         evalCmd.value = 'bash scripts/run_tests.sh';
     }
     autoFillProjectNameFromGoal(false);
+    markProjectDirty();
     scheduleDraftSave();
 }
 
@@ -2148,6 +2322,7 @@ function resetForm() {
     projectNameManualOverride = false;
     lastAutoProjectName = '';
     autoFillProjectNameFromGoal(true);
+    markProjectDirty();
     scheduleDraftSave();
 }
 
@@ -2156,8 +2331,8 @@ function bindAutoSave() {
     ids.forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
-        el.addEventListener('input', scheduleDraftSave);
-        el.addEventListener('change', scheduleDraftSave);
+        el.addEventListener('input', () => { markProjectDirty(); scheduleDraftSave(); });
+        el.addEventListener('change', () => { markProjectDirty(); scheduleDraftSave(); });
     });
     const goal = document.getElementById('goal');
     if (goal) {
@@ -2198,7 +2373,12 @@ function bindEvents() {
     document.getElementById('project_load_btn').addEventListener('click', loadSelectedProject);
     document.getElementById('project_delete_btn').addEventListener('click', () => { deleteSelectedProject(); });
     document.getElementById('project_selector').addEventListener('change', syncProjectNameFromSelection);
+    document.getElementById('project_search').addEventListener('input', () => {
+        projectSearchKeyword = document.getElementById('project_search').value || '';
+        renderProjectAccordion();
+    });
     document.getElementById('project_name').addEventListener('input', () => {
+        markProjectDirty();
         const value = document.getElementById('project_name').value.trim();
         if (!value) {
             projectNameManualOverride = false;
@@ -2337,6 +2517,7 @@ async function init() {
     renderProjectSelector('');
     bindEvents();
     bindAutoSave();
+    setProjectDraftState();
     setRunningProjectIndicator(txt('running_project_none', '无'));
     setProjectControlsDisabled(false);
     applyReadOnlyMode();
@@ -2346,6 +2527,7 @@ async function init() {
     setRunState('idle', txt('run_idle', '空闲'));
     await loadDraft();
     autoFillProjectNameFromGoal(false);
+    markProjectClean();
     applySharedConfigToInputs();
     selectProjectByCurrentForm();
     renderCurrentLogView();
