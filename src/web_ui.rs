@@ -1122,7 +1122,7 @@ pub async fn run_web_server(
 ) -> std::io::Result<()> {
     fs::create_dir_all(managed_root_path())?;
     fs::create_dir_all(managed_workspaces_path())?;
-    let _validated_languages = load_language_packs_checked().map_err(|e| {
+    load_language_packs_checked().map_err(|e| {
         eprintln!("[KACF] ERROR: {}", e);
         std::io::Error::new(std::io::ErrorKind::InvalidData, e)
     })?;

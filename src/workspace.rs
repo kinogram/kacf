@@ -11,6 +11,7 @@ pub fn ensure_dir(dir: &Path) -> Result<()> {
 /// Write a file within the workspace safely. Prevents directory traversal by
 /// rejecting paths containing `..` or absolute prefixes. Creates any
 /// necessary parent directories. The file contents are overwritten.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn write_file_safely(workspace: &Path, rel_path: &str, content: &str) -> Result<()> {
     if rel_path.trim().is_empty() {
         return Err(anyhow!("Empty path"));

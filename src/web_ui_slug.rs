@@ -6,11 +6,10 @@ pub(crate) fn normalize_slug(raw: &str) -> String {
         if c.is_ascii_alphanumeric() {
             out.push(c);
             prev_dash = false;
-        } else if matches!(c, '-' | '_' | ' ' | '\t' | '\n' | '\r') {
-            if !prev_dash && !out.is_empty() {
-                out.push('-');
-                prev_dash = true;
-            }
+        } else if matches!(c, '-' | '_' | ' ' | '\t' | '\n' | '\r') && !prev_dash && !out.is_empty()
+        {
+            out.push('-');
+            prev_dash = true;
         }
     }
     while out.ends_with('-') {

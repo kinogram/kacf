@@ -10,7 +10,7 @@ pub(crate) fn system_prompt(language: &str, unattended_mode: bool) -> String {
             // Keep this short and explicit for non-zh/en language tags.
             // The model should still return valid JSON while adapting natural-language fields.
             let mut text = format!(
-                "{}\n{}",
+                "{}\n10) Output language constraint: all user-facing text fields (e.g. summary, clarify.question, done message) must follow language tag `{}`; keep code/commands/paths unchanged.",
                 r#"你是一个“自编程代理”。你必须严格遵守：
 1) 你每次回复只能输出一个 JSON 对象，禁止输出 Markdown、解释、代码块围栏、自然语言。
 2) 允许输出的 JSON 只能有两种形式：
@@ -38,10 +38,7 @@ pub(crate) fn system_prompt(language: &str, unattended_mode: bool) -> String {
 8) 当你收到“评测失败”反馈时，你必须优先分析失败根因，并针对关键错误行修复。禁止无关重构，禁止一次性改太多文件。
 9) 如果同类错误连续出现，你必须优先修复测试脚本/构建脚本与入口参数的不一致问题，并在 patch 中显式更新对应脚本，防止同类错误再次出现。
 "#,
-                format!(
-                    "10) Output language constraint: all user-facing text fields (e.g. summary, clarify.question, done message) must follow language tag `{}`; keep code/commands/paths unchanged.",
-                    other
-                )
+                other
             );
             if unattended_mode {
                 text.push_str("\n11) Unattended mode is ON: do not output `kind=clarify` at all. Always proceed with reasonable defaults and keep self-iterating with `kind=patch` until convergence.");
