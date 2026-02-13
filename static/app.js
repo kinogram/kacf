@@ -2049,6 +2049,7 @@ async function refreshUiState() {
                 activeRunLogBucket = `runtime:${label}`;
             }
             runSessionActive = true;
+            unattendedAutoResumeRemaining = autoResumeAttemptsSetting();
             setRunningProjectIndicator(label);
             setProjectControlsDisabled(true);
             applyReadOnlyMode();
@@ -2115,6 +2116,20 @@ async function refreshMetrics() {
         chip.textContent = fmt('readiness_line', '', { level: level.toUpperCase() });
     } catch (_e) {
         markBackendFailure('metrics');
+    }
+}
+
+async function bootstrapEventCursor() {
+    try {
+        const resp = await fetch('/metrics');
+        if (!resp.ok) return;
+        const m = await resp.json();
+        const nextId = Number(m?.next_event_id || 0);
+        if (Number.isFinite(nextId) && nextId > 0) {
+            lastEventId = Math.max(lastEventId, nextId);
+        }
+    } catch (_e) {
+        // Keep default cursor when backend metrics is temporarily unavailable.
     }
 }
 
@@ -2895,6 +2910,9 @@ async function init() {
     await loadProjectConfigForWorkspace();
     await refreshUiState();
     await refreshMetrics();
+    await bootstrapEventCursor();
+    renderUnattendedState();
+    renderUiForViewBucket();
     setInterval(refreshUiState, UI_STATE_SYNC_MS);
     setInterval(refreshMetrics, 5000);
     setInterval(renderUnattendedState, 1000);
