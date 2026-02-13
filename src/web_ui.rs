@@ -83,7 +83,6 @@ pub struct AppState {
     projects_lock: Arc<Mutex<()>>,
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StartPayload {
     api_key: String,

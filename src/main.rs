@@ -9,6 +9,7 @@ mod protocol_repair_prompt;
 mod protocol_session_state;
 mod protocol_stream;
 mod protocol_system_prompt;
+mod protocol_wait;
 mod runner;
 mod web_ui;
 mod web_ui_analytics;

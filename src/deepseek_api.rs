@@ -68,15 +68,8 @@ pub async fn chat_complete_streaming(
     on_delta: &mut dyn FnMut(&str),
 ) -> Result<String> {
     let mut sink = |_delta: &str| {};
-    chat_complete_streaming_with_reasoning(
-        base_url,
-        api_key,
-        model,
-        messages,
-        on_delta,
-        &mut sink,
-    )
-    .await
+    chat_complete_streaming_with_reasoning(base_url, api_key, model, messages, on_delta, &mut sink)
+        .await
 }
 
 pub async fn chat_complete_streaming_with_reasoning(

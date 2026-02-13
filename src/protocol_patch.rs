@@ -14,7 +14,11 @@ pub(crate) fn validate_patch_payload(summary: &str, diff: &str) -> Result<()> {
     if !diff.contains("diff --git ") {
         return Err(anyhow!("diff 缺少 `diff --git` 头"));
     }
-    if !diff.contains("\n@@ ") && !diff.contains("\n@@\t") && !diff.contains("\n@@\n") && !diff.contains("\n@@") {
+    if !diff.contains("\n@@ ")
+        && !diff.contains("\n@@\t")
+        && !diff.contains("\n@@\n")
+        && !diff.contains("\n@@")
+    {
         return Err(anyhow!("diff 缺少 hunk（@@）"));
     }
     let paths = extract_paths_from_unified_diff(diff)?;

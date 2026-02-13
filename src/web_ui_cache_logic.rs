@@ -91,7 +91,10 @@ mod tests {
     fn patch_sanitizes_project_logs() {
         let mut payload = UiCachePayload::default();
         let mut logs = BTreeMap::new();
-        logs.insert("project:a".to_string(), format!("{}\n", "x".repeat(140_000)));
+        logs.insert(
+            "project:a".to_string(),
+            format!("{}\n", "x".repeat(140_000)),
+        );
         apply_ui_cache_patch(
             &mut payload,
             UiCachePatch {
@@ -103,7 +106,11 @@ mod tests {
                 ..UiCachePatch::default()
             },
         );
-        let out = payload.project_logs.get("project:a").cloned().unwrap_or_default();
+        let out = payload
+            .project_logs
+            .get("project:a")
+            .cloned()
+            .unwrap_or_default();
         assert!(out.chars().count() <= 50_001);
     }
 

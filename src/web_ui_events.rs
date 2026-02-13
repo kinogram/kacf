@@ -84,7 +84,8 @@ pub(crate) fn spawn_event_collector(
                                 600,
                             );
                         }
-                        if let Some(ms) = web_ui_analytics::parse_perf_ms(line, "[Perf] deepseek_api=")
+                        if let Some(ms) =
+                            web_ui_analytics::parse_perf_ms(line, "[Perf] deepseek_api=")
                         {
                             web_ui_analytics::push_sample(&mut runtime.api_ms_samples, ms, 400);
                         }
@@ -170,7 +171,10 @@ fn serializable_event_size(evt: &SerializableEvent) -> usize {
         SerializableEvent::NeedClarify { questions } => questions
             .iter()
             .map(|q| {
-                q.id.len() + q.question.len() + q.qtype.len() + q.options.iter().map(|x| x.len()).sum::<usize>()
+                q.id.len()
+                    + q.question.len()
+                    + q.qtype.len()
+                    + q.options.iter().map(|x| x.len()).sum::<usize>()
             })
             .sum(),
     }

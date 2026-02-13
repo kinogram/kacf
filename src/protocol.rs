@@ -1,4 +1,3 @@
-use anyhow::Error;
 use anyhow::{Context, Result};
 use crossbeam_channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
@@ -8,6 +7,7 @@ use crate::protocol_auto_revert;
 use crate::protocol_repair_prompt;
 use crate::protocol_stream;
 use crate::protocol_system_prompt;
+use crate::protocol_wait::{self, ClarifyWaitOutcome};
 use crate::{deepseek_api, git_utils, runner, workspace};
 use crate::{protocol_failure, protocol_patch};
 use crate::{protocol_history, protocol_session_state};
@@ -93,10 +93,7 @@ enum ModelJson {
     #[serde(rename = "clarify")]
     Clarify { questions: Vec<ClarifyQuestion> },
     #[serde(rename = "patch")]
-    Patch {
-        summary: String,
-        diff: String,
-    },
+    Patch { summary: String, diff: String },
 }
 
 /// Run the agent loop. This function listens for requests from the UI and
@@ -149,7 +146,9 @@ pub async fn agent_loop(rx_req: Receiver<AgentRequest>, tx_evt: Sender<AgentEven
                     &rx_req,
                     &tx_evt,
                     &mut stop_flag,
-                ).await {
+                )
+                .await
+                {
                     let _ = tx_evt.send(AgentEvent::Done {
                         success: false,
                         message: format!("Session error: {:#}", e),
@@ -163,11 +162,7 @@ pub async fn agent_loop(rx_req: Receiver<AgentRequest>, tx_evt: Sender<AgentEven
             Ok(AgentRequest::RevertLast) => {
                 // Attempt to revert the last commit via git.
                 if let Some(ref cfg) = cfg {
-                    if let Err(e) = git_utils::revert_last_commit(&cfg.workspace) {
-                        let _ = tx_evt.send(AgentEvent::Log(format!("[Agent] 回滚失败: {e}")));
-                    } else {
-                        let _ = tx_evt.send(AgentEvent::Log("[Agent] 已回滚上一次提交".into()));
-                    }
+                    protocol_wait::handle_revert_request(&cfg.workspace, &tx_evt);
                 }
             }
             Ok(AgentRequest::Stop) => {
@@ -187,23 +182,13 @@ pub async fn agent_loop(rx_req: Receiver<AgentRequest>, tx_evt: Sender<AgentEven
             }) => {
                 // When receiving a push request, attempt to add/update the remote and push the branch.
                 if let Some(ref cfg) = cfg {
-                    let res: Result<(), Error> = (|| {
-                        git_utils::add_remote(&cfg.workspace, &remote, &url)?;
-                        git_utils::push(&cfg.workspace, &remote, &branch)?;
-                        Ok(())
-                    })();
-                    match res {
-                        Ok(_) => {
-                            let _ = tx_evt.send(AgentEvent::Log(format!(
-                                "[Agent] 已推送到远程 {} 的 {} 分支",
-                                remote, branch
-                            )));
-                        }
-                        Err(e) => {
-                            let _ = tx_evt
-                                .send(AgentEvent::Log(format!("[Agent] 推送远程失败: {:#}", e)));
-                        }
-                    }
+                    protocol_wait::handle_push_remote_request(
+                        &cfg.workspace,
+                        &tx_evt,
+                        &remote,
+                        &url,
+                        &branch,
+                    );
                 }
             }
             Err(_) => break,
@@ -372,8 +357,8 @@ async fn run_session(
             &messages,
             tx_evt,
         )
-            .await
-            .context("deepseek chat_complete")?;
+        .await
+        .context("deepseek chat_complete")?;
         let api_ms = api_start.elapsed().as_millis();
         let _ = tx_evt.send(AgentEvent::Log(format!("[Perf] deepseek_api={}ms", api_ms)));
         let raw = resp.trim().to_string();
@@ -439,53 +424,17 @@ async fn run_session(
                 }
                 // Ask the UI for clarification answers.
                 let _ = tx_evt.send(AgentEvent::NeedClarify { questions });
-                // Wait until we receive Clarify or Stop from UI.
-                loop {
-                    if *stop_flag {
-                        return Ok(());
+                match protocol_wait::wait_for_clarify_answers(
+                    rx_req,
+                    tx_evt,
+                    &cfg.workspace,
+                    stop_flag,
+                ) {
+                    ClarifyWaitOutcome::Answers(answers) => {
+                        *clarify_answers = answers;
                     }
-                    match rx_req.recv() {
-                        Ok(AgentRequest::Clarify { answers }) => {
-                            *clarify_answers = answers;
-                            break;
-                        }
-                        Ok(AgentRequest::RevertLast) => {
-                            // Handle revert request during clarification stage.
-                            git_utils::revert_last_commit(&cfg.workspace).ok();
-                            let _ = tx_evt.send(AgentEvent::Log("[Agent] 已回滚上一次提交".into()));
-                        }
-                        Ok(AgentRequest::PushRemote {
-                            remote,
-                            url,
-                            branch,
-                        }) => {
-                            // Handle push remote during clarification stage. Attempt to add/update the
-                            // remote and push the branch. Log any errors.
-                            let res: Result<(), anyhow::Error> = (|| {
-                                git_utils::add_remote(&cfg.workspace, &remote, &url)?;
-                                git_utils::push(&cfg.workspace, &remote, &branch)?;
-                                Ok(())
-                            })();
-                            match res {
-                                Ok(_) => {
-                                    let _ = tx_evt.send(AgentEvent::Log(format!(
-                                        "[Agent] 已推送到远程 {} 的 {} 分支",
-                                        remote, branch
-                                    )));
-                                }
-                                Err(e) => {
-                                    let _ = tx_evt.send(AgentEvent::Log(format!(
-                                        "[Agent] 推送远程失败: {:#}",
-                                        e
-                                    )));
-                                }
-                            }
-                        }
-                        Ok(AgentRequest::Stop) => {
-                            *stop_flag = true;
-                            return Ok(());
-                        }
-                        _ => {}
+                    ClarifyWaitOutcome::Stopped => {
+                        return Ok(());
                     }
                 }
                 // Send answers back to model and ask for a patch.
@@ -505,8 +454,8 @@ async fn run_session(
                 // 记录 patch 输出方便之后放入对话历史
                 let patch_content = content.clone();
                 let diff = protocol_patch::sanitize_unified_diff(&diff);
-                let patch_paths = protocol_patch::extract_paths_from_unified_diff(&diff)
-                    .unwrap_or_default();
+                let patch_paths =
+                    protocol_patch::extract_paths_from_unified_diff(&diff).unwrap_or_default();
                 let patch_history =
                     protocol_history::compact_patch_history(&summary, &patch_paths, &patch_content);
                 repair.total_patches += 1;
@@ -692,108 +641,57 @@ async fn run_session(
                     let _ = tx_evt.send(AgentEvent::NeedClarify {
                         questions: vec![feedback_question],
                     });
-                    // 等待用户反馈
-                    loop {
-                        if *stop_flag {
-                            return Ok(());
-                        }
-                        match rx_req.recv() {
-                            Ok(AgentRequest::Clarify { answers }) => {
-                                // 提取反馈文本（text 字段优先，其次 single，或空）
-                                let mut feedback = String::new();
-                                for ans in &answers {
-                                    if ans.id == "feedback" {
-                                        if !ans.text.is_empty() {
-                                            feedback = ans.text.clone();
-                                        } else if !ans.single.is_empty() {
-                                            feedback = ans.single.clone();
-                                        } else if !ans.multi.is_empty() {
-                                            feedback = ans.multi.join(", ");
-                                        }
-                                        break;
-                                    }
-                                }
-                                let trimmed = feedback.trim();
-                                // 如果用户表示满意（空或含满意字样），结束会话；否则作为改进建议继续迭代。
-                                if trimmed.is_empty() || trimmed.contains("满意") {
-                                    // 保存当前会话状态并结束。将来如果重新启动，用户需重新设定目标。
-                                    protocol_session_state::save_session_state(
-                                        &cfg.workspace,
-                                        &build_session_state(
-                                            cfg,
-                                            &messages,
-                                            iter,
-                                            "done_user_satisfied",
-                                        ),
-                                    );
-                                    let _ = tx_evt.send(AgentEvent::Done {
-                                        success: true,
-                                        message: "用户满意，项目完成".into(),
-                                    });
-                                    return Ok(());
-                                } else {
-                                    // 将用户反馈添加到对话历史，要求模型根据反馈改进代码。
-                                    messages.push(deepseek_api::ChatMessage::assistant(
-                                        patch_history.clone(),
-                                    ));
-                                    messages.push(deepseek_api::ChatMessage::user(format!(
-                                        "用户反馈：{}。请根据反馈改进代码，生成新的 patch JSON（严格按照协议输出 JSON）。",
-                                        trimmed
-                                    )));
-                                    // 保存状态以便断点续跑
-                                    protocol_session_state::save_session_state(
-                                        &cfg.workspace,
-                                        &build_session_state(
-                                            cfg,
-                                            &messages,
-                                            iter,
-                                            "feedback_requires_improvement",
-                                        ),
-                                    );
-                                    // 跳出等待，进入下一轮迭代
-                                    continue 'outer;
-                                }
-                            }
-                            Ok(AgentRequest::RevertLast) => {
-                                // 用户要求回滚：回滚最后提交并继续等待反馈
-                                let _ = git_utils::revert_last_commit(&cfg.workspace);
-                                let _ =
-                                    tx_evt.send(AgentEvent::Log("[Agent] 已回滚上一次提交".into()));
-                            }
-                            Ok(AgentRequest::Stop) => {
-                                *stop_flag = true;
-                                return Ok(());
-                            }
-                            Ok(AgentRequest::PushRemote {
-                                remote,
-                                url,
-                                branch,
-                            }) => {
-                                // Handle push remote during feedback stage. Attempt to push and log.
-                                let res: Result<(), anyhow::Error> = (|| {
-                                    git_utils::add_remote(&cfg.workspace, &remote, &url)?;
-                                    git_utils::push(&cfg.workspace, &remote, &branch)?;
-                                    Ok(())
-                                })(
+                    match protocol_wait::wait_for_clarify_answers(
+                        rx_req,
+                        tx_evt,
+                        &cfg.workspace,
+                        stop_flag,
+                    ) {
+                        ClarifyWaitOutcome::Answers(answers) => {
+                            let feedback = extract_feedback_text(&answers);
+                            let trimmed = feedback.trim();
+                            // 如果用户表示满意（空或含满意字样），结束会话；否则作为改进建议继续迭代。
+                            if trimmed.is_empty() || trimmed.contains("满意") {
+                                // 保存当前会话状态并结束。将来如果重新启动，用户需重新设定目标。
+                                protocol_session_state::save_session_state(
+                                    &cfg.workspace,
+                                    &build_session_state(
+                                        cfg,
+                                        &messages,
+                                        iter,
+                                        "done_user_satisfied",
+                                    ),
                                 );
-                                match res {
-                                    Ok(_) => {
-                                        let _ = tx_evt.send(AgentEvent::Log(format!(
-                                            "[Agent] 已推送到远程 {} 的 {} 分支",
-                                            remote, branch
-                                        )));
-                                    }
-                                    Err(e) => {
-                                        let _ = tx_evt.send(AgentEvent::Log(format!(
-                                            "[Agent] 推送远程失败: {:#}",
-                                            e
-                                        )));
-                                    }
-                                }
+                                let _ = tx_evt.send(AgentEvent::Done {
+                                    success: true,
+                                    message: "用户满意，项目完成".into(),
+                                });
+                                return Ok(());
+                            } else {
+                                // 将用户反馈添加到对话历史，要求模型根据反馈改进代码。
+                                messages.push(deepseek_api::ChatMessage::assistant(
+                                    patch_history.clone(),
+                                ));
+                                messages.push(deepseek_api::ChatMessage::user(format!(
+                                    "用户反馈：{}。请根据反馈改进代码，生成新的 patch JSON（严格按照协议输出 JSON）。",
+                                    trimmed
+                                )));
+                                // 保存状态以便断点续跑
+                                protocol_session_state::save_session_state(
+                                    &cfg.workspace,
+                                    &build_session_state(
+                                        cfg,
+                                        &messages,
+                                        iter,
+                                        "feedback_requires_improvement",
+                                    ),
+                                );
+                                // 跳出等待，进入下一轮迭代
+                                continue 'outer;
                             }
-                            Err(_) | Ok(AgentRequest::Start { .. }) => {
-                                // 忽略其他消息
-                            }
+                        }
+                        ClarifyWaitOutcome::Stopped => {
+                            return Ok(());
                         }
                     }
                 } else {
@@ -833,7 +731,7 @@ async fn run_session(
                         ),
                     ));
                     if should_auto_revert(&repair, &digest, previous_severity, iter) {
-                        let _ = git_utils::revert_last_commit(&cfg.workspace);
+                        protocol_wait::handle_revert_request(&cfg.workspace, tx_evt);
                         let _ = tx_evt.send(AgentEvent::Log(
                             "[Agent] 检测到连续重复错误，已自动回滚最近一次提交并要求小步修复"
                                 .into(),
@@ -892,6 +790,24 @@ fn to_answer_map(answers: &[ClarifyAnswer]) -> serde_json::Value {
         m.insert(a.id.clone(), v);
     }
     serde_json::Value::Object(m)
+}
+
+fn extract_feedback_text(answers: &[ClarifyAnswer]) -> String {
+    for ans in answers {
+        if ans.id == "feedback" {
+            if !ans.text.is_empty() {
+                return ans.text.clone();
+            }
+            if !ans.single.is_empty() {
+                return ans.single.clone();
+            }
+            if !ans.multi.is_empty() {
+                return ans.multi.join(", ");
+            }
+            return String::new();
+        }
+    }
+    String::new()
 }
 
 fn run_eval_pipeline(cfg: &SessionCfg, tx_evt: &Sender<AgentEvent>) -> Result<EvalPipelineReport> {

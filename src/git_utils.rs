@@ -167,7 +167,11 @@ pub fn push(workspace: &Path, remote: &str, branch: &str) -> Result<()> {
 
 /// Validate whether a unified diff can be applied cleanly in the workspace.
 pub fn check_apply_unified_diff(workspace: &Path, diff: &str) -> Result<()> {
-    run_git_apply(workspace, diff, &["apply", "--check", "--recount", "--whitespace=nowarn"])
+    run_git_apply(
+        workspace,
+        diff,
+        &["apply", "--check", "--recount", "--whitespace=nowarn"],
+    )
 }
 
 /// Apply a unified diff to the workspace.
