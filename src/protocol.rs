@@ -9,7 +9,7 @@ use std::time::Duration;
 use crate::protocol_auto_revert;
 use crate::{deepseek_api, git_utils, runner, workspace};
 use crate::{protocol_failure, protocol_patch};
-use std::fs;
+use crate::{protocol_history, protocol_session_state};
 
 /// Messages sent from the UI thread to the agent thread.
 #[derive(Debug)]
@@ -244,7 +244,7 @@ struct SessionCfg {
 /// goal are persisted; other runtime state (e.g. clarify answers) is
 /// reconstructed at runtime.
 #[derive(Serialize, Deserialize)]
-struct SessionState {
+pub(crate) struct SessionState {
     #[serde(default = "default_schema_version")]
     schema_version: u32,
     goal: String,
@@ -307,7 +307,7 @@ async fn run_session(
     // 尝试从工作目录加载先前保存的会话状态。如果存在且与当前目标一致，则继续该对话；否则开始新对话。
     let mut messages: Vec<deepseek_api::ChatMessage>;
     if cfg.resume_from_checkpoint {
-        if let Some(state) = load_session_state(&cfg.workspace) {
+        if let Some(state) = protocol_session_state::load_session_state(&cfg.workspace) {
             if state.goal == cfg.goal {
                 messages = state.messages.clone();
                 let _ = tx_evt.send(AgentEvent::Log(
@@ -337,7 +337,7 @@ async fn run_session(
     }
 
     // Save an initial checkpoint as soon as session context is ready.
-    save_session_state(
+    protocol_session_state::save_session_state(
         &cfg.workspace,
         &build_session_state(cfg, &messages, 0, "session_initialized"),
     );
@@ -347,13 +347,15 @@ async fn run_session(
         if *stop_flag {
             return Ok(());
         }
-        if let Some((removed_msgs, removed_chars)) = trim_message_history_for_speed(&mut messages) {
+        if let Some((removed_msgs, removed_chars)) =
+            protocol_history::trim_message_history_for_speed(&mut messages)
+        {
             let _ = tx_evt.send(AgentEvent::Log(format!(
                 "[Agent] 为提升性能已裁剪上下文: removed_messages={} removed_chars={}",
                 removed_msgs, removed_chars
             )));
         }
-        save_session_state(
+        protocol_session_state::save_session_state(
             &cfg.workspace,
             &build_session_state(cfg, &messages, iter, "iteration_started"),
         );
@@ -369,7 +371,7 @@ async fn run_session(
         let raw = resp.trim().to_string();
         if raw.len() > 200_000 {
             messages.push(deepseek_api::ChatMessage::assistant(
-                compact_assistant_text(&raw, 12_000),
+                protocol_history::compact_assistant_text(&raw, 12_000),
             ));
             messages.push(deepseek_api::ChatMessage::user(
                 "你的回复过大（超过 200KB），请仅输出必要 JSON 并显著缩短内容。".to_string(),
@@ -386,7 +388,7 @@ async fn run_session(
             Err(e) => {
                 // 如果 JSON 无法修复，则将错误反馈给模型以便其重新发送。
                 messages.push(deepseek_api::ChatMessage::assistant(
-                    compact_assistant_text(&raw, 12_000),
+                    protocol_history::compact_assistant_text(&raw, 12_000),
                 ));
                 messages.push(deepseek_api::ChatMessage::user(format!(
                     "你的回复无法解析为合法 JSON：{}。请严格按照约定输出 JSON 对象。",
@@ -400,7 +402,7 @@ async fn run_session(
             Err(e) => {
                 // 结构不合法，要求模型重新发送。
                 messages.push(deepseek_api::ChatMessage::assistant(
-                    compact_assistant_text(&raw, 12_000),
+                    protocol_history::compact_assistant_text(&raw, 12_000),
                 ));
                 messages.push(deepseek_api::ChatMessage::user(format!(
                     "JSON 解析错误：{}。请严格按照约定输出 JSON 对象。",
@@ -470,7 +472,7 @@ async fn run_session(
                     answers_json
                 )));
                 // Save session state after appending new messages so that we can resume later.
-                save_session_state(
+                protocol_session_state::save_session_state(
                     &cfg.workspace,
                     &build_session_state(cfg, &messages, iter, "waiting_patch_after_clarify"),
                 );
@@ -478,7 +480,8 @@ async fn run_session(
             ModelJson::Patch { summary, files } => {
                 // 记录 patch 输出方便之后放入对话历史
                 let patch_content = content.clone();
-                let patch_history = compact_patch_history(&summary, &files, &patch_content);
+                let patch_history =
+                    protocol_history::compact_patch_history(&summary, &files, &patch_content);
                 repair.total_patches += 1;
                 if let Err(e) = validate_patch_payload(&summary, &files) {
                     let _ =
@@ -488,7 +491,7 @@ async fn run_session(
                         "你给出的 patch 无效：{}。请重新输出 kind=patch JSON，只做必要最小改动，并确保 files 中每个 path 唯一且 content 是完整文件内容。",
                         e
                     )));
-                    save_session_state(
+                    protocol_session_state::save_session_state(
                         &cfg.workspace,
                         &build_session_state(cfg, &messages, iter, "invalid_patch_payload"),
                     );
@@ -609,7 +612,7 @@ async fn run_session(
                                 &diff_for_feedback,
                             )
                         )));
-                        save_session_state(
+                        protocol_session_state::save_session_state(
                             &cfg.workspace,
                             &build_session_state(cfg, &messages, iter, "eval_verify_failed"),
                         );
@@ -650,7 +653,7 @@ async fn run_session(
                                 // 如果用户表示满意（空或含满意字样），结束会话；否则作为改进建议继续迭代。
                                 if trimmed.is_empty() || trimmed.contains("满意") {
                                     // 保存当前会话状态并结束。将来如果重新启动，用户需重新设定目标。
-                                    save_session_state(
+                                    protocol_session_state::save_session_state(
                                         &cfg.workspace,
                                         &build_session_state(
                                             cfg,
@@ -674,7 +677,7 @@ async fn run_session(
                                         trimmed
                                     )));
                                     // 保存状态以便断点续跑
-                                    save_session_state(
+                                    protocol_session_state::save_session_state(
                                         &cfg.workspace,
                                         &build_session_state(
                                             cfg,
@@ -781,7 +784,7 @@ async fn run_session(
                         repair.last_auto_revert_iter = iter;
                     }
                     // 保存状态后继续下一轮迭代
-                    save_session_state(
+                    protocol_session_state::save_session_state(
                         &cfg.workspace,
                         &build_session_state(cfg, &messages, iter, "eval_failed_waiting_fix"),
                     );
@@ -791,7 +794,7 @@ async fn run_session(
         }
     }
     // 达到最大迭代次数后保存状态，以便可能的续跑。
-    save_session_state(
+    protocol_session_state::save_session_state(
         &cfg.workspace,
         &build_session_state(cfg, &messages, 30, "max_iterations_reached"),
     );
@@ -910,96 +913,6 @@ fn to_answer_map(answers: &[ClarifyAnswer]) -> serde_json::Value {
         m.insert(a.id.clone(), v);
     }
     serde_json::Value::Object(m)
-}
-
-fn trim_message_history_for_speed(
-    messages: &mut Vec<deepseek_api::ChatMessage>,
-) -> Option<(usize, usize)> {
-    let max_messages = read_history_max_messages();
-    let max_chars = read_history_max_chars();
-    if messages.is_empty() {
-        return None;
-    }
-    let total_chars: usize = messages.iter().map(|m| m.content.len()).sum();
-    if messages.len() <= max_messages && total_chars <= max_chars {
-        return None;
-    }
-
-    let mut kept = Vec::new();
-    let mut used_chars = 0usize;
-    let mut start_idx = 0usize;
-
-    if messages[0].role == "system" {
-        used_chars += messages[0].content.len();
-        kept.push(messages[0].clone());
-        start_idx = 1;
-    }
-
-    let mut tail = Vec::new();
-    for idx in (start_idx..messages.len()).rev() {
-        let m = &messages[idx];
-        let next_count = kept.len() + tail.len() + 1;
-        let next_chars = used_chars + m.content.len();
-        if next_count > max_messages || next_chars > max_chars {
-            break;
-        }
-        tail.push(m.clone());
-        used_chars = next_chars;
-    }
-    tail.reverse();
-    kept.extend(tail);
-
-    let removed_msgs = messages.len().saturating_sub(kept.len());
-    let removed_chars = total_chars.saturating_sub(used_chars);
-    if removed_msgs == 0 {
-        return None;
-    }
-    *messages = kept;
-    Some((removed_msgs, removed_chars))
-}
-
-fn read_history_max_messages() -> usize {
-    std::env::var("AUTOCODING_HISTORY_MAX_MESSAGES")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .filter(|v| *v >= 10 && *v <= 200)
-        .unwrap_or(40)
-}
-
-fn read_history_max_chars() -> usize {
-    std::env::var("AUTOCODING_HISTORY_MAX_CHARS")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .filter(|v| *v >= 10_000 && *v <= 2_000_000)
-        .unwrap_or(70_000)
-}
-
-fn compact_assistant_text(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        return s.to_string();
-    }
-    format!(
-        "{}\n...[history truncated {} chars]",
-        &s[..max],
-        s.len() - max
-    )
-}
-
-fn compact_patch_history(summary: &str, files: &[FileWrite], raw_patch_json: &str) -> String {
-    let paths = files
-        .iter()
-        .take(30)
-        .map(|f| f.path.as_str())
-        .collect::<Vec<_>>()
-        .join(", ");
-    let header = format!(
-        "kind=patch summary={} file_count={} paths=[{}]",
-        summary,
-        files.len(),
-        paths
-    );
-    let raw = compact_assistant_text(raw_patch_json, 16_000);
-    format!("{header}\n{raw}")
 }
 
 fn run_eval_pipeline(cfg: &SessionCfg, tx_evt: &Sender<AgentEvent>) -> Result<EvalPipelineReport> {
@@ -1257,30 +1170,6 @@ fn extract_json(input: &str) -> Result<String> {
     protocol_patch::extract_json(input)
 }
 
-/// Attempt to load a persisted session state from the workspace. Returns
-/// None if the file does not exist or cannot be parsed. The state file
-/// name is hard-coded as `.autocoding_state.json` in the workspace root.
-fn load_session_state(workspace: &std::path::Path) -> Option<SessionState> {
-    let state_path = workspace.join(".autocoding_state.json");
-    match fs::read_to_string(&state_path) {
-        Ok(content) => serde_json::from_str::<SessionState>(&content).ok(),
-        Err(_) => None,
-    }
-}
-
-/// Save the current session state to the workspace. Errors during saving
-/// are ignored (logged to stderr) but do not interrupt the session.
-fn save_session_state(workspace: &std::path::Path, state: &SessionState) {
-    let state_path = workspace.join(".autocoding_state.json");
-    if let Ok(json) = serde_json::to_string_pretty(state) {
-        // Write to a temporary file then rename for atomicity.
-        let tmp_path = state_path.with_extension("tmp");
-        if fs::write(&tmp_path, json).is_ok() {
-            let _ = fs::rename(tmp_path, state_path);
-        }
-    }
-}
-
 fn build_session_state(
     cfg: &SessionCfg,
     messages: &[deepseek_api::ChatMessage],
@@ -1294,31 +1183,21 @@ fn build_session_state(
         eval_cmd: cfg.eval_cmd.clone(),
         iteration,
         last_status: status.to_string(),
-        updated_at_unix: now_unix(),
+        updated_at_unix: protocol_session_state::now_unix(),
         message_count: messages.len(),
         messages: messages.to_vec(),
     }
 }
 
-fn now_unix() -> u64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        category_changed_worse, compact_assistant_text, failure_severity,
-        trim_message_history_for_speed, validate_patch_payload, FileWrite,
-    };
+    use super::{category_changed_worse, failure_severity, validate_patch_payload, FileWrite};
     use crate::deepseek_api::ChatMessage;
     use crate::protocol_auto_revert::{
         auto_revert_min_severity, auto_revert_on_repeat, auto_revert_repeat_count,
         auto_revert_signature_allowed,
     };
+    use crate::protocol_history::{compact_assistant_text, trim_message_history_for_speed};
 
     #[test]
     fn trim_history_keeps_system_and_recent_messages() {

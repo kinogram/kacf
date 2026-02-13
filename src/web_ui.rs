@@ -11,7 +11,7 @@ use async_stream::stream;
 use crossbeam_channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -21,6 +21,7 @@ use crate::web_ui_analytics::{self, CategoryCount, TimePoint};
 use crate::web_ui_api_key;
 use crate::web_ui_languages;
 use crate::web_ui_slug;
+use crate::web_ui_store;
 
 /// Index HTML page embedded at compile time.
 const INDEX_HTML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/index.html"));
@@ -284,7 +285,7 @@ struct MetricsResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct ProjectConfig {
+pub(crate) struct ProjectConfig {
     auto_revert_profile: String,
     #[serde(default)]
     precheck_cmd: String,
@@ -308,7 +309,7 @@ struct WebProject {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-struct UiCachePayload {
+pub(crate) struct UiCachePayload {
     #[serde(default)]
     projects: Vec<WebProject>,
     #[serde(default)]
@@ -390,47 +391,8 @@ fn normalize_resume_draft_defaults(draft: &mut DraftPayload) {
     }
 }
 
-fn normalize_rel_path(path: &Path) -> Option<PathBuf> {
-    if path.is_absolute() {
-        return None;
-    }
-    let mut out = PathBuf::new();
-    for comp in path.components() {
-        match comp {
-            std::path::Component::CurDir => {}
-            std::path::Component::Normal(seg) => out.push(seg),
-            _ => return None,
-        }
-    }
-    if out.as_os_str().is_empty() {
-        return None;
-    }
-    Some(out)
-}
-
-fn workspace_path_for_input(workspace: &str) -> Option<PathBuf> {
-    let ws = workspace.trim();
-    if ws.is_empty() {
-        return None;
-    }
-    let rel = normalize_rel_path(Path::new(ws))?;
-    let root_rel = normalize_rel_path(Path::new(MANAGED_ROOT_DIR))?;
-    if !rel.starts_with(&root_rel) {
-        return None;
-    }
-    Some(rel)
-}
-
 fn require_managed_workspace(workspace: &str) -> Result<PathBuf, String> {
-    let rel = workspace_path_for_input(workspace).ok_or_else(|| {
-        format!(
-            "workspace must be under ./{}/{}",
-            MANAGED_ROOT_DIR, MANAGED_WORKSPACES_DIR
-        )
-    })?;
-    Ok(std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join(rel))
+    web_ui_store::require_managed_workspace(workspace, MANAGED_ROOT_DIR, MANAGED_WORKSPACES_DIR)
 }
 
 fn save_project_config(
@@ -441,10 +403,6 @@ fn save_project_config(
     history_max_chars: &str,
     release_gate_threshold: &str,
 ) -> std::io::Result<()> {
-    let Ok(ws) = require_managed_workspace(workspace) else {
-        return Ok(());
-    };
-    fs::create_dir_all(&ws)?;
     let cfg = ProjectConfig {
         auto_revert_profile: profile.to_string(),
         precheck_cmd: precheck_cmd.to_string(),
@@ -453,23 +411,22 @@ fn save_project_config(
         release_gate_threshold: release_gate_threshold.to_string(),
         updated_at_unix: now_unix(),
     };
-    let json = serde_json::to_string_pretty(&cfg)?;
-    let path = ws.join(PROJECT_CONFIG_FILENAME);
-    let tmp = path.with_extension("tmp");
-    fs::write(&tmp, json)?;
-    fs::rename(tmp, path)?;
-    Ok(())
+    web_ui_store::save_project_config(
+        workspace,
+        MANAGED_ROOT_DIR,
+        MANAGED_WORKSPACES_DIR,
+        PROJECT_CONFIG_FILENAME,
+        &cfg,
+    )
 }
 
 fn read_project_config(workspace: &str) -> Option<ProjectConfig> {
-    let ws = require_managed_workspace(workspace).ok()?;
-    let path = ws.join(PROJECT_CONFIG_FILENAME);
-    let content = fs::read_to_string(path).ok()?;
-    serde_json::from_str::<ProjectConfig>(&content).ok()
-}
-
-fn ui_cache_path() -> PathBuf {
-    managed_root_path().join(UI_CACHE_FILENAME)
+    web_ui_store::read_project_config(
+        workspace,
+        MANAGED_ROOT_DIR,
+        MANAGED_WORKSPACES_DIR,
+        PROJECT_CONFIG_FILENAME,
+    )
 }
 
 fn sanitize_language_code(raw: &str) -> Option<String> {
@@ -489,24 +446,11 @@ fn load_language_packs_checked() -> Result<(), String> {
 }
 
 fn read_ui_cache() -> UiCachePayload {
-    let path = ui_cache_path();
-    let content = match fs::read_to_string(path) {
-        Ok(v) => v,
-        Err(_) => return UiCachePayload::default(),
-    };
-    serde_json::from_str::<UiCachePayload>(&content).unwrap_or_default()
+    web_ui_store::read_ui_cache(MANAGED_ROOT_DIR, UI_CACHE_FILENAME)
 }
 
 fn write_ui_cache(payload: &UiCachePayload) -> std::io::Result<()> {
-    let path = ui_cache_path();
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let json = serde_json::to_string_pretty(payload)?;
-    let tmp = path.with_extension("tmp");
-    fs::write(&tmp, json)?;
-    fs::rename(tmp, path)?;
-    Ok(())
+    web_ui_store::write_ui_cache(MANAGED_ROOT_DIR, UI_CACHE_FILENAME, payload)
 }
 
 fn apply_runtime_config_envs(payload: &StartPayload) {
