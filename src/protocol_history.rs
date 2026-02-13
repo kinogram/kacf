@@ -91,3 +91,44 @@ fn read_history_max_chars() -> usize {
         .filter(|v| *v >= 10_000 && *v <= 2_000_000)
         .unwrap_or(70_000)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{compact_assistant_text, compact_patch_history, trim_message_history_for_speed};
+    use crate::deepseek_api::ChatMessage;
+    use crate::protocol::FileWrite;
+
+    #[test]
+    fn compact_assistant_text_truncates_and_marks() {
+        let s = "a".repeat(100);
+        let out = compact_assistant_text(&s, 20);
+        assert!(out.contains("truncated"));
+        assert!(out.len() < s.len() + 80);
+    }
+
+    #[test]
+    fn compact_patch_history_includes_header_and_paths() {
+        let files = vec![FileWrite {
+            path: "src/main.rs".to_string(),
+            content: "fn main() {}".to_string(),
+        }];
+        let out = compact_patch_history("fix", &files, "{\"kind\":\"patch\"}");
+        assert!(out.contains("kind=patch summary=fix"));
+        assert!(out.contains("src/main.rs"));
+    }
+
+    #[test]
+    fn trim_history_keeps_system_message() {
+        std::env::set_var("AUTOCODING_HISTORY_MAX_MESSAGES", "10");
+        std::env::set_var("AUTOCODING_HISTORY_MAX_CHARS", "10000");
+        let mut msgs = vec![ChatMessage::system("sys".to_string())];
+        for i in 0..30 {
+            msgs.push(ChatMessage::user(format!("u{i}")));
+        }
+        let trimmed = trim_message_history_for_speed(&mut msgs);
+        assert!(trimmed.is_some());
+        assert_eq!(msgs.first().map(|m| m.role.as_str()), Some("system"));
+        std::env::remove_var("AUTOCODING_HISTORY_MAX_MESSAGES");
+        std::env::remove_var("AUTOCODING_HISTORY_MAX_CHARS");
+    }
+}

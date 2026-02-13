@@ -114,3 +114,31 @@ fn ui_cache_path(managed_root_dir: &str, ui_cache_filename: &str) -> PathBuf {
         .join(managed_root_dir)
         .join(ui_cache_filename)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_rel_path, require_managed_workspace, workspace_path_for_input};
+    use std::path::Path;
+
+    #[test]
+    fn normalize_rel_path_rejects_escape_components() {
+        assert!(normalize_rel_path(Path::new("../x")).is_none());
+        assert!(normalize_rel_path(Path::new("/abs/x")).is_none());
+        assert!(normalize_rel_path(Path::new("a/../../b")).is_none());
+    }
+
+    #[test]
+    fn workspace_path_must_stay_under_managed_root() {
+        assert!(
+            workspace_path_for_input("autocoding_data/workspaces/a", "autocoding_data").is_some()
+        );
+        assert!(workspace_path_for_input("workspace/a", "autocoding_data").is_none());
+    }
+
+    #[test]
+    fn require_managed_workspace_returns_helpful_error() {
+        let err = require_managed_workspace("workspace/a", "autocoding_data", "workspaces")
+            .expect_err("must reject unmanaged workspace");
+        assert!(err.contains("./autocoding_data/workspaces"));
+    }
+}

@@ -11,6 +11,7 @@ mod web_ui;
 mod web_ui_analytics;
 mod web_ui_api_key;
 mod web_ui_languages;
+mod web_ui_runtime_env;
 mod web_ui_slug;
 mod web_ui_store;
 mod workspace;

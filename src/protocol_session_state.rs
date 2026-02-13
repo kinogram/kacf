@@ -29,3 +29,20 @@ pub(crate) fn now_unix() -> u64 {
         .map(|d| d.as_secs())
         .unwrap_or(0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{load_session_state, now_unix};
+    use std::path::Path;
+
+    #[test]
+    fn load_session_state_returns_none_when_absent() {
+        let p = Path::new("/tmp/kacf_non_existing_workspace_for_test");
+        assert!(load_session_state(p).is_none());
+    }
+
+    #[test]
+    fn now_unix_is_non_zero_for_modern_systems() {
+        assert!(now_unix() > 1_600_000_000);
+    }
+}

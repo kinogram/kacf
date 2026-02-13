@@ -20,6 +20,7 @@ use crate::protocol::{AgentEvent, AgentRequest, ClarifyAnswer, ClarifyQuestion};
 use crate::web_ui_analytics::{self, CategoryCount, TimePoint};
 use crate::web_ui_api_key;
 use crate::web_ui_languages;
+use crate::web_ui_runtime_env;
 use crate::web_ui_slug;
 use crate::web_ui_store;
 
@@ -453,27 +454,6 @@ fn write_ui_cache(payload: &UiCachePayload) -> std::io::Result<()> {
     web_ui_store::write_ui_cache(MANAGED_ROOT_DIR, UI_CACHE_FILENAME, payload)
 }
 
-fn apply_runtime_config_envs(payload: &StartPayload) {
-    set_or_clear_env("AUTOCODING_PRECHECK_CMD", &payload.precheck_cmd);
-    set_or_clear_env(
-        "AUTOCODING_HISTORY_MAX_MESSAGES",
-        &payload.history_max_messages,
-    );
-    set_or_clear_env("AUTOCODING_HISTORY_MAX_CHARS", &payload.history_max_chars);
-    set_or_clear_env(
-        "AUTOCODING_RELEASE_GATE_THRESHOLD",
-        &payload.release_gate_threshold,
-    );
-}
-
-fn set_or_clear_env(key: &str, value: &str) {
-    if value.trim().is_empty() {
-        std::env::remove_var(key);
-    } else {
-        std::env::set_var(key, value.trim());
-    }
-}
-
 fn read_resume_info(workspace: &str, goal: &str) -> Option<ResumeInfo> {
     let path = require_managed_workspace(workspace)
         .ok()?
@@ -514,7 +494,12 @@ fn start_from_payload(
     }
     let auto_revert_profile = payload.auto_revert_profile.clone();
     let workspace_full = require_managed_workspace(&payload.workspace)?;
-    apply_runtime_config_envs(&payload);
+    web_ui_runtime_env::apply_runtime_config_envs(
+        &payload.precheck_cmd,
+        &payload.history_max_messages,
+        &payload.history_max_chars,
+        &payload.release_gate_threshold,
+    );
     let req = AgentRequest::Start {
         api_key: payload.api_key,
         base_url: payload.base_url,
