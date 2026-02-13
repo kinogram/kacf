@@ -67,6 +67,8 @@
   "confirm_dirty_continue": "There are unsaved changes. Continue to {action}?",
   "confirm_delete_project": "Delete project \"{name}\"? This will not delete files on disk.",
   "project_unnamed": "Unnamed",
+  "autosave_project_ok": "Project status: auto-saved ({time})",
+  "autosave_project_fail": "Project status: auto-save failed ({time})",
   "report_title": "# KACF Release Diagnostics Report",
   "download_log_prefix": "kacf-log",
   "download_snapshot_prefix": "kacf-snapshot",

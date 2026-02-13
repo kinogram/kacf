@@ -545,6 +545,8 @@
 let lastEventId = 0;
 let polling = false;
 let saveTimer = null;
+let projectAutoSaveTimer = null;
+let projectAutoSaveInFlight = false;
 let stopRequested = false;
 let stopAckTimer = null;
 let eventSource = null;
@@ -1590,7 +1592,9 @@ function syncProjectNameFromSelection() {
     applyReadOnlyMode();
 }
 
-async function saveCurrentProject() {
+async function saveCurrentProject(opts) {
+    const options = opts || {};
+    const silent = !!options.silent;
     updateSharedConfigFromInputs();
     autoFillProjectNameFromGoal(false);
     const body = { ...getFormData() };
@@ -1640,11 +1644,13 @@ async function saveCurrentProject() {
     projectNameManualOverride = true;
     lastAutoProjectName = '';
     document.getElementById('workspace').value = projectWorkspace;
-    appendLog(
-        txt('log_project_saved', '[UI] 项目已保存：{name}{suffix}')
-            .replace('{name}', project.name)
-            .replace('{suffix}', serverOk ? '' : txt('log_fallback_suffix_unsynced', '（后端未同步）'))
-    );
+    if (!silent) {
+        appendLog(
+            txt('log_project_saved', '[UI] 项目已保存：{name}{suffix}')
+                .replace('{name}', project.name)
+                .replace('{suffix}', serverOk ? '' : txt('log_fallback_suffix_unsynced', '（后端未同步）'))
+        );
+    }
     markProjectClean();
     return true;
 }
@@ -1769,11 +1775,48 @@ function draftQueryByWorkspace() {
     return ws ? `?workspace=${encodeURIComponent(ws)}` : '';
 }
 
+function shouldAutoSaveProjectNow() {
+    if (isReadOnlyView() || runSessionActive) return false;
+    const selectedId = document.getElementById('project_selector')?.value || '';
+    if (selectedId) return true;
+    const goal = (document.getElementById('goal')?.value || '').trim();
+    const name = (document.getElementById('project_name')?.value || '').trim();
+    return !!(goal || name);
+}
+
+async function autoSaveProjectFromForm() {
+    if (!shouldAutoSaveProjectNow()) return;
+    if (projectAutoSaveInFlight) return;
+    projectAutoSaveInFlight = true;
+    try {
+        const ok = await saveCurrentProject({ silent: true });
+        if (ok) {
+            setAutoSaveState(
+                fmt('autosave_project_ok', '项目状态：已自动保存 ({time})', { time: nowText() })
+            );
+        } else {
+            setAutoSaveState(
+                fmt('autosave_project_fail', '项目状态：自动保存失败 ({time})', { time: nowText() })
+            );
+        }
+    } catch (_e) {
+        setAutoSaveState(
+            fmt('autosave_project_fail', '项目状态：自动保存失败 ({time})', { time: nowText() })
+        );
+    } finally {
+        projectAutoSaveInFlight = false;
+    }
+}
+
 function scheduleDraftSave() {
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
         saveDraftRemote();
     }, 400);
+    if (projectAutoSaveTimer) clearTimeout(projectAutoSaveTimer);
+    projectAutoSaveTimer = setTimeout(() => {
+        autoSaveProjectFromForm();
+    }, 550);
 }
 
 async function loadDraft() {

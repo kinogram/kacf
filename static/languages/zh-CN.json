@@ -67,6 +67,8 @@
   "confirm_dirty_continue": "当前项目有未保存修改，确定继续{action}吗？",
   "confirm_delete_project": "确定删除项目「{name}」吗？此操作不会删除磁盘目录。",
   "project_unnamed": "未命名",
+  "autosave_project_ok": "项目状态：已自动保存 ({time})",
+  "autosave_project_fail": "项目状态：自动保存失败 ({time})",
   "report_title": "# KACF 发布诊断报告",
   "download_log_prefix": "kacf-log",
   "download_snapshot_prefix": "kacf-snapshot",
