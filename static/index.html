@@ -1101,23 +1101,10 @@ async function fetchPlainApiKeyFromServer() {
     return (data && typeof data.api_key === 'string') ? data.api_key.trim() : '';
 }
 
-function looksLikeMaskedApiKey(value) {
-    const v = (value || '').trim();
-    if (!v) return false;
-    // Matches maskApiKey output only:
-    // 1) short keys: all '*'
-    // 2) long keys: first 4 visible + stars + last 4 visible
-    if (/^\*+$/.test(v)) return true;
-    return /^.{4}\*{4,}.{4}$/.test(v);
-}
-
 async function beginEditApiKey() {
     if (!sharedConfig.mask_api_key) return;
     try {
-        const inputEl = document.getElementById('api_key');
-        const showingMasked = !!inputEl && inputEl.dataset.masked === '1';
-        const sameAsDisplayed = showingMasked && !!inputEl && (sharedConfig.api_key || '').trim() === (inputEl.value || '').trim();
-        const mustFetchPlain = sharedConfig.api_key_is_masked || sameAsDisplayed || (showingMasked && looksLikeMaskedApiKey(sharedConfig.api_key));
+        const mustFetchPlain = sharedConfig.api_key_is_masked;
         if (mustFetchPlain) {
             sharedConfig.api_key = await fetchPlainApiKeyFromServer();
             sharedConfig.api_key_is_masked = false;
@@ -1139,7 +1126,7 @@ async function resolveApiKeyForRequest(forceResolve) {
     const force = forceResolve === true;
     const shouldResolve = force || (
         !!sharedConfig.mask_api_key
-        && (sharedConfig.api_key_is_masked || looksLikeMaskedApiKey(sharedConfig.api_key))
+        && sharedConfig.api_key_is_masked
     );
     if (!shouldResolve) return true;
     try {
@@ -2946,10 +2933,7 @@ function bindEvents() {
     document.getElementById('api_key').addEventListener('blur', reMaskApiKeyIfNeeded);
     document.getElementById('mask_api_key').addEventListener('change', async () => {
         updateSharedConfigFromInputs();
-        const apiKeyInput = document.getElementById('api_key');
-        const sameAsDisplayed = !!apiKeyInput && apiKeyInput.dataset.masked === '1'
-            && (sharedConfig.api_key || '').trim() === (apiKeyInput.value || '').trim();
-        if (!sharedConfig.mask_api_key && (sharedConfig.api_key_is_masked || sameAsDisplayed || looksLikeMaskedApiKey(sharedConfig.api_key))) {
+        if (!sharedConfig.mask_api_key && sharedConfig.api_key_is_masked) {
             const apiReady = await resolveApiKeyForRequest(true);
             if (!apiReady) {
                 sharedConfig.mask_api_key = true;
