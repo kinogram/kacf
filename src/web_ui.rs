@@ -9,21 +9,28 @@
 use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer, Responder};
 use async_stream::stream;
 use crossbeam_channel::{Receiver, Sender};
-use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::deepseek_api;
-use crate::protocol::{AgentEvent, AgentRequest, ClarifyAnswer};
-use crate::web_ui_analytics::{self, CategoryCount, TimePoint};
+use crate::protocol::{AgentEvent, AgentRequest};
+use crate::web_ui_analytics;
 use crate::web_ui_cache_logic;
 use crate::web_ui_events::{self, SerializableEvent};
 use crate::web_ui_languages;
+use crate::web_ui_models;
+pub(crate) use crate::web_ui_models::{
+    GlobalOptions, HealthResponse, LanguageListResponse, MetricsResponse, ProjectConfig,
+    ProjectConfigQuery, PushPayload, ResumeInfo, ResumeMeta, ResumePayload, RuntimeStatus,
+    SharedConfig, SlugSuggestPayload, SlugSuggestResponse, StartPayload, UiCachePatch,
+    UiCachePayload, UiStateResponse, WebProject,
+};
 use crate::web_ui_projects;
 use crate::web_ui_runtime_env;
 use crate::web_ui_runtime_metrics;
+use crate::web_ui_session;
 use crate::web_ui_slug;
 use crate::web_ui_store;
 
@@ -75,307 +82,15 @@ const MANAGED_WORKSPACES_DIR: &str = "workspaces";
 
 #[derive(Clone)]
 pub struct AppState {
-    tx_req: Sender<AgentRequest>,
-    events: Arc<Mutex<Vec<(usize, SerializableEvent)>>>,
-    event_bytes: Arc<Mutex<usize>>,
-    next_event_id: Arc<Mutex<usize>>,
-    runtime: Arc<Mutex<RuntimeStatus>>,
-    projects_lock: Arc<Mutex<()>>,
+    pub(crate) tx_req: Sender<AgentRequest>,
+    pub(crate) events: Arc<Mutex<Vec<(usize, SerializableEvent)>>>,
+    pub(crate) event_bytes: Arc<Mutex<usize>>,
+    pub(crate) next_event_id: Arc<Mutex<usize>>,
+    pub(crate) runtime: Arc<Mutex<RuntimeStatus>>,
+    pub(crate) projects_lock: Arc<Mutex<()>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct StartPayload {
-    api_key: String,
-    base_url: String,
-    model: String,
-    #[serde(default)]
-    language: String,
-    #[serde(default = "default_auto_revert_profile")]
-    auto_revert_profile: String,
-    #[serde(default)]
-    unattended_mode: bool,
-    #[serde(default)]
-    precheck_cmd: String,
-    #[serde(default)]
-    release_gate_threshold: String,
-    workspace: String,
-    goal: String,
-    eval_cmd: String,
-    success_regex: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct DraftPayload {
-    api_key: String,
-    base_url: String,
-    model: String,
-    #[serde(default)]
-    language: String,
-    #[serde(default = "default_auto_revert_profile")]
-    auto_revert_profile: String,
-    #[serde(default)]
-    unattended_mode: bool,
-    #[serde(default)]
-    precheck_cmd: String,
-    #[serde(default)]
-    release_gate_threshold: String,
-    workspace: String,
-    goal: String,
-    eval_cmd: String,
-    success_regex: String,
-    remote: String,
-    remote_url: String,
-    branch: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct ProjectConfigQuery {
-    workspace: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct ResumePayload {
-    #[serde(default)]
-    project_id: String,
-    #[serde(default)]
-    unattended_mode: bool,
-}
-
-impl DraftPayload {
-    fn into_start(self) -> StartPayload {
-        StartPayload {
-            api_key: self.api_key,
-            base_url: self.base_url,
-            model: self.model,
-            language: self.language,
-            auto_revert_profile: self.auto_revert_profile,
-            unattended_mode: self.unattended_mode,
-            precheck_cmd: self.precheck_cmd,
-            release_gate_threshold: self.release_gate_threshold,
-            workspace: self.workspace,
-            goal: self.goal,
-            eval_cmd: self.eval_cmd,
-            success_regex: self.success_regex,
-        }
-    }
-}
-
-fn default_auto_revert_profile() -> String {
-    "balanced".to_string()
-}
-
-#[derive(Debug, Deserialize)]
-struct ClarifyPayload {
-    answers: serde_json::Value,
-}
-
-#[derive(Debug, Deserialize)]
-struct PushPayload {
-    remote: String,
-    url: String,
-    branch: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct SlugSuggestPayload {
-    #[serde(default)]
-    project_name: String,
-    #[serde(default)]
-    goal: String,
-    #[serde(default)]
-    api_key: String,
-    #[serde(default = "default_base_url")]
-    base_url: String,
-    #[serde(default = "default_model_name")]
-    model: String,
-}
-
-fn default_base_url() -> String {
-    "https://api.deepseek.com".to_string()
-}
-
-fn default_model_name() -> String {
-    "deepseek-reasoner".to_string()
-}
-
-#[derive(Debug, Serialize)]
-struct SlugSuggestResponse {
-    slug: String,
-    source: String,
-}
-
-#[derive(Debug, Clone, Serialize, Default)]
-pub(crate) struct RuntimeStatus {
-    pub(crate) running: bool,
-    pub(crate) last_start_unix: u64,
-    pub(crate) last_workspace: String,
-    pub(crate) last_goal: String,
-    pub(crate) total_events: u64,
-    pub(crate) total_logs: u64,
-    pub(crate) total_done_ok: u64,
-    pub(crate) total_done_fail: u64,
-    pub(crate) last_error: String,
-    #[serde(skip_serializing)]
-    pub(crate) api_ms_samples: Vec<u32>,
-    #[serde(skip_serializing)]
-    pub(crate) eval_ms_samples: Vec<u32>,
-    #[serde(skip_serializing)]
-    pub(crate) done_history: Vec<(u64, bool)>,
-    #[serde(skip_serializing)]
-    pub(crate) digest_history: Vec<(u64, String)>,
-    #[serde(skip_serializing)]
-    pub(crate) root_cause_history: Vec<(u64, String)>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct ResumeInfo {
-    resumable: bool,
-    updated_at_unix: Option<u64>,
-    iteration: Option<u32>,
-    message_count: Option<usize>,
-    last_status: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ResumeMeta {
-    #[serde(default)]
-    goal: String,
-    #[serde(default)]
-    updated_at_unix: Option<u64>,
-    #[serde(default)]
-    iteration: Option<u32>,
-    #[serde(default)]
-    message_count: Option<usize>,
-    #[serde(default)]
-    last_status: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct UiStateResponse {
-    runtime: RuntimeStatus,
-    resume: Option<ResumeInfo>,
-}
-
-#[derive(Debug, Serialize)]
-struct LanguageListResponse {
-    languages: Vec<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct HealthResponse {
-    ok: bool,
-    service: &'static str,
-    version: &'static str,
-    unix_time: u64,
-}
-
-#[derive(Debug, Serialize)]
-pub(crate) struct MetricsResponse {
-    pub(crate) unix_time: u64,
-    pub(crate) event_buffer_len: usize,
-    pub(crate) next_event_id: usize,
-    pub(crate) running: bool,
-    pub(crate) total_events: u64,
-    pub(crate) total_logs: u64,
-    pub(crate) total_done_ok: u64,
-    pub(crate) total_done_fail: u64,
-    pub(crate) last_error: String,
-    pub(crate) api_p50_ms: Option<u32>,
-    pub(crate) api_p95_ms: Option<u32>,
-    pub(crate) eval_p50_ms: Option<u32>,
-    pub(crate) eval_p95_ms: Option<u32>,
-    pub(crate) done_5m_ok: u64,
-    pub(crate) done_5m_fail: u64,
-    pub(crate) done_5m_success_rate: Option<f64>,
-    pub(crate) readiness: String,
-    pub(crate) readiness_score: u8,
-    pub(crate) blockers: Vec<String>,
-    pub(crate) actions: Vec<String>,
-    pub(crate) gate_threshold: u8,
-    pub(crate) gate_passed: bool,
-    pub(crate) gate_reason: String,
-    pub(crate) digest_5m: Vec<CategoryCount>,
-    pub(crate) root_causes_5m: Vec<CategoryCount>,
-    pub(crate) success_rate_series_5m: Vec<TimePoint>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct ProjectConfig {
-    auto_revert_profile: String,
-    #[serde(default)]
-    unattended_mode: bool,
-    #[serde(default)]
-    precheck_cmd: String,
-    #[serde(default)]
-    release_gate_threshold: String,
-    updated_at_unix: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct WebProject {
-    pub(crate) id: String,
-    pub(crate) name: String,
-    pub(crate) workspace: String,
-    pub(crate) goal: String,
-    pub(crate) updated_at: u64,
-    snapshot: DraftPayload,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub(crate) struct UiCachePayload {
-    #[serde(default)]
-    pub(crate) projects: Vec<WebProject>,
-    #[serde(default)]
-    pub(crate) shared_config: Option<SharedConfig>,
-    #[serde(default)]
-    pub(crate) global_options: Option<GlobalOptions>,
-    #[serde(default)]
-    pub(crate) project_logs: std::collections::BTreeMap<String, String>,
-    #[serde(default)]
-    pub(crate) project_ui_state: std::collections::BTreeMap<String, serde_json::Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub(crate) struct SharedConfig {
-    #[serde(default)]
-    pub(crate) api_key: String,
-    #[serde(default)]
-    pub(crate) base_url: String,
-    #[serde(default)]
-    pub(crate) model: String,
-    #[serde(default)]
-    pub(crate) language: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub(crate) struct GlobalOptions {
-    #[serde(default)]
-    pub(crate) auto_resume_attempts: String,
-    #[serde(default)]
-    pub(crate) stop_after_minutes: String,
-    #[serde(default)]
-    pub(crate) history_max_messages: String,
-    #[serde(default)]
-    pub(crate) history_max_chars: String,
-    #[serde(default)]
-    pub(crate) log_max_chars: String,
-    #[serde(default)]
-    pub(crate) diff_max_chars: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub(crate) struct UiCachePatch {
-    #[serde(default)]
-    pub(crate) projects: Option<Vec<WebProject>>,
-    #[serde(default)]
-    pub(crate) shared_config: Option<SharedConfig>,
-    #[serde(default)]
-    pub(crate) global_options: Option<GlobalOptions>,
-    #[serde(default)]
-    pub(crate) project_logs: Option<std::collections::BTreeMap<String, String>>,
-    #[serde(default)]
-    pub(crate) project_ui_state: Option<std::collections::BTreeMap<String, serde_json::Value>>,
-}
+type DraftPayload = web_ui_models::DraftPayload;
 
 fn now_unix() -> u64 {
     SystemTime::now()
@@ -394,7 +109,7 @@ fn managed_workspaces_path() -> PathBuf {
     managed_root_path().join(MANAGED_WORKSPACES_DIR)
 }
 
-fn merge_shared_config_into_draft(draft: &mut DraftPayload, cfg: &SharedConfig) {
+pub(crate) fn merge_shared_config_into_draft(draft: &mut DraftPayload, cfg: &SharedConfig) {
     if !cfg.api_key.trim().is_empty() {
         draft.api_key = cfg.api_key.trim().to_string();
     }
@@ -409,12 +124,12 @@ fn merge_shared_config_into_draft(draft: &mut DraftPayload, cfg: &SharedConfig) 
     }
 }
 
-fn normalize_resume_draft_defaults(draft: &mut DraftPayload) {
+pub(crate) fn normalize_resume_draft_defaults(draft: &mut DraftPayload) {
     if draft.base_url.trim().is_empty() {
-        draft.base_url = default_base_url();
+        draft.base_url = web_ui_models::default_base_url();
     }
     if draft.model.trim().is_empty() {
-        draft.model = default_model_name();
+        draft.model = web_ui_models::default_model_name();
     }
 }
 
@@ -445,7 +160,7 @@ fn save_project_config(
     )
 }
 
-fn read_project_config(workspace: &str) -> Option<ProjectConfig> {
+pub(crate) fn read_project_config(workspace: &str) -> Option<ProjectConfig> {
     web_ui_store::read_project_config(
         workspace,
         MANAGED_ROOT_DIR,
@@ -470,7 +185,7 @@ fn load_language_packs_checked() -> Result<(), String> {
     web_ui_languages::ensure_language_packs_checked()
 }
 
-fn read_ui_cache() -> UiCachePayload {
+pub(crate) fn read_ui_cache() -> UiCachePayload {
     web_ui_store::read_ui_cache(MANAGED_ROOT_DIR, UI_CACHE_FILENAME)
 }
 
@@ -478,7 +193,7 @@ fn write_ui_cache(payload: &UiCachePayload) -> std::io::Result<()> {
     web_ui_store::write_ui_cache(MANAGED_ROOT_DIR, UI_CACHE_FILENAME, payload)
 }
 
-fn read_global_history_limits(opts: Option<&GlobalOptions>) -> (String, String) {
+pub(crate) fn read_global_history_limits(opts: Option<&GlobalOptions>) -> (String, String) {
     let Some(opts) = opts else {
         return (String::new(), String::new());
     };
@@ -488,7 +203,7 @@ fn read_global_history_limits(opts: Option<&GlobalOptions>) -> (String, String) 
     )
 }
 
-fn read_resume_info(workspace: &str, goal: &str) -> Option<ResumeInfo> {
+pub(crate) fn read_resume_info(workspace: &str, goal: &str) -> Option<ResumeInfo> {
     let path = require_managed_workspace(workspace)
         .ok()?
         .join(SESSION_STATE_FILENAME);
@@ -512,7 +227,7 @@ fn read_resume_info(workspace: &str, goal: &str) -> Option<ResumeInfo> {
     })
 }
 
-fn start_from_payload(
+pub(crate) fn start_from_payload(
     data: &web::Data<AppState>,
     payload: StartPayload,
     global_history_max_messages: &str,
@@ -568,40 +283,6 @@ fn start_from_payload(
     runtime.last_goal = payload.goal;
     runtime.last_error.clear();
     Ok(())
-}
-
-async fn start_session(data: web::Data<AppState>, body: web::Json<StartPayload>) -> impl Responder {
-    let payload = body.into_inner();
-    let (history_max_messages, history_max_chars) = {
-        let _guard = data.projects_lock.lock().unwrap();
-        let cache = read_ui_cache();
-        read_global_history_limits(cache.global_options.as_ref())
-    };
-    match start_from_payload(
-        &data,
-        payload,
-        &history_max_messages,
-        &history_max_chars,
-        false,
-    ) {
-        Ok(_) => HttpResponse::Ok().body("started"),
-        Err(e) => {
-            if e.contains("api_key is empty") {
-                HttpResponse::BadRequest().body(e)
-            } else if e.contains("already running") {
-                HttpResponse::Conflict().body(e)
-            } else {
-                HttpResponse::InternalServerError().body(e)
-            }
-        }
-    }
-}
-
-async fn get_project_config(query: web::Query<ProjectConfigQuery>) -> impl Responder {
-    match read_project_config(&query.workspace) {
-        Some(cfg) => HttpResponse::Ok().json(cfg),
-        None => HttpResponse::NotFound().body("project config not found"),
-    }
 }
 
 async fn list_projects(data: web::Data<AppState>) -> impl Responder {
@@ -704,70 +385,6 @@ async fn suggest_project_slug(body: web::Json<SlugSuggestPayload>) -> impl Respo
     })
 }
 
-async fn resume_session(
-    data: web::Data<AppState>,
-    body: web::Json<ResumePayload>,
-) -> impl Responder {
-    let payload = body.into_inner();
-    if payload.project_id.trim().is_empty() {
-        return HttpResponse::BadRequest().body("project_id is empty");
-    }
-    let (mut draft, history_max_messages, history_max_chars): (DraftPayload, String, String) = {
-        let _guard = data.projects_lock.lock().unwrap();
-        let cache = read_ui_cache();
-        let (history_max_messages, history_max_chars) =
-            read_global_history_limits(cache.global_options.as_ref());
-        let Some(project) = cache
-            .projects
-            .into_iter()
-            .find(|p| p.id == payload.project_id)
-        else {
-            return HttpResponse::NotFound().body("project not found");
-        };
-        let mut snapshot = project.snapshot;
-        if let Some(cfg) = cache.shared_config.as_ref() {
-            merge_shared_config_into_draft(&mut snapshot, cfg);
-        }
-        (snapshot, history_max_messages, history_max_chars)
-    };
-    normalize_resume_draft_defaults(&mut draft);
-    draft.unattended_mode = payload.unattended_mode;
-    if draft.api_key.trim().is_empty() {
-        return HttpResponse::BadRequest().body("api_key is empty in snapshot");
-    }
-    let resume = read_resume_info(&draft.workspace, &draft.goal);
-    if resume.as_ref().map(|x| x.resumable).unwrap_or(false) {
-        match start_from_payload(
-            &data,
-            draft.into_start(),
-            &history_max_messages,
-            &history_max_chars,
-            true,
-        ) {
-            Ok(_) => HttpResponse::Ok().body("resumed"),
-            Err(e) => {
-                if e.contains("already running") {
-                    HttpResponse::Conflict().body(e)
-                } else {
-                    HttpResponse::InternalServerError().body(e)
-                }
-            }
-        }
-    } else {
-        HttpResponse::BadRequest().body("no matching resumable session")
-    }
-}
-
-async fn get_ui_state(data: web::Data<AppState>) -> impl Responder {
-    let runtime = data.runtime.lock().unwrap().clone();
-    let resume = if runtime.last_workspace.trim().is_empty() {
-        None
-    } else {
-        read_resume_info(&runtime.last_workspace, &runtime.last_goal)
-    };
-    HttpResponse::Ok().json(UiStateResponse { runtime, resume })
-}
-
 async fn health() -> impl Responder {
     HttpResponse::Ok().json(HealthResponse {
         ok: true,
@@ -784,73 +401,6 @@ async fn metrics(data: web::Data<AppState>) -> impl Responder {
     let body =
         web_ui_runtime_metrics::build_metrics_response(&runtime, events_len, next_id, now_unix());
     HttpResponse::Ok().json(body)
-}
-
-async fn answer_clarify(
-    data: web::Data<AppState>,
-    body: web::Json<ClarifyPayload>,
-) -> impl Responder {
-    let mut answers_vec = Vec::new();
-    if let Some(map) = body.answers.as_object() {
-        for (id, value) in map {
-            let (qtype, single, multi, text) = match value {
-                serde_json::Value::String(s) => ("single", s.clone(), Vec::new(), String::new()),
-                serde_json::Value::Array(arr) => {
-                    let multi = arr
-                        .iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect::<Vec<_>>();
-                    ("multi", String::new(), multi, String::new())
-                }
-                _ => ("text", String::new(), Vec::new(), value.to_string()),
-            };
-            answers_vec.push(ClarifyAnswer {
-                id: id.to_string(),
-                qtype: qtype.to_string(),
-                single,
-                multi,
-                text,
-            });
-        }
-    }
-    if let Err(e) = data.tx_req.send(AgentRequest::Clarify {
-        answers: answers_vec,
-    }) {
-        return HttpResponse::InternalServerError().body(format!("send clarify failed: {}", e));
-    }
-    HttpResponse::Ok().body("clarify sent")
-}
-
-async fn push_remote(data: web::Data<AppState>, body: web::Json<PushPayload>) -> impl Responder {
-    let payload = body.into_inner();
-    let req = AgentRequest::PushRemote {
-        remote: payload.remote,
-        url: payload.url,
-        branch: payload.branch,
-    };
-    if let Err(e) = data.tx_req.send(req) {
-        return HttpResponse::InternalServerError().body(format!("send push failed: {}", e));
-    }
-    HttpResponse::Ok().body("push sent")
-}
-
-async fn revert_last(data: web::Data<AppState>) -> impl Responder {
-    if let Err(e) = data.tx_req.send(AgentRequest::RevertLast) {
-        return HttpResponse::InternalServerError().body(format!("send revert failed: {}", e));
-    }
-    HttpResponse::Ok().body("revert sent")
-}
-
-async fn stop_session(data: web::Data<AppState>) -> impl Responder {
-    let mut runtime = data.runtime.lock().unwrap();
-    runtime.running = false;
-    match data.tx_req.send(AgentRequest::Stop) {
-        Ok(_) => HttpResponse::Ok().body("stop sent"),
-        Err(e) => {
-            runtime.last_error = format!("stop channel unavailable: {}", e);
-            HttpResponse::Ok().body("stop acknowledged (channel unavailable)")
-        }
-    }
 }
 
 async fn get_events(
@@ -1004,10 +554,13 @@ pub async fn run_web_server(
                 "/assets/languages/{code}.json",
                 web::get().to(get_language_pack),
             )
-            .route("/start", web::post().to(start_session))
-            .route("/stop", web::post().to(stop_session))
-            .route("/resume", web::post().to(resume_session))
-            .route("/project_config", web::get().to(get_project_config))
+            .route("/start", web::post().to(web_ui_session::start_session))
+            .route("/stop", web::post().to(web_ui_session::stop_session))
+            .route("/resume", web::post().to(web_ui_session::resume_session))
+            .route(
+                "/project_config",
+                web::get().to(web_ui_session::get_project_config),
+            )
             .route("/projects", web::get().to(list_projects))
             .route("/projects", web::post().to(upsert_project))
             .route("/projects/{id}", web::delete().to(delete_project))
@@ -1017,12 +570,12 @@ pub async fn run_web_server(
             )
             .route("/ui_cache", web::get().to(get_ui_cache))
             .route("/ui_cache", web::put().to(put_ui_cache))
-            .route("/ui_state", web::get().to(get_ui_state))
+            .route("/ui_state", web::get().to(web_ui_session::get_ui_state))
             .route("/health", web::get().to(health))
             .route("/metrics", web::get().to(metrics))
-            .route("/clarify", web::post().to(answer_clarify))
-            .route("/revert", web::post().to(revert_last))
-            .route("/push", web::post().to(push_remote))
+            .route("/clarify", web::post().to(web_ui_session::answer_clarify))
+            .route("/revert", web::post().to(web_ui_session::revert_last))
+            .route("/push", web::post().to(web_ui_session::push_remote))
             .route("/events", web::get().to(get_events))
             .route("/events/stream", web::get().to(stream_events))
     })
