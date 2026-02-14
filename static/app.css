@@ -60,13 +60,16 @@
         .topbar-status {
             flex: 1 1 auto;
             min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
         }
         .topbar-status .runbar {
             margin-top: 0;
             height: 8px;
         }
         .topbar-status .hint {
-            margin-top: 6px;
+            margin-top: 0;
             font-size: 12px;
             line-height: 1.25;
             white-space: nowrap;
