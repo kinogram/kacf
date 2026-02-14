@@ -526,15 +526,12 @@ function bindEvents() {
     document.getElementById('global_config_modal').addEventListener('click', (e) => {
         if (e.target && e.target.id === 'global_config_modal') closeGlobalConfigModal();
     });
-    document.getElementById('sidebar_toggle_btn').addEventListener('click', () => {
+    document.getElementById('sidebar_corner_btn').addEventListener('click', () => {
         if (isNarrowViewport()) {
-            setSidebarMobileOpen(false);
+            setSidebarMobileOpen(!sidebarMobileOpen);
         } else {
             setSidebarCollapsed(!sidebarCollapsed);
         }
-    });
-    document.getElementById('sidebar_mobile_btn').addEventListener('click', () => {
-        setSidebarMobileOpen(true);
     });
     document.getElementById('sidebar_overlay').addEventListener('click', () => {
         setSidebarMobileOpen(false);

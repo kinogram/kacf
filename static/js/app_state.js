@@ -437,25 +437,18 @@ function applySidebarLayout() {
     const narrow = isNarrowViewport();
     root.classList.toggle('sidebar-collapsed', !narrow && sidebarCollapsed);
     root.classList.toggle('sidebar-open', narrow && sidebarMobileOpen);
-    const t = document.getElementById('sidebar_toggle_btn');
-    const m = document.getElementById('sidebar_mobile_btn');
-    debugSidebarLayoutOnce(narrow, t, m);
-    if (t) {
-        // Ensure icon-only buttons remain visible on narrow layouts even if global button styles change.
-        t.style.display = 'inline-flex';
-        const label = narrow
-            ? txt('btn_sidebar_close', '')
-            : (sidebarCollapsed ? txt('btn_sidebar_expand', '') : txt('btn_sidebar_collapse', ''));
-        const iconName = narrow ? 'x' : (sidebarCollapsed ? 'chevron-right' : 'chevron-left');
-        setIconButton(t, iconName, label);
-        maybeReportIconVisibility(t, 'sidebar_toggle_btn', narrow);
-    }
-    if (m) {
-        m.style.display = 'inline-flex';
-        const label = txt('btn_sidebar_open', '');
-        setIconButton(m, 'menu', label);
-        maybeReportIconVisibility(m, 'sidebar_mobile_btn', narrow);
-    }
+    const b = document.getElementById('sidebar_corner_btn');
+    debugSidebarLayoutOnce(narrow, b, null);
+    if (!b) return;
+    b.style.display = 'inline-flex';
+    const label = narrow
+        ? (sidebarMobileOpen ? txt('btn_sidebar_close', '') : txt('btn_sidebar_open', ''))
+        : (sidebarCollapsed ? txt('btn_sidebar_expand', '') : txt('btn_sidebar_collapse', ''));
+    const iconName = narrow
+        ? (sidebarMobileOpen ? 'x' : 'menu')
+        : (sidebarCollapsed ? 'chevron-right' : 'chevron-left');
+    setIconButton(b, iconName, label);
+    maybeReportIconVisibility(b, 'sidebar_corner_btn', narrow);
 }
 
 function setSidebarCollapsed(next) {
