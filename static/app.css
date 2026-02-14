@@ -181,6 +181,16 @@
             line-height: 1;
             pointer-events: none;
         }
+        .btn-icon svg {
+            width: 18px;
+            height: 18px;
+            display: block;
+            stroke: currentColor;
+            fill: none;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
         .btn-ghost { background: #edf3fd; color: #24406d; }
         .btn-ghost:hover:not(:disabled),
         .btn-ghost:focus-visible:not(:disabled),

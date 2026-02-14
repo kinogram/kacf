@@ -112,6 +112,119 @@ const CONFIG_EDIT_IDS = [
     'open_global_config_btn', 'language_select',
 ];
 
+// Debug log reporting: lets us diagnose Android/tablet issues without remote DevTools.
+// Best-effort only; failures are ignored.
+let debugLogLastSentAt = 0;
+let debugLogBurst = 0;
+function postDebugLog(payload) {
+    const now = Date.now();
+    if (now - debugLogLastSentAt > 5000) {
+        debugLogBurst = 0;
+        debugLogLastSentAt = now;
+    }
+    debugLogBurst++;
+    if (debugLogBurst > 6) return; // avoid flooding
+    try {
+        fetch('/debug/client_logs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload || {}),
+        }).catch(() => {});
+    } catch (_e) {}
+}
+window.addEventListener('error', (ev) => {
+    const err = ev && ev.error;
+    postDebugLog({
+        level: 'error',
+        message: String(ev && ev.message ? ev.message : 'window.error'),
+        href: String(location && location.href ? location.href : ''),
+        user_agent: String(navigator && navigator.userAgent ? navigator.userAgent : ''),
+        stack: String(err && err.stack ? err.stack : ''),
+    });
+});
+window.addEventListener('unhandledrejection', (ev) => {
+    const r = ev && ev.reason;
+    postDebugLog({
+        level: 'error',
+        message: String(r && r.message ? r.message : r ? r : 'unhandledrejection'),
+        href: String(location && location.href ? location.href : ''),
+        user_agent: String(navigator && navigator.userAgent ? navigator.userAgent : ''),
+        stack: String(r && r.stack ? r.stack : ''),
+    });
+});
+
+// Startup ping: confirms client -> server debug log path is working on the device.
+postDebugLog({
+    level: 'info',
+    message: 'debug_log_online',
+    href: String(location && location.href ? location.href : ''),
+    user_agent: String(navigator && navigator.userAgent ? navigator.userAgent : ''),
+    stack: '',
+});
+
+let sidebarLayoutDebugSent = false;
+function debugSidebarLayoutOnce(narrow, t, m) {
+    if (sidebarLayoutDebugSent) return;
+    sidebarLayoutDebugSent = true;
+    postDebugLog({
+        level: 'info',
+        message: 'applySidebarLayout_called',
+        href: String(location && location.href ? location.href : ''),
+        user_agent: String(navigator && navigator.userAgent ? navigator.userAgent : ''),
+        stack: JSON.stringify({
+            narrow: !!narrow,
+            vw: window.innerWidth,
+            vh: window.innerHeight,
+            sidebarCollapsed: !!sidebarCollapsed,
+            sidebarMobileOpen: !!sidebarMobileOpen,
+            hasToggleBtn: !!t,
+            hasMobileBtn: !!m,
+        }),
+    });
+}
+
+let sidebarIconDebugReported = false;
+function maybeReportIconVisibility(btn, id, narrow) {
+    if (!btn || sidebarIconDebugReported) return;
+    // Defer until after layout/paint.
+    requestAnimationFrame(() => {
+        if (sidebarIconDebugReported) return;
+        const cs = window.getComputedStyle(btn);
+        const r = btn.getBoundingClientRect();
+        const txt = (btn.textContent || '').trim();
+        const invisible =
+            !txt ||
+            cs.display === 'none' ||
+            cs.visibility === 'hidden' ||
+            Number(cs.opacity || '1') === 0 ||
+            r.width < 8 ||
+            r.height < 8 ||
+            cs.color === 'transparent' ||
+            cs.color === 'rgba(0, 0, 0, 0)' ||
+            cs.color === 'rgba(0,0,0,0)';
+        if (!invisible) return;
+        sidebarIconDebugReported = true;
+        postDebugLog({
+            level: 'warn',
+            message: `sidebar icon not visible: ${id}`,
+            href: String(location && location.href ? location.href : ''),
+            user_agent: String(navigator && navigator.userAgent ? navigator.userAgent : ''),
+            stack: JSON.stringify({
+                narrow: !!narrow,
+                sidebarCollapsed: !!sidebarCollapsed,
+                sidebarMobileOpen: !!sidebarMobileOpen,
+                text: txt,
+                className: btn.className || '',
+                display: cs.display,
+                visibility: cs.visibility,
+                opacity: cs.opacity,
+                color: cs.color,
+                rect: { x: r.x, y: r.y, w: r.width, h: r.height },
+            }),
+        });
+    });
+}
+
 function normalizeLanguageCode(raw) {
     const v = (raw || '').trim();
     if (!v) return '';
@@ -260,29 +373,79 @@ function isNarrowViewport() {
     return window.matchMedia('(max-width: 1023px)').matches;
 }
 
+function buildIconSvg(name) {
+    // Build SVG elements via DOM APIs (more reliable than innerHTML parsing on Safari).
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    // Set explicit dimensions + paint attributes to avoid CSS inheritance quirks on mobile browsers.
+    svg.setAttribute('width', '18');
+    svg.setAttribute('height', '18');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS(NS, 'path');
+    const dMap = {
+        'chevron-left': 'M15 6l-6 6 6 6',
+        'chevron-right': 'M9 6l6 6-6 6',
+        'x': 'M6 6l12 12M18 6l-12 12',
+        'menu': 'M4 7h16M4 12h16M4 17h16',
+    };
+    const d = dMap[name] || '';
+    if (!d) return null;
+    path.setAttribute('d', d);
+    // Duplicate paint attributes on the path too (Safari can ignore svg-level stroke in some cases).
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '2');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+    svg.appendChild(path);
+    return svg;
+}
+
+function setIconButton(btn, iconName, label) {
+    if (!btn) return;
+    btn.classList.add('btn-icon-only');
+    // Clear previous content reliably.
+    while (btn.firstChild) btn.removeChild(btn.firstChild);
+    // Use plain text glyphs directly on the button to eliminate any span/CSS interactions.
+    // ASCII-only fallback ensures glyphs exist on all devices.
+    const fallbackMap = { menu: '|||', x: 'X', 'chevron-left': '<', 'chevron-right': '>' };
+    const glyph = fallbackMap[iconName] || '·';
+    btn.textContent = glyph;
+    btn.style.fontSize = '20px';
+    btn.style.lineHeight = '1';
+    btn.title = label || '';
+    if (label) btn.setAttribute('aria-label', label);
+}
+
 function applySidebarLayout() {
     const root = document.body;
     const narrow = isNarrowViewport();
     root.classList.toggle('sidebar-collapsed', !narrow && sidebarCollapsed);
     root.classList.toggle('sidebar-open', narrow && sidebarMobileOpen);
     const t = document.getElementById('sidebar_toggle_btn');
+    const m = document.getElementById('sidebar_mobile_btn');
+    debugSidebarLayoutOnce(narrow, t, m);
     if (t) {
+        // Ensure icon-only buttons remain visible on narrow layouts even if global button styles change.
+        t.style.display = 'inline-flex';
         const label = narrow
             ? txt('btn_sidebar_close', '')
             : (sidebarCollapsed ? txt('btn_sidebar_expand', '') : txt('btn_sidebar_collapse', ''));
-        const icon = narrow ? '&#10005;' : (sidebarCollapsed ? '&#187;' : '&#171;');
-        t.classList.add('btn-icon-only');
-        t.innerHTML = `<span class="btn-icon" aria-hidden="true">${icon}</span>`;
-        t.title = label;
-        t.setAttribute('aria-label', label);
+        const iconName = narrow ? 'x' : (sidebarCollapsed ? 'chevron-right' : 'chevron-left');
+        setIconButton(t, iconName, label);
+        maybeReportIconVisibility(t, 'sidebar_toggle_btn', narrow);
     }
-    const m = document.getElementById('sidebar_mobile_btn');
     if (m) {
+        m.style.display = 'inline-flex';
         const label = txt('btn_sidebar_open', '');
-        m.classList.add('btn-icon-only');
-        m.innerHTML = '<span class="btn-icon" aria-hidden="true">&#9776;</span>';
-        m.title = label;
-        m.setAttribute('aria-label', label);
+        setIconButton(m, 'menu', label);
+        maybeReportIconVisibility(m, 'sidebar_mobile_btn', narrow);
     }
 }
 
@@ -398,6 +561,14 @@ function fmt(key, fallback, vars) {
         out = out.replaceAll(`{${k}}`, String(map[k]));
     });
     return out;
+}
+
+function escapeHtml(text) {
+    // Used by project list rendering; must be available before app_projects.js runs.
+    return String(text || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
 }
 
 function inferProjectNameFromGoal(goal) {

@@ -145,34 +145,35 @@ function applyStaticCopyToDom() {
         const el = document.getElementById(id);
         if (el) el.textContent = txt(key, '');
     });
-    const iconMap = [
-        ['start_btn', 'btn_start', '&#9654;'],
-        ['resume_btn', 'btn_resume', '&#8635;'],
-        ['stop_btn', 'btn_stop', '&#9632;'],
-        ['go_running_project_btn', 'btn_go_running', '&#9679;'],
-        ['revert_btn', 'btn_revert', '&#8630;'],
-        ['push_btn', 'btn_push', '&#8679;'],
-        ['open_global_config_btn', 'btn_open_global', '&#9881;'],
-        ['save_global_config_btn', 'btn_save_global', '&#10003;'],
-        ['close_global_config_btn', 'btn_close', '&#10005;'],
-        ['project_new_btn', 'btn_project_new', '&#43;'],
-        ['project_save_btn', 'btn_project_save', '&#10003;'],
-        ['project_load_btn', 'btn_project_load', '&#10548;'],
-        ['project_delete_btn', 'btn_project_delete', '&#128465;'],
-        ['clarify_submit_btn', 'btn_clarify_submit', '&#10148;'],
-        ['clear_log_btn', 'btn_clear_log', '&#128465;'],
-        ['export_log_btn', 'btn_export_log', '&#10515;'],
-        ['export_snapshot_btn', 'btn_export_snapshot', '&#10515;'],
-        ['export_report_btn', 'btn_export_report', '&#10515;'],
+    const buttonTextMap = [
+        ['start_btn', 'btn_start'],
+        ['resume_btn', 'btn_resume'],
+        ['stop_btn', 'btn_stop'],
+        ['go_running_project_btn', 'btn_go_running'],
+        ['revert_btn', 'btn_revert'],
+        ['push_btn', 'btn_push'],
+        ['open_global_config_btn', 'btn_open_global'],
+        ['save_global_config_btn', 'btn_save_global'],
+        ['close_global_config_btn', 'btn_close'],
+        ['project_new_btn', 'btn_project_new'],
+        ['project_save_btn', 'btn_project_save'],
+        ['project_load_btn', 'btn_project_load'],
+        ['project_delete_btn', 'btn_project_delete'],
+        ['clarify_submit_btn', 'btn_clarify_submit'],
+        ['clear_log_btn', 'btn_clear_log'],
+        ['export_log_btn', 'btn_export_log'],
+        ['export_snapshot_btn', 'btn_export_snapshot'],
+        ['export_report_btn', 'btn_export_report'],
     ];
-    iconMap.forEach(([id, key, icon]) => {
+    buttonTextMap.forEach(([id, key]) => {
         const el = document.getElementById(id);
         if (!el) return;
         const label = txt(key, '');
-        el.classList.add('btn-icon-only');
-        el.innerHTML = `<span class="btn-icon" aria-hidden="true">${icon}</span>`;
-        el.title = label;
-        el.setAttribute('aria-label', label);
+        el.classList.remove('btn-icon-only');
+        el.textContent = label;
+        el.removeAttribute('aria-label');
+        // Clear any leftover icon-only markup/tooltips from older builds.
+        el.title = '';
     });
     const logBtnTips = [
         ['export_log_btn', 'tip_export_log'],
@@ -209,9 +210,19 @@ function applyStaticCopyToDom() {
         summary.textContent = fmt('project_summary_total', '', { total: loadProjects().length });
     }
     setProjectDraftState();
-    renderProjectAccordion();
+    // Make sidebar buttons resilient: don't depend on project rendering (which may throw) to populate them.
     applySidebarLayout();
     renderUnattendedState();
+    try {
+        renderProjectAccordion();
+    } catch (e) {
+        console.error('renderProjectAccordion failed', e);
+        if (typeof postDebugLog === 'function') {
+            postDebugLog('error', 'renderProjectAccordion_failed', {
+                message: String(e && e.message ? e.message : e),
+            });
+        }
+    }
 }
 
 function openGlobalConfigModal() {

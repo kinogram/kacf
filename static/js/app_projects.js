@@ -100,12 +100,12 @@ function renderProjectAccordion() {
     ${escapeHtml(txt('project_meta_updated', ''))}: ${escapeHtml(dt)}<br>
     ${escapeHtml(txt('project_meta_eval', ''))}: ${escapeHtml(snap.eval_cmd || '-')}<br>
     ${escapeHtml(txt('project_meta_revert', ''))}: ${escapeHtml(snap.auto_revert_profile || '-')}
-  </div>
-  <div class="buttons">
-    <button class="btn-ghost btn-icon-only" onclick="selectProject('${p.id}', true)" title="${escapeHtml(txt('btn_project_open_card', ''))}" aria-label="${escapeHtml(txt('btn_project_open_card', ''))}"><span class="btn-icon" aria-hidden="true">&#128194;</span></button>
-    <button class="btn-ghost btn-icon-only" onclick="deleteProjectById('${p.id}')" title="${escapeHtml(txt('btn_project_delete_card', ''))}" aria-label="${escapeHtml(txt('btn_project_delete_card', ''))}"><span class="btn-icon" aria-hidden="true">&#128465;</span></button>
-  </div>
-</div>`;
+	  </div>
+	  <div class="buttons">
+	    <button class="btn-ghost" onclick="selectProject('${p.id}', true)">${escapeHtml(txt('btn_project_open_card', ''))}</button>
+	    <button class="btn-ghost" onclick="deleteProjectById('${p.id}')">${escapeHtml(txt('btn_project_delete_card', ''))}</button>
+	  </div>
+	</div>`;
         })
         .join('');
 }

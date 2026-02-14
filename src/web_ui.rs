@@ -18,6 +18,7 @@ use crate::deepseek_api;
 use crate::protocol::{AgentEvent, AgentRequest};
 use crate::web_ui_analytics;
 use crate::web_ui_cache_logic;
+use crate::web_ui_debug;
 use crate::web_ui_events::{self, SerializableEvent};
 use crate::web_ui_languages;
 use crate::web_ui_models;
@@ -88,6 +89,7 @@ pub struct AppState {
     pub(crate) next_event_id: Arc<Mutex<usize>>,
     pub(crate) runtime: Arc<Mutex<RuntimeStatus>>,
     pub(crate) projects_lock: Arc<Mutex<()>>,
+    pub(crate) debug_client_logs: web_ui_debug::DebugLogStore,
 }
 
 type DraftPayload = web_ui_models::DraftPayload;
@@ -534,6 +536,7 @@ pub async fn run_web_server(
         next_event_id: Arc::new(Mutex::new(0)),
         runtime: Arc::new(Mutex::new(RuntimeStatus::default())),
         projects_lock: Arc::new(Mutex::new(())),
+        debug_client_logs: web_ui_debug::DebugLogStore::new(),
     };
     web_ui_events::spawn_event_collector(
         rx_evt,
@@ -578,6 +581,13 @@ pub async fn run_web_server(
             .route("/push", web::post().to(web_ui_session::push_remote))
             .route("/events", web::get().to(get_events))
             .route("/events/stream", web::get().to(stream_events))
+            .service(
+                web::scope("/debug")
+                    .app_data(web::Data::new(state.debug_client_logs.entries()))
+                    .app_data(web::Data::new(state.debug_client_logs.bytes()))
+                    .route("/client_logs", web::post().to(web_ui_debug::post_client_log))
+                    .route("/client_logs", web::get().to(web_ui_debug::get_client_logs)),
+            )
     })
     .bind(("0.0.0.0", port))?
     .run()
