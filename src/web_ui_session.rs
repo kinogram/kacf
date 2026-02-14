@@ -169,6 +169,8 @@ pub(crate) async fn revert_last(data: web::Data<AppState>) -> impl Responder {
 pub(crate) async fn stop_session(data: web::Data<AppState>) -> impl Responder {
     let mut runtime = data.runtime.lock().unwrap();
     runtime.running = false;
+    data.stop_now
+        .store(true, std::sync::atomic::Ordering::Relaxed);
     match data.tx_req.send(AgentRequest::Stop) {
         Ok(_) => HttpResponse::Ok().body("stop sent"),
         Err(e) => {

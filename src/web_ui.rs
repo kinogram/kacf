@@ -12,6 +12,7 @@ use crossbeam_channel::{Receiver, Sender};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::deepseek_api;
@@ -90,6 +91,7 @@ pub struct AppState {
     pub(crate) runtime: Arc<Mutex<RuntimeStatus>>,
     pub(crate) projects_lock: Arc<Mutex<()>>,
     pub(crate) debug_client_logs: web_ui_debug::DebugLogStore,
+    pub(crate) stop_now: Arc<AtomicBool>,
 }
 
 type DraftPayload = web_ui_models::DraftPayload;
@@ -236,6 +238,8 @@ pub(crate) fn start_from_payload(
     global_history_max_chars: &str,
     resume_from_checkpoint: bool,
 ) -> Result<(), String> {
+    // Clear any previous stop request so the new run can proceed.
+    data.stop_now.store(false, std::sync::atomic::Ordering::Relaxed);
     if payload.api_key.trim().is_empty() {
         return Err("api_key is empty".to_string());
     }
@@ -518,6 +522,7 @@ pub(crate) fn release_gate(
 pub async fn run_web_server(
     tx_req: Sender<AgentRequest>,
     rx_evt: Receiver<AgentEvent>,
+    stop_now: Arc<AtomicBool>,
 ) -> std::io::Result<()> {
     fs::create_dir_all(managed_root_path())?;
     fs::create_dir_all(managed_workspaces_path())?;
@@ -537,6 +542,7 @@ pub async fn run_web_server(
         runtime: Arc::new(Mutex::new(RuntimeStatus::default())),
         projects_lock: Arc::new(Mutex::new(())),
         debug_client_logs: web_ui_debug::DebugLogStore::new(),
+        stop_now,
     };
     web_ui_events::spawn_event_collector(
         rx_evt,

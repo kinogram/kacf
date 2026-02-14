@@ -14,11 +14,16 @@ use crate::protocol_wait::{self, ClarifyWaitOutcome};
 use crate::{deepseek_api, git_utils, runner, workspace};
 use crate::{protocol_failure, protocol_patch};
 use crate::{protocol_history, protocol_session_state};
+use std::sync::{Arc, atomic::AtomicBool};
 
 /// Run the agent loop. This function listens for requests from the UI and
 /// interacts with the DeepSeek API, applying patches and evaluating the
 /// resulting project. It sends events back to the UI to update state.
-pub async fn agent_loop(rx_req: Receiver<AgentRequest>, tx_evt: Sender<AgentEvent>) {
+pub async fn agent_loop(
+    rx_req: Receiver<AgentRequest>,
+    tx_evt: Sender<AgentEvent>,
+    stop_now: Arc<AtomicBool>,
+) {
     // Session state
     // stop_flag is passed by mutable reference into run_session so that a Stop
     // request from the UI can interrupt the session. It is also read at the
@@ -65,6 +70,7 @@ pub async fn agent_loop(rx_req: Receiver<AgentRequest>, tx_evt: Sender<AgentEven
                     &rx_req,
                     &tx_evt,
                     &mut stop_flag,
+                    &stop_now,
                 )
                 .await
                 {
@@ -128,6 +134,7 @@ async fn run_session(
     rx_req: &Receiver<AgentRequest>,
     tx_evt: &Sender<AgentEvent>,
     stop_flag: &mut bool,
+    stop_now: &Arc<AtomicBool>,
 ) -> Result<()> {
     protocol_auto_revert::set_current_auto_revert_profile(&cfg.auto_revert_profile);
     workspace::ensure_dir(&cfg.workspace)?;
@@ -185,7 +192,7 @@ async fn run_session(
     );
     let mut repair = RepairHeuristics::default();
     'outer: for iter in 1..=30 {
-        if *stop_flag {
+        if *stop_flag || stop_now.load(std::sync::atomic::Ordering::Relaxed) {
             return Ok(());
         }
         if let Some((removed_msgs, removed_chars)) =
@@ -204,15 +211,30 @@ async fn run_session(
         let api_start = std::time::Instant::now();
         // Send the chat completion request to DeepSeek and keep emitting
         // progress logs so UI users can distinguish "still generating" from "stuck".
-        let resp = protocol_stream::chat_complete_with_progress(
+        let resp = match protocol_stream::chat_complete_with_progress(
             &cfg.base_url,
             &cfg.api_key,
             &cfg.model,
             &messages,
             tx_evt,
+            stop_now,
         )
         .await
-        .context("deepseek chat_complete")?;
+        {
+            Ok(v) => v,
+            Err(e) => {
+                if protocol_stream::is_stop_requested_error(&e)
+                    || stop_now.load(std::sync::atomic::Ordering::Relaxed)
+                {
+                    return Ok(());
+                }
+                return Err(e).context("deepseek chat_complete");
+            }
+        };
+        // If the stop flag was set while waiting for the model, exit early.
+        if stop_now.load(std::sync::atomic::Ordering::Relaxed) {
+            return Ok(());
+        }
         let api_ms = api_start.elapsed().as_millis();
         let _ = tx_evt.send(AgentEvent::Log(format!("[Perf] deepseek_api={}ms", api_ms)));
         let raw = resp.trim().to_string();

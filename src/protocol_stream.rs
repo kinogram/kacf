@@ -6,6 +6,22 @@ use std::time::Duration;
 use crate::deepseek_api;
 use crate::protocol::AgentEvent;
 use crate::protocol_patch;
+use std::sync::{Arc, atomic::AtomicBool};
+
+#[derive(Debug)]
+struct StopRequested;
+
+impl std::fmt::Display for StopRequested {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "stop requested")
+    }
+}
+
+impl std::error::Error for StopRequested {}
+
+pub(crate) fn is_stop_requested_error(err: &anyhow::Error) -> bool {
+    err.chain().any(|e| e.is::<StopRequested>())
+}
 
 #[derive(Default)]
 struct StreamPreview {
@@ -52,6 +68,7 @@ pub(crate) async fn chat_complete_with_progress(
     model: &str,
     messages: &[deepseek_api::ChatMessage],
     tx_evt: &Sender<AgentEvent>,
+    stop_now: &Arc<AtomicBool>,
 ) -> Result<String> {
     let _ = tx_evt.send(AgentEvent::Log("[Model] 正在请求模型响应...".to_string()));
     let started_at = std::time::Instant::now();
@@ -88,6 +105,8 @@ pub(crate) async fn chat_complete_with_progress(
     tokio::pin!(req);
     let mut ticker = tokio::time::interval(Duration::from_secs(1));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut stop_poll = tokio::time::interval(Duration::from_millis(200));
+    stop_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut first_tick = true;
     loop {
         tokio::select! {
@@ -117,6 +136,20 @@ pub(crate) async fn chat_complete_with_progress(
                     "[Model] 仍在生成中... {}s",
                     started_at.elapsed().as_secs()
                 )));
+            }
+            _ = stop_poll.tick() => {
+                if stop_now.load(std::sync::atomic::Ordering::Relaxed) {
+                    {
+                        let mut st = preview.borrow_mut();
+                        st.flush_to_log(tx_evt, 600);
+                    }
+                    {
+                        let mut reasoning = reasoning_preview.borrow_mut();
+                        reasoning.flush_to_log(tx_evt, 600);
+                    }
+                    let _ = tx_evt.send(AgentEvent::Log("[Model] 已请求停止，正在取消模型请求...".to_string()));
+                    return Err(anyhow::Error::new(StopRequested));
+                }
             }
         }
     }
