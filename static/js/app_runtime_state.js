@@ -102,6 +102,14 @@ function applyStaticCopyToDom() {
     document.title = txt('app_title', document.title);
     const h1 = document.querySelector('.hero h1');
     if (h1) h1.textContent = txt('app_header', h1.textContent);
+    const brand = txt('app_brand', 'KACF');
+    const topBrand = document.getElementById('topbar_brand');
+    if (topBrand) {
+        topBrand.textContent = brand;
+        topBrand.setAttribute('aria-label', brand);
+    }
+    const sideBrand = document.getElementById('sidebar_brand');
+    if (sideBrand) sideBrand.textContent = brand;
     const staticMap = [
         ['hero_sub', 'hero_sub'],
         ['backend_offline_banner', 'banner_backend_offline'],
