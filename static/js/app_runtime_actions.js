@@ -1,3 +1,4 @@
+(() => {
 function assertRuntimeActionDependencies() {
     const root = window.KACF || {};
     const required = {
@@ -708,3 +709,4 @@ async function init() {
 }
 
 init();
+})();

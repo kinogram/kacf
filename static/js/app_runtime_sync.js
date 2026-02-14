@@ -1,3 +1,4 @@
+(() => {
 function assertRuntimeSyncDependencies() {
     const root = window.KACF || {};
     const required = {
@@ -439,3 +440,4 @@ window.KACF.runtimeSync = {
     startEventStream,
     closeEventStream,
 };
+})();
