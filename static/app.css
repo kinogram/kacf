@@ -17,6 +17,9 @@
             --grid-gap: 12px;
             --sidebar-w: 320px;
             --sidebar-w-collapsed: 64px;
+
+            /* Updated at runtime based on #topbar height (for mobile sidebar layout). */
+            --topbar-h: 0px;
         }
         * { box-sizing: border-box; }
         body {
@@ -627,9 +630,10 @@
             .sidebar {
                 position: fixed;
                 left: 0;
-                top: 0;
+                top: calc(var(--topbar-h) + 8px);
                 bottom: 0;
                 width: min(90vw, 380px);
+                height: calc(100dvh - (var(--topbar-h) + 8px));
                 max-height: none;
                 z-index: 1200;
                 border-radius: 0 14px 14px 0;
@@ -675,6 +679,7 @@
             .sidebar-overlay {
                 position: fixed;
                 inset: 0;
+                top: var(--topbar-h);
                 background: rgba(13, 25, 48, 0.32);
                 z-index: 1100;
             }

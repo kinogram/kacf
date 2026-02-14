@@ -454,7 +454,16 @@ function setIconButton(btn, iconName, label) {
     if (label) btn.setAttribute('aria-label', label);
 }
 
+function syncTopbarHeightVar() {
+    const topbar = document.getElementById('topbar');
+    if (!topbar) return;
+    const h = Math.max(0, Math.round(topbar.getBoundingClientRect().height));
+    if (!h) return;
+    document.documentElement.style.setProperty('--topbar-h', `${h}px`);
+}
+
 function applySidebarLayout() {
+    syncTopbarHeightVar();
     const root = document.body;
     const narrow = isNarrowViewport();
     root.classList.toggle('sidebar-collapsed', !narrow && sidebarCollapsed);
