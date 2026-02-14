@@ -300,11 +300,16 @@ function renderUnattendedState() {
     const resumeLeft = runSessionActive
         ? Math.max(0, unattendedAutoResumeRemaining)
         : Math.max(0, autoResumeAttemptsSetting());
-    el.textContent = fmt('unattended_state_line', '', {
+    const line = fmt('unattended_state_line', '', {
         mode: unattendedMode ? txt('unattended_mode_on', '') : txt('unattended_mode_off', ''),
         resume_left: String(resumeLeft),
         stop: stopText,
     });
+    if (typeof setTopbarHintText === 'function') {
+        setTopbarHintText(el, line);
+    } else {
+        el.textContent = line;
+    }
 }
 
 function clearUnattendedAutoResumeTimer() {

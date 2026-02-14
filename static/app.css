@@ -72,9 +72,26 @@
             margin-top: 0;
             font-size: 12px;
             line-height: 1.25;
+            overflow: hidden;
+        }
+        .topbar-status .hint .marquee-inner {
+            display: block;
+            width: 100%;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+        }
+        .topbar-status .hint.marquee .marquee-inner {
+            display: inline-block;
+            width: auto;
+            overflow: visible;
+            text-overflow: clip;
+            padding-right: 24px;
+            animation: topbar-marquee var(--marquee-duration, 10s) linear infinite;
+        }
+        @keyframes topbar-marquee {
+            0% { transform: translateX(0); }
+            100% { transform: translateX(calc(-1 * var(--marquee-shift, 0px))); }
         }
         .app-shell {
             display: grid;

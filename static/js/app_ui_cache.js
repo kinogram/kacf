@@ -310,7 +310,13 @@ function renderUiForViewBucket() {
     status.className = 'status-box ' + (normalized.status_class || '');
     const bar = document.getElementById('runbar');
     bar.dataset.state = normalized.run_state || 'idle';
-    document.getElementById('runbar_text').textContent = fmt('runbar_line', '', { state: normalized.run_text || txt('run_idle', '') });
+    const runText = fmt('runbar_line', '', { state: normalized.run_text || txt('run_idle', '') });
+    const runEl = document.getElementById('runbar_text');
+    if (typeof setTopbarHintText === 'function') {
+        setTopbarHintText(runEl, runText);
+    } else if (runEl) {
+        runEl.textContent = runText;
+    }
     document.getElementById('diagnostics').textContent = normalized.diagnostics_text || txt('diagnostics_none', '');
     renderDiffPanel(normalized.diff_text || '');
     const shouldShowClarify = shouldAllowClarifyInteraction() && Array.isArray(normalized.clarify_questions) && normalized.clarify_questions.length > 0;

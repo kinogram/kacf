@@ -730,10 +730,39 @@ function nowText() {
     return new Date().toLocaleString();
 }
 
+function setTopbarHintText(el, text) {
+    if (!el) return;
+    const innerClass = 'marquee-inner';
+    let inner = el.querySelector(`:scope > span.${innerClass}`);
+    if (!inner) {
+        el.textContent = '';
+        inner = document.createElement('span');
+        inner.className = innerClass;
+        el.appendChild(inner);
+    }
+    inner.textContent = String(text || '');
+    el.classList.remove('marquee');
+    el.style.removeProperty('--marquee-shift');
+    el.style.removeProperty('--marquee-duration');
+
+    // Defer measurement until layout is stable.
+    requestAnimationFrame(() => {
+        const maxW = Math.max(0, el.clientWidth);
+        const w = Math.max(0, inner.scrollWidth);
+        const overflow = w - maxW;
+        if (overflow <= 8) return;
+        const shift = overflow + 24; // extra gap so the tail clears before looping
+        const duration = Math.max(6, Math.min(18, shift / 35)); // scale with content length
+        el.classList.add('marquee');
+        el.style.setProperty('--marquee-shift', `${shift}px`);
+        el.style.setProperty('--marquee-duration', `${duration}s`);
+    });
+}
+
 function setRunningProjectIndicator(label) {
     const el = document.getElementById('running_project_text');
     if (!el) return;
-    el.textContent = fmt('running_project_line', '', { name: label || txt('running_project_none', '') });
+    setTopbarHintText(el, fmt('running_project_line', '', { name: label || txt('running_project_none', '') }));
     renderProjectAccordion();
 }
 

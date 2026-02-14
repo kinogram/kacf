@@ -541,6 +541,15 @@ function bindEvents() {
             sidebarMobileOpen = false;
         }
         applySidebarLayout();
+        // Recompute topbar marquee thresholds when layout changes.
+        const ids = ['runbar_text', 'running_project_text', 'unattended_state_text'];
+        ids.forEach(id => {
+            const el = document.getElementById(id);
+            if (el && typeof setTopbarHintText === 'function') {
+                const inner = el.querySelector(':scope > span.marquee-inner');
+                if (inner) setTopbarHintText(el, inner.textContent || '');
+            }
+        });
     });
 }
 
