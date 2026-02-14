@@ -545,10 +545,16 @@
             line-height: 1.5;
         }
         body.sidebar-collapsed .app-shell {
-            grid-template-columns: var(--sidebar-w-collapsed) minmax(0, 1fr);
+            /* When collapsed, hide the sidebar column entirely (topbar toggle remains accessible). */
+            grid-template-columns: 0 minmax(0, 1fr);
+            gap: 0;
         }
         body.sidebar-collapsed .sidebar {
-            padding: 10px 8px;
+            width: 0;
+            padding: 0;
+            border: none;
+            box-shadow: none;
+            overflow: hidden;
         }
         body.sidebar-collapsed .sidebar-brand,
         body.sidebar-collapsed .sidebar-content {
