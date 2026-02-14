@@ -412,13 +412,22 @@ function setIconButton(btn, iconName, label) {
     btn.classList.add('btn-icon-only');
     // Clear previous content reliably.
     while (btn.firstChild) btn.removeChild(btn.firstChild);
-    // Use plain text glyphs directly on the button to eliminate any span/CSS interactions.
-    // ASCII-only fallback ensures glyphs exist on all devices.
-    const fallbackMap = { menu: '|||', x: 'X', 'chevron-left': '<', 'chevron-right': '>' };
-    const glyph = fallbackMap[iconName] || '·';
-    btn.textContent = glyph;
-    btn.style.fontSize = '20px';
-    btn.style.lineHeight = '1';
+
+    // Prefer SVG icons (DeepSeek-like) but keep ASCII fallback for maximum compatibility.
+    const svg = buildIconSvg(iconName);
+    if (svg) {
+        const span = document.createElement('span');
+        span.className = 'btn-icon';
+        span.setAttribute('aria-hidden', 'true');
+        span.appendChild(svg);
+        btn.appendChild(span);
+    } else {
+        const fallbackMap = { menu: '|||', x: 'X', 'chevron-left': '<', 'chevron-right': '>' };
+        btn.textContent = fallbackMap[iconName] || '·';
+        btn.style.fontSize = '20px';
+        btn.style.lineHeight = '1';
+    }
+
     btn.title = label || '';
     if (label) btn.setAttribute('aria-label', label);
 }
