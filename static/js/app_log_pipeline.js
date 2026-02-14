@@ -230,4 +230,5 @@ window.KACF.logPipeline = {
     isRunStateActive,
     setBackendOfflineState,
     markBackendAlive,
+    markBackendFailure,
 };

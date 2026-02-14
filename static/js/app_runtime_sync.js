@@ -22,6 +22,7 @@ function assertRuntimeSyncDependencies() {
         ],
         runtimeState: [
             'stopAfterMinutesSetting',
+            'autoResumeAttemptsSetting',
             'markRunSessionStarted',
             'syncStoppedStateIfNeeded',
             'checkBackendHealth',
@@ -30,6 +31,7 @@ function assertRuntimeSyncDependencies() {
             'applyDoneOutcome',
             'resetStopTimerState',
             'renderUnattendedState',
+            'getFormData',
         ],
         projects: ['saveCurrentProject', 'ensureWorkspaceForCurrentProject'],
     };
@@ -74,6 +76,7 @@ const {
 } = window.KACF.logPipeline;
 const {
     stopAfterMinutesSetting,
+    autoResumeAttemptsSetting,
     markRunSessionStarted,
     syncStoppedStateIfNeeded,
     checkBackendHealth,
@@ -82,6 +85,7 @@ const {
     applyDoneOutcome,
     resetStopTimerState,
     renderUnattendedState,
+    getFormData,
 } = window.KACF.runtimeState;
 const { saveCurrentProject, ensureWorkspaceForCurrentProject } = window.KACF.projects;
 
