@@ -17,11 +17,6 @@
             --grid-gap: 12px;
             --sidebar-w: 320px;
             --sidebar-w-collapsed: 64px;
-
-            /* Corner sidebar button sizing. */
-            --corner-btn-offset: 10px;
-            --corner-btn-gap: 12px;
-            --corner-btn-size: 40px;
         }
         * { box-sizing: border-box; }
         body {
@@ -37,11 +32,50 @@
             margin: 0 auto;
             padding: var(--shell-pad-top) var(--shell-pad-x) 18px;
         }
+        .topbar {
+            position: sticky;
+            top: 0;
+            z-index: 1500;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.86);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            box-shadow: 0 10px 26px rgba(20, 60, 130, 0.10);
+        }
+        .topbar-brand {
+            font-weight: 900;
+            letter-spacing: 0.6px;
+            color: #24406d;
+            white-space: nowrap;
+            user-select: none;
+        }
+        .topbar-status {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+        .topbar-status .runbar {
+            margin-top: 0;
+            height: 8px;
+        }
+        .topbar-status .hint {
+            margin-top: 6px;
+            font-size: 12px;
+            line-height: 1.25;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
         .app-shell {
             display: grid;
             grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
             gap: var(--grid-gap);
             align-items: start;
+            margin-top: 12px;
         }
         .sidebar {
             position: sticky;
@@ -80,8 +114,6 @@
             border-radius: 14px;
             background: linear-gradient(120deg, #f6faff, #ffffff);
             box-shadow: 0 8px 28px rgba(20, 60, 130, 0.08);
-            /* Leave room for the fixed corner sidebar button so the title block is never covered. */
-            padding-left: calc(20px + var(--corner-btn-size) + var(--corner-btn-gap));
         }
         .hero h1 {
             margin: 0 0 6px;
@@ -226,16 +258,6 @@
         .btn-danger:active:not(:disabled) {
             background: #98211a;
             filter: none;
-        }
-        .sidebar-corner-btn {
-            position: fixed;
-            top: calc(var(--shell-pad-top) + var(--corner-btn-offset) + env(safe-area-inset-top, 0px));
-            /* Desktop: align with the main column (avoid covering the sidebar). */
-            left: calc(var(--shell-pad-x) + var(--sidebar-w) + var(--grid-gap) + var(--corner-btn-offset) + env(safe-area-inset-left, 0px));
-            z-index: 1300;
-            border: 1px solid #c9d8f4;
-            background: #f3f8ff;
-            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
         }
         .hint {
             margin-top: 10px;
@@ -529,9 +551,6 @@
         body.sidebar-collapsed .sidebar-content {
             display: none;
         }
-        body.sidebar-collapsed .sidebar-corner-btn {
-            left: calc(var(--shell-pad-x) + var(--sidebar-w-collapsed) + var(--grid-gap) + var(--corner-btn-offset) + env(safe-area-inset-left, 0px));
-        }
         @media (min-width: 1024px) {
             .grid { grid-template-columns: 1.15fr 1fr; }
             .row.two { grid-template-columns: 1fr 1fr; }
@@ -548,7 +567,6 @@
             }
             .hero {
                 padding: 14px;
-                padding-left: calc(14px + var(--corner-btn-size) + var(--corner-btn-gap));
             }
             .hero h1 {
                 font-size: 24px;
@@ -605,11 +623,6 @@
             }
             .app-shell {
                 grid-template-columns: 1fr;
-            }
-            .sidebar-corner-btn {
-                /* Mobile: anchor to the content area (no persistent sidebar column). */
-                top: calc(8px + var(--corner-btn-offset) + env(safe-area-inset-top, 0px));
-                left: calc(8px + var(--corner-btn-offset) + env(safe-area-inset-left, 0px));
             }
             .sidebar {
                 position: fixed;

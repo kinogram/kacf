@@ -152,7 +152,6 @@ function applyStaticCopyToDom() {
         ['go_running_project_btn', 'btn_go_running'],
         ['revert_btn', 'btn_revert'],
         ['push_btn', 'btn_push'],
-        ['open_global_config_btn', 'btn_open_global'],
         ['save_global_config_btn', 'btn_save_global'],
         ['close_global_config_btn', 'btn_close'],
         ['project_new_btn', 'btn_project_new'],
@@ -175,6 +174,12 @@ function applyStaticCopyToDom() {
         // Clear any leftover icon-only markup/tooltips from older builds.
         el.title = '';
     });
+
+    // Global settings button is icon-only in the top bar (gear). Use language pack for tooltip/aria label.
+    const globalBtn = document.getElementById('open_global_config_btn');
+    if (globalBtn && typeof setIconButton === 'function') {
+        setIconButton(globalBtn, 'gear', txt('btn_open_global', ''));
+    }
     const logBtnTips = [
         ['export_log_btn', 'tip_export_log'],
         ['export_snapshot_btn', 'tip_export_snapshot'],

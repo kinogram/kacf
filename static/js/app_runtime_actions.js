@@ -526,7 +526,7 @@ function bindEvents() {
     document.getElementById('global_config_modal').addEventListener('click', (e) => {
         if (e.target && e.target.id === 'global_config_modal') closeGlobalConfigModal();
     });
-    document.getElementById('sidebar_corner_btn').addEventListener('click', () => {
+    document.getElementById('sidebar_toggle_btn').addEventListener('click', () => {
         if (isNarrowViewport()) {
             setSidebarMobileOpen(!sidebarMobileOpen);
         } else {

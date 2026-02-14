@@ -387,6 +387,28 @@ function buildIconSvg(name) {
     svg.setAttribute('stroke-linecap', 'round');
     svg.setAttribute('stroke-linejoin', 'round');
     svg.setAttribute('aria-hidden', 'true');
+
+    if (name === 'gear') {
+        // Lucide "settings" style cog: path + center circle.
+        const path = document.createElementNS(NS, 'path');
+        path.setAttribute('d', 'M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.51a2 2 0 0 1 1-1.72l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z');
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke', 'currentColor');
+        path.setAttribute('stroke-width', '2');
+        path.setAttribute('stroke-linecap', 'round');
+        path.setAttribute('stroke-linejoin', 'round');
+        svg.appendChild(path);
+        const circle = document.createElementNS(NS, 'circle');
+        circle.setAttribute('cx', '12');
+        circle.setAttribute('cy', '12');
+        circle.setAttribute('r', '3');
+        circle.setAttribute('fill', 'none');
+        circle.setAttribute('stroke', 'currentColor');
+        circle.setAttribute('stroke-width', '2');
+        svg.appendChild(circle);
+        return svg;
+    }
+
     const path = document.createElementNS(NS, 'path');
     const dMap = {
         'chevron-left': 'M15 6l-6 6 6 6',
@@ -437,7 +459,7 @@ function applySidebarLayout() {
     const narrow = isNarrowViewport();
     root.classList.toggle('sidebar-collapsed', !narrow && sidebarCollapsed);
     root.classList.toggle('sidebar-open', narrow && sidebarMobileOpen);
-    const b = document.getElementById('sidebar_corner_btn');
+    const b = document.getElementById('sidebar_toggle_btn');
     debugSidebarLayoutOnce(narrow, b, null);
     if (!b) return;
     b.style.display = 'inline-flex';
@@ -448,7 +470,7 @@ function applySidebarLayout() {
         ? (sidebarMobileOpen ? 'x' : 'menu')
         : (sidebarCollapsed ? 'chevron-right' : 'chevron-left');
     setIconButton(b, iconName, label);
-    maybeReportIconVisibility(b, 'sidebar_corner_btn', narrow);
+    maybeReportIconVisibility(b, 'sidebar_toggle_btn', narrow);
 }
 
 function setSidebarCollapsed(next) {

@@ -8,9 +8,17 @@
 </head>
 <body>
 <div class="shell">
-    <!-- Single DeepSeek-like sidebar toggle button: fixed at top-left for both desktop and mobile. -->
-    <!-- Fallback label so the button is never visually empty even if JS fails early. -->
-    <button class="btn-ghost sidebar-corner-btn" id="sidebar_corner_btn">|||</button>
+    <header class="topbar" id="topbar">
+        <!-- Sidebar toggle: desktop collapses/expands; mobile opens/closes the overlay sidebar. -->
+        <button class="btn-ghost btn-icon-only" id="sidebar_toggle_btn">|||</button>
+        <div class="topbar-brand" aria-label="KACF">KACF</div>
+        <div class="topbar-status" role="status" aria-live="polite">
+            <div class="runbar" id="runbar" data-state="idle"><div class="runbar-fill"></div></div>
+            <div class="hint" id="runbar_text"></div>
+        </div>
+        <!-- Global settings: gear icon only; accessible label is set via language pack at runtime. -->
+        <button class="btn-ghost btn-icon-only" id="open_global_config_btn">⚙</button>
+    </header>
     <div class="sidebar-overlay" id="sidebar_overlay"></div>
     <div class="app-shell">
         <aside class="sidebar" id="project_sidebar">
@@ -35,7 +43,6 @@
                     <button class="btn-ghost" id="project_delete_btn"></button>
                 </div>
                 <div class="buttons">
-                    <button class="btn-ghost" id="open_global_config_btn"></button>
                 </div>
                 <div class="hint" id="project_dirty_state"></div>
                 <input id="workspace" type="hidden" value="">
@@ -131,8 +138,6 @@
                 <section class="card">
             <h2 class="title" id="section_status_title"></h2>
             <div class="status-box" id="status"></div>
-            <div class="runbar" id="runbar" data-state="idle"><div class="runbar-fill"></div></div>
-            <div class="hint" id="runbar_text"></div>
             <div class="hint" id="running_project_text"></div>
             <div class="hint" id="readonly_mode_text"></div>
             <div class="hint" id="unattended_state_text"></div>
