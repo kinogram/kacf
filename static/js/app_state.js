@@ -267,13 +267,23 @@ function applySidebarLayout() {
     root.classList.toggle('sidebar-open', narrow && sidebarMobileOpen);
     const t = document.getElementById('sidebar_toggle_btn');
     if (t) {
-        t.textContent = narrow
+        const label = narrow
             ? txt('btn_sidebar_close', '')
             : (sidebarCollapsed ? txt('btn_sidebar_expand', '') : txt('btn_sidebar_collapse', ''));
-        t.title = t.textContent;
+        const icon = narrow ? '&#10005;' : (sidebarCollapsed ? '&#187;' : '&#171;');
+        t.classList.add('btn-icon-only');
+        t.innerHTML = `<span class="btn-icon" aria-hidden="true">${icon}</span>`;
+        t.title = label;
+        t.setAttribute('aria-label', label);
     }
     const m = document.getElementById('sidebar_mobile_btn');
-    if (m) m.textContent = txt('btn_sidebar_open', '');
+    if (m) {
+        const label = txt('btn_sidebar_open', '');
+        m.classList.add('btn-icon-only');
+        m.innerHTML = '<span class="btn-icon" aria-hidden="true">&#9776;</span>';
+        m.title = label;
+        m.setAttribute('aria-label', label);
+    }
 }
 
 function setSidebarCollapsed(next) {

@@ -166,6 +166,21 @@
             cursor: default;
             background: #9db3d6;
         }
+        .btn-icon-only {
+            width: 40px;
+            min-width: 40px;
+            height: 40px;
+            padding: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .btn-icon {
+            display: inline-block;
+            font-size: 18px;
+            line-height: 1;
+            pointer-events: none;
+        }
         .btn-ghost { background: #edf3fd; color: #24406d; }
         .btn-ghost:hover:not(:disabled),
         .btn-ghost:focus-visible:not(:disabled),
@@ -510,12 +525,9 @@
                 padding: 11px 14px;
             }
             .buttons {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
+                display: flex;
+                flex-wrap: wrap;
                 gap: 8px;
-            }
-            .buttons > button {
-                width: 100%;
             }
             .project-tools {
                 grid-template-columns: 1fr;
@@ -601,9 +613,6 @@
             }
         }
         @media (max-width: 640px) {
-            .buttons {
-                grid-template-columns: 1fr;
-            }
             .hero h1 {
                 font-size: 21px;
             }

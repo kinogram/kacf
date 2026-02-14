@@ -38,9 +38,8 @@ function assertRuntimeActionDependencies() {
             'bindGlobalOptionInput',
             'applyGlobalOptionsToInputs',
             'scheduleUiCacheSave',
-            'renderCurrentLogView',
         ],
-        logPipeline: ['setStatus', 'setRunState', 'appendLog'],
+        logPipeline: ['setStatus', 'setRunState', 'appendLog', 'renderCurrentLogView'],
         runtimeState: [
             'stopAfterMinutesSetting',
             'markRunSessionStarted',
@@ -139,9 +138,8 @@ const {
     bindGlobalOptionInput,
     applyGlobalOptionsToInputs,
     scheduleUiCacheSave,
-    renderCurrentLogView,
 } = window.KACF.uiCache;
-const { setStatus, setRunState, appendLog } = window.KACF.logPipeline;
+const { setStatus, setRunState, appendLog, renderCurrentLogView } = window.KACF.logPipeline;
 const {
     stopAfterMinutesSetting,
     markRunSessionStarted,
