@@ -547,7 +547,14 @@ function bindEvents() {
             const el = document.getElementById(id);
             if (el && typeof setTopbarHintText === 'function') {
                 const inner = el.querySelector(':scope > span.marquee-inner');
-                if (inner) setTopbarHintText(el, inner.textContent || '');
+                if (inner) {
+                    const curW = Math.max(0, el.clientWidth);
+                    const prevW = Number(el.dataset.marqueeClientWidth || '0');
+                    if (Math.abs(curW - prevW) >= 1) {
+                        el.dataset.marqueeClientWidth = String(curW);
+                        setTopbarHintText(el, inner.textContent || '', { force: true });
+                    }
+                }
             }
         });
     });

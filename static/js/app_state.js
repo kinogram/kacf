@@ -730,8 +730,9 @@ function nowText() {
     return new Date().toLocaleString();
 }
 
-function setTopbarHintText(el, text) {
+function setTopbarHintText(el, text, opts) {
     if (!el) return;
+    opts = opts || {};
     const innerClass = 'marquee-inner';
     let inner = el.querySelector(`:scope > span.${innerClass}`);
     if (!inner) {
@@ -740,7 +741,12 @@ function setTopbarHintText(el, text) {
         inner.className = innerClass;
         el.appendChild(inner);
     }
-    inner.textContent = String(text || '');
+
+    const next = String(text || '');
+    const sameText = inner.textContent === next;
+    if (!opts.force && sameText && !opts.allowResetWhenSameText) return;
+
+    inner.textContent = next;
     el.classList.remove('marquee');
     el.style.removeProperty('--marquee-shift');
     el.style.removeProperty('--marquee-duration');
