@@ -407,8 +407,7 @@ async function submitClarify(e) {
 
 function renderDiff(diffText) {
     const bucket = currentLogBucket();
-    const safe = sanitizeDiffText(diffText || '');
-    writeBucketUiState(bucket, { diff_text: safe });
+    writeBucketUiState(bucket, { diff_text: String(diffText || '') });
     // Do not render diff in the main UI; it is shown in a dedicated diff tab.
 }
 

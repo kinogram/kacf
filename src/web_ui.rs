@@ -535,20 +535,6 @@ struct DiffDataResponse {
     diff_text: String,
 }
 
-fn truncate_head_chars(input: &str, max_chars: usize) -> String {
-    if max_chars == 0 {
-        return String::new();
-    }
-    let mut out = String::new();
-    for (i, ch) in input.chars().enumerate() {
-        if i >= max_chars {
-            break;
-        }
-        out.push(ch);
-    }
-    out
-}
-
 async fn diff_data(data: web::Data<AppState>, query: web::Query<DiffDataQuery>) -> impl Responder {
     let bucket = query.bucket.trim().to_string();
     if bucket.is_empty() || bucket.len() > 512 {
@@ -599,7 +585,7 @@ async fn diff_data(data: web::Data<AppState>, query: web::Query<DiffDataQuery>) 
 
     // Prefer computing diff from git to avoid propagating any "[truncated ...]" markers
     // inserted by other layers. Fall back to cached diff when needed.
-    let mut diff_text = if let Some(ws) = project_workspace.as_deref() {
+    let diff_text = if let Some(ws) = project_workspace.as_deref() {
         if let Ok(path) = require_managed_workspace(ws) {
             crate::git_utils::diff_last_commit(&path).unwrap_or(cached_diff_text)
         } else {
@@ -608,9 +594,6 @@ async fn diff_data(data: web::Data<AppState>, query: web::Query<DiffDataQuery>) 
     } else {
         cached_diff_text
     };
-
-    // Server-side safety cap (independent from any client-side limits).
-    diff_text = truncate_head_chars(&diff_text, 20_000);
 
     HttpResponse::Ok().json(DiffDataResponse {
         ok: true,

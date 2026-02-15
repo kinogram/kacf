@@ -205,6 +205,8 @@
 
     async function init() {
         document.body.classList.add('diff-page');
+        // Avoid re-rendering identical diff content: re-writing innerHTML clears text selection.
+        let lastRenderedDiffText = null;
         const cache = await fetchUiCache();
         sharedConfig.language = normalizeLanguageCode(cache?.shared_config?.language || '');
         globalOptions.stop_after_minutes = String(cache?.global_options?.stop_after_minutes || '').trim();
@@ -232,7 +234,11 @@
             const [uiState, diffData] = await Promise.all([fetchUiState(), fetchDiffData(bucket)]);
             if (diffData) {
                 renderTopbarFromBucketState(diffData);
-                renderDiff(diffData.diff_text || '');
+                const nextDiff = String(diffData.diff_text || '');
+                if (nextDiff !== lastRenderedDiffText) {
+                    renderDiff(nextDiff);
+                    lastRenderedDiffText = nextDiff;
+                }
             }
             renderUnattendedState(uiState?.runtime || null);
         };

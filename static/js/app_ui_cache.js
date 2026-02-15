@@ -120,40 +120,16 @@ function readBucketUiState(bucket) {
     const raw = all[bucket];
     if (!raw || typeof raw !== 'object') return defaultBucketUiState();
     const merged = { ...defaultBucketUiState(), ...raw };
-    merged.diff_text = sanitizeDiffText(merged.diff_text || '');
     return merged;
 }
 
 function writeBucketUiState(bucket, patch) {
     const all = loadProjectUiStateMap();
     const next = { ...readBucketUiState(bucket), ...(patch || {}) };
-    next.diff_text = sanitizeDiffText(next.diff_text || '');
     all[bucket] = next;
     touchBucket(uiStateBucketTouchedAt, bucket);
     pruneUiStateBuckets();
     saveProjectUiStateMap(all);
-}
-
-function renderDiffPanel(diffText) {
-    const safe = sanitizeDiffText(diffText || '');
-    const section = document.getElementById('diff_section');
-    const diffElem = document.getElementById('diff');
-    if (!safe) {
-        section.style.display = 'none';
-        diffElem.innerHTML = '';
-        return;
-    }
-    const lines = safe.split('\n');
-    diffElem.innerHTML = lines.map(line => {
-        if (line.startsWith('+') && !line.startsWith('+++')) {
-            return `<div class="diff-line-add">${escapeHtml(line)}</div>`;
-        }
-        if (line.startsWith('-') && !line.startsWith('---')) {
-            return `<div class="diff-line-del">${escapeHtml(line)}</div>`;
-        }
-        return `<div class="diff-line-other">${escapeHtml(line)}</div>`;
-    }).join('');
-    section.style.display = 'block';
 }
 
 function normalizeClarifyQuestions(questions) {

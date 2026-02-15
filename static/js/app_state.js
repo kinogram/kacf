@@ -28,7 +28,6 @@ const BACKEND_FAILURE_THRESHOLD = 3;
 const SSE_ERROR_LIMIT = 6;
 const SSE_CONNECT_GRACE_MS = 10000;
 const DEFAULT_LOG_MAX_CHARS = 20000;
-const DEFAULT_DIFF_MAX_CHARS = 20000; // fixed (no UI option) but still caps diff payloads for safety.
 const LARGE_CHAR_LIMIT_WARNING_THRESHOLD = 30000;
 const GLOBAL_OPTION_DEFAULTS = {
     auto_resume_attempts: '',
@@ -271,10 +270,6 @@ function truncateTailChars(raw, maxChars) {
     return text.slice(text.length - maxChars);
 }
 
-function sanitizeDiffText(raw) {
-    return truncateTailChars(raw, DEFAULT_DIFF_MAX_CHARS);
-}
-
 function sanitizeLogContent(raw) {
     const tail = truncateTailChars(raw, logMaxCharsSetting());
     if (!tail) return '';
@@ -297,11 +292,7 @@ function sanitizeProjectUiStateMap(rawMap) {
     Object.keys(rawMap).forEach(k => {
         const entry = rawMap[k];
         if (!entry || typeof entry !== 'object') return;
-        const normalized = { ...entry };
-        if (typeof normalized.diff_text === 'string') {
-            normalized.diff_text = sanitizeDiffText(normalized.diff_text);
-        }
-        out[String(k)] = normalized;
+        out[String(k)] = { ...entry };
     });
     return out;
 }
