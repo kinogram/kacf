@@ -372,6 +372,15 @@ async fn list_projects(req: HttpRequest, data: web::Data<AppState>) -> impl Resp
     if let Err(e) = web_ui_authz::ensure_user_dirs(&ctx) {
         return HttpResponse::InternalServerError().body(format!("init user dirs failed: {}", e));
     }
+    {
+        let mut fields: std::collections::HashMap<&str, String> = std::collections::HashMap::new();
+        fields.insert(
+            "user",
+            ctx.username.clone().unwrap_or_else(|| "guest".to_string()),
+        );
+        fields.insert("role", format!("{:?}", ctx.role));
+        data.auth.audit("web_list_projects", &fields);
+    }
     let _guard = lock_recover(&data.projects_lock, "projects_lock");
     let mut items = read_ui_cache_for_root(&ctx.managed_root_dir).projects;
     web_ui_projects::sort_projects_by_updated_desc(&mut items);
@@ -388,6 +397,13 @@ async fn upsert_project(
         Err(resp) => return resp,
     };
     if !ctx.can_write {
+        let mut fields: std::collections::HashMap<&str, String> = std::collections::HashMap::new();
+        fields.insert(
+            "user",
+            ctx.username.clone().unwrap_or_else(|| "guest".to_string()),
+        );
+        fields.insert("role", format!("{:?}", ctx.role));
+        data.auth.audit("web_upsert_project_denied_readonly", &fields);
         return HttpResponse::Forbidden().body("read-only session");
     }
     if let Err(e) = web_ui_authz::ensure_user_dirs(&ctx) {
@@ -403,6 +419,14 @@ async fn upsert_project(
     if let Err(e) = write_ui_cache_for_root(&ctx.managed_root_dir, &cache) {
         return HttpResponse::InternalServerError().body(format!("write projects failed: {}", e));
     }
+    {
+        let mut fields: std::collections::HashMap<&str, String> = std::collections::HashMap::new();
+        fields.insert("user", ctx.username.clone().unwrap_or_default());
+        fields.insert("role", format!("{:?}", ctx.role));
+        fields.insert("project_id", item.id.clone());
+        fields.insert("workspace", item.workspace.clone());
+        data.auth.audit("web_upsert_project", &fields);
+    }
     HttpResponse::Ok().json(item)
 }
 
@@ -416,6 +440,13 @@ async fn delete_project(
         Err(resp) => return resp,
     };
     if !ctx.can_write {
+        let mut fields: std::collections::HashMap<&str, String> = std::collections::HashMap::new();
+        fields.insert(
+            "user",
+            ctx.username.clone().unwrap_or_else(|| "guest".to_string()),
+        );
+        fields.insert("role", format!("{:?}", ctx.role));
+        data.auth.audit("web_delete_project_denied_readonly", &fields);
         return HttpResponse::Forbidden().body("read-only session");
     }
     if let Err(e) = web_ui_authz::ensure_user_dirs(&ctx) {
@@ -434,6 +465,13 @@ async fn delete_project(
     if let Err(e) = write_ui_cache_for_root(&ctx.managed_root_dir, &cache) {
         return HttpResponse::InternalServerError().body(format!("write projects failed: {}", e));
     }
+    {
+        let mut fields: std::collections::HashMap<&str, String> = std::collections::HashMap::new();
+        fields.insert("user", ctx.username.clone().unwrap_or_default());
+        fields.insert("role", format!("{:?}", ctx.role));
+        fields.insert("project_id", id);
+        data.auth.audit("web_delete_project", &fields);
+    }
     HttpResponse::Ok().body("deleted")
 }
 
@@ -442,6 +480,15 @@ async fn get_ui_cache(req: HttpRequest, data: web::Data<AppState>) -> impl Respo
         Ok(v) => v,
         Err(resp) => return resp,
     };
+    {
+        let mut fields: std::collections::HashMap<&str, String> = std::collections::HashMap::new();
+        fields.insert(
+            "user",
+            ctx.username.clone().unwrap_or_else(|| "guest".to_string()),
+        );
+        fields.insert("role", format!("{:?}", ctx.role));
+        data.auth.audit("web_get_ui_cache", &fields);
+    }
     let _guard = lock_recover(&data.projects_lock, "projects_lock");
     let payload = read_ui_cache_for_root(&ctx.managed_root_dir);
     HttpResponse::Ok().json(payload)
@@ -457,6 +504,13 @@ async fn put_ui_cache(
         Err(resp) => return resp,
     };
     if !ctx.can_write {
+        let mut fields: std::collections::HashMap<&str, String> = std::collections::HashMap::new();
+        fields.insert(
+            "user",
+            ctx.username.clone().unwrap_or_else(|| "guest".to_string()),
+        );
+        fields.insert("role", format!("{:?}", ctx.role));
+        data.auth.audit("web_put_ui_cache_denied_readonly", &fields);
         return HttpResponse::Forbidden().body("read-only session");
     }
     if let Err(e) = web_ui_authz::ensure_user_dirs(&ctx) {
@@ -467,7 +521,14 @@ async fn put_ui_cache(
     let mut payload = read_ui_cache_for_root(&ctx.managed_root_dir);
     web_ui_cache_logic::apply_ui_cache_patch(&mut payload, patch);
     match write_ui_cache_for_root(&ctx.managed_root_dir, &payload) {
-        Ok(_) => HttpResponse::Ok().body("saved"),
+        Ok(_) => {
+            let mut fields: std::collections::HashMap<&str, String> =
+                std::collections::HashMap::new();
+            fields.insert("user", ctx.username.clone().unwrap_or_default());
+            fields.insert("role", format!("{:?}", ctx.role));
+            data.auth.audit("web_put_ui_cache", &fields);
+            HttpResponse::Ok().body("saved")
+        }
         Err(e) => HttpResponse::InternalServerError().body(format!("write ui cache failed: {}", e)),
     }
 }

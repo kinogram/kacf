@@ -25,6 +25,7 @@ pub(crate) async fn start_session(
         return HttpResponse::InternalServerError().body(format!("init user dirs failed: {}", e));
     }
     let payload = body.into_inner();
+    let workspace_for_audit = payload.workspace.clone();
     let (history_max_messages, history_max_chars) = {
         let _guard = lock_recover(&data.projects_lock, "projects_lock");
         let cache = read_ui_cache_for_root(&ctx.managed_root_dir);
@@ -38,7 +39,14 @@ pub(crate) async fn start_session(
         &history_max_chars,
         false,
     ) {
-        Ok(_) => HttpResponse::Ok().body("started"),
+        Ok(_) => {
+            let mut fields: std::collections::HashMap<&str, String> = std::collections::HashMap::new();
+            fields.insert("user", ctx.username.clone().unwrap_or_default());
+            fields.insert("role", format!("{:?}", ctx.role));
+            fields.insert("workspace", workspace_for_audit);
+            data.auth.audit("web_start_session", &fields);
+            HttpResponse::Ok().body("started")
+        }
         Err(e) => {
             if e.contains("api_key is empty") {
                 HttpResponse::BadRequest().body(e)
@@ -114,7 +122,14 @@ pub(crate) async fn resume_session(
             &history_max_chars,
             true,
         ) {
-            Ok(_) => HttpResponse::Ok().body("resumed"),
+            Ok(_) => {
+                let mut fields: std::collections::HashMap<&str, String> = std::collections::HashMap::new();
+                fields.insert("user", ctx.username.clone().unwrap_or_default());
+                fields.insert("role", format!("{:?}", ctx.role));
+                fields.insert("project_id", payload.project_id);
+                data.auth.audit("web_resume_session", &fields);
+                HttpResponse::Ok().body("resumed")
+            }
             Err(e) => {
                 if e.contains("already running") {
                     HttpResponse::Conflict().body(e)
@@ -182,6 +197,12 @@ pub(crate) async fn answer_clarify(
     }) {
         return HttpResponse::InternalServerError().body(format!("send clarify failed: {}", e));
     }
+    {
+        let mut fields: std::collections::HashMap<&str, String> = std::collections::HashMap::new();
+        fields.insert("user", ctx.username.clone().unwrap_or_default());
+        fields.insert("role", format!("{:?}", ctx.role));
+        data.auth.audit("web_clarify", &fields);
+    }
     HttpResponse::Ok().body("clarify sent")
 }
 
@@ -206,6 +227,12 @@ pub(crate) async fn push_remote(
     if let Err(e) = data.tx_req.send(req) {
         return HttpResponse::InternalServerError().body(format!("send push failed: {}", e));
     }
+    {
+        let mut fields: std::collections::HashMap<&str, String> = std::collections::HashMap::new();
+        fields.insert("user", ctx.username.clone().unwrap_or_default());
+        fields.insert("role", format!("{:?}", ctx.role));
+        data.auth.audit("web_push_remote", &fields);
+    }
     HttpResponse::Ok().body("push sent")
 }
 
@@ -219,6 +246,12 @@ pub(crate) async fn revert_last(req: HttpRequest, data: web::Data<AppState>) -> 
     }
     if let Err(e) = data.tx_req.send(AgentRequest::RevertLast) {
         return HttpResponse::InternalServerError().body(format!("send revert failed: {}", e));
+    }
+    {
+        let mut fields: std::collections::HashMap<&str, String> = std::collections::HashMap::new();
+        fields.insert("user", ctx.username.clone().unwrap_or_default());
+        fields.insert("role", format!("{:?}", ctx.role));
+        data.auth.audit("web_revert_last", &fields);
     }
     HttpResponse::Ok().body("revert sent")
 }
@@ -236,7 +269,13 @@ pub(crate) async fn stop_session(req: HttpRequest, data: web::Data<AppState>) ->
     data.stop_now
         .store(true, std::sync::atomic::Ordering::Relaxed);
     match data.tx_req.send(AgentRequest::Stop) {
-        Ok(_) => HttpResponse::Ok().body("stop sent"),
+        Ok(_) => {
+            let mut fields: std::collections::HashMap<&str, String> = std::collections::HashMap::new();
+            fields.insert("user", ctx.username.clone().unwrap_or_default());
+            fields.insert("role", format!("{:?}", ctx.role));
+            data.auth.audit("web_stop_session", &fields);
+            HttpResponse::Ok().body("stop sent")
+        }
         Err(e) => {
             runtime.last_error = format!("stop channel unavailable: {}", e);
             HttpResponse::Ok().body("stop acknowledged (channel unavailable)")
