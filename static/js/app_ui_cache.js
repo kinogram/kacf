@@ -311,7 +311,6 @@ window.KACF.uiCache = {
     defaultBucketUiState,
     readBucketUiState,
     writeBucketUiState,
-    renderDiffPanel,
     normalizeClarifyQuestions,
     snapshotClarifyAnswers,
     renderClarifyQuestions,
