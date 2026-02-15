@@ -764,10 +764,36 @@ function setTopbarHintText(el, text, opts) {
     });
 }
 
-function setRunningProjectIndicator(label) {
-    const el = document.getElementById('running_project_text');
+let topbarParts = { run: '', project: '', unattended: '' };
+
+function renderTopbarCombined(opts) {
+    const el = document.getElementById('topbar_line_text');
     if (!el) return;
-    setTopbarHintText(el, fmt('running_project_line', '', { name: label || txt('running_project_none', '') }));
+    const line = fmt('topbar_combined_line', '', {
+        run: String(topbarParts.run || ''),
+        project: String(topbarParts.project || ''),
+        unattended: String(topbarParts.unattended || ''),
+    });
+    setTopbarHintText(el, line, opts || {});
+}
+
+function setTopbarPart(kind, text, opts) {
+    const k = String(kind || '');
+    if (k === 'run') topbarParts.run = String(text || '');
+    else if (k === 'project') topbarParts.project = String(text || '');
+    else if (k === 'unattended') topbarParts.unattended = String(text || '');
+    renderTopbarCombined(opts || {});
+}
+
+function refreshTopbarCombined() {
+    renderTopbarCombined({ force: true, allowResetWhenSameText: true });
+}
+
+function setRunningProjectIndicator(label) {
+    setTopbarPart(
+        'project',
+        fmt('running_project_line', '', { name: label || txt('running_project_none', '') })
+    );
     renderProjectAccordion();
 }
 
@@ -996,6 +1022,8 @@ window.KACF.state = {
     updateSharedConfigFromInputs,
     applySharedConfigToInputs,
     nowText,
+    setTopbarPart,
+    refreshTopbarCombined,
     setRunningProjectIndicator,
     setRunActionButtons,
     setElementsDisabled,

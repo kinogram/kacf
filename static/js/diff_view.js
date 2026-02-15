@@ -146,20 +146,32 @@
         });
     }
 
-    function refreshTopbarMarquees() {
-        const ids = ['runbar_text', 'running_project_text', 'unattended_state_text'];
-        ids.forEach(id => {
-            const el = document.getElementById(id);
-            if (!el) return;
-            const seg = el.querySelector(':scope > span.marquee-inner > span.marquee-seg');
-            const cur = seg ? (seg.textContent || '') : (el.textContent || '');
-            setTopbarHintText(el, cur, { force: true, allowResetWhenSameText: true });
+    let topbarParts = { run: '', project: '', unattended: '' };
+
+    function renderTopbarCombined(opts) {
+        const el = document.getElementById('topbar_line_text');
+        if (!el) return;
+        const line = fmt('topbar_combined_line', '', {
+            run: String(topbarParts.run || ''),
+            project: String(topbarParts.project || ''),
+            unattended: String(topbarParts.unattended || ''),
         });
+        setTopbarHintText(el, line, opts || {});
+    }
+
+    function setTopbarPart(kind, text, opts) {
+        const k = String(kind || '');
+        if (k === 'run') topbarParts.run = String(text || '');
+        else if (k === 'project') topbarParts.project = String(text || '');
+        else if (k === 'unattended') topbarParts.unattended = String(text || '');
+        renderTopbarCombined(opts || {});
+    }
+
+    function refreshTopbarMarquees() {
+        renderTopbarCombined({ force: true, allowResetWhenSameText: true });
     }
 
     function renderUnattendedState(runtime) {
-        const el = document.getElementById('unattended_state_text');
-        if (!el) return;
         const unattendedMode = false; // Diff viewer is read-only; show "off".
         const mins = parseBoundedInt(globalOptions.stop_after_minutes, 0, 24 * 60, 0);
         const serverStartMs = Number(runtime?.last_start_unix || 0) * 1000;
@@ -178,7 +190,7 @@
             resume_left: String(resumeLeft),
             stop: stopText,
         });
-        setTopbarHintText(el, line);
+        setTopbarPart('unattended', line);
     }
 
     function classifyDiffLine(line) {
@@ -243,10 +255,9 @@
     function renderTopbarFromBucketState(s) {
         const runbar = document.getElementById('runbar');
         if (runbar) runbar.dataset.state = String(s?.run_state || 'idle');
-        const runText = fmt('runbar_line', '', { state: String(s?.run_text || txt('run_idle', '')) });
-        setTopbarHintText(document.getElementById('runbar_text'), runText);
-        setTopbarHintText(
-            document.getElementById('running_project_text'),
+        setTopbarPart('run', fmt('runbar_line', '', { state: String(s?.run_text || txt('run_idle', '')) }));
+        setTopbarPart(
+            'project',
             fmt('running_project_line', '', { name: String(s?.project_label || txt('running_project_none', '')) })
         );
     }
@@ -285,8 +296,8 @@
         const bucket = qs('bucket');
         if (!bucket) {
             renderDiff('');
-            setTopbarHintText(document.getElementById('runbar_text'), fmt('runbar_line', '', { state: txt('run_idle', '') }));
-            setTopbarHintText(document.getElementById('running_project_text'), fmt('running_project_line', '', { name: txt('running_project_none', '') }));
+            setTopbarPart('run', fmt('runbar_line', '', { state: txt('run_idle', '') }));
+            setTopbarPart('project', fmt('running_project_line', '', { name: txt('running_project_none', '') }));
             renderUnattendedState(null);
             return;
         }

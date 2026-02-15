@@ -542,21 +542,14 @@ function bindEvents() {
         }
         applySidebarLayout();
         // Recompute topbar marquee thresholds when layout changes.
-        const ids = ['runbar_text', 'running_project_text', 'unattended_state_text'];
-        ids.forEach(id => {
-            const el = document.getElementById(id);
+        if (typeof refreshTopbarCombined === 'function') {
+            refreshTopbarCombined();
+        } else {
+            const el = document.getElementById('topbar_line_text');
             if (el && typeof setTopbarHintText === 'function') {
-                const inner = el.querySelector(':scope > span.marquee-inner');
-                if (inner) {
-                    const curW = Math.max(0, el.clientWidth);
-                    const prevW = Number(el.dataset.marqueeClientWidth || '0');
-                    if (Math.abs(curW - prevW) >= 1) {
-                        el.dataset.marqueeClientWidth = String(curW);
-                        setTopbarHintText(el, inner.textContent || '', { force: true });
-                    }
-                }
+                setTopbarHintText(el, el.textContent || '', { force: true, allowResetWhenSameText: true });
             }
-        });
+        }
     });
 }
 

@@ -104,6 +104,7 @@
   "run_failed": "已完成（失败）",
   "running_project_none": "无",
   "running_project_line": "当前运行项目：{name}",
+  "topbar_combined_line": "{run}  |  {project}  |  {unattended}",
   "go_running_title_ok": "点击切回当前运行项目视图",
   "go_running_title_missing": "运行项目不在当前列表中",
   "status_go_running_ok": "已切回运行项目：{name}",

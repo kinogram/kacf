@@ -104,6 +104,7 @@
   "run_failed": "Completed (failed)",
   "running_project_none": "None",
   "running_project_line": "Running project: {name}",
+  "topbar_combined_line": "{run}  |  {project}  |  {unattended}",
   "go_running_title_ok": "Click to switch back to the running project",
   "go_running_title_missing": "Running project is not in current list",
   "status_go_running_ok": "Switched back to running project: {name}",

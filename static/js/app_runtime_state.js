@@ -129,7 +129,6 @@ function applyStaticCopyToDom() {
         ['label_branch', 'label_branch'],
         ['hint_run_new_round', 'hint_run_new_round'],
         ['section_status_title', 'section_status_title'],
-        ['unattended_state_text', 'unattended_state_default'],
         ['section_clarify_title', 'section_clarify_title'],
         ['section_log_title', 'section_log_title'],
         ['hint_log_exports', 'hint_log_exports'],
@@ -213,6 +212,17 @@ function applyStaticCopyToDom() {
         summary.textContent = fmt('project_summary_total', '', { total: loadProjects().length });
     }
     setProjectDraftState();
+
+    // Initialize the single-line topbar content once copy is loaded.
+    if (typeof setTopbarPart === 'function') {
+        setTopbarPart('run', fmt('runbar_line', '', { state: txt('run_idle', '') }), { force: true });
+        setTopbarPart(
+            'project',
+            fmt('running_project_line', '', { name: txt('running_project_none', '') }),
+            { force: true }
+        );
+        // Unattended part is maintained by renderUnattendedState().
+    }
     // Make sidebar buttons resilient: don't depend on project rendering (which may throw) to populate them.
     applySidebarLayout();
     renderUnattendedState();
@@ -276,8 +286,6 @@ function setAutoSaveState(text) {
 }
 
 function renderUnattendedState() {
-    const el = document.getElementById('unattended_state_text');
-    if (!el) return;
     const configuredUnattendedMode = !!document.getElementById('unattended_mode')?.checked;
     const unattendedMode = runSessionActive ? activeRunUnattendedMode : configuredUnattendedMode;
     const mins = stopAfterMinutesSetting();
@@ -302,10 +310,8 @@ function renderUnattendedState() {
         resume_left: String(resumeLeft),
         stop: stopText,
     });
-    if (typeof setTopbarHintText === 'function') {
-        setTopbarHintText(el, line);
-    } else {
-        el.textContent = line;
+    if (typeof setTopbarPart === 'function') {
+        setTopbarPart('unattended', line);
     }
 }
 

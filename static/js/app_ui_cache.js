@@ -287,11 +287,12 @@ function renderUiForViewBucket() {
     const bar = document.getElementById('runbar');
     bar.dataset.state = normalized.run_state || 'idle';
     const runText = fmt('runbar_line', '', { state: normalized.run_text || txt('run_idle', '') });
-    const runEl = document.getElementById('runbar_text');
-    if (typeof setTopbarHintText === 'function') {
-        setTopbarHintText(runEl, runText);
-    } else if (runEl) {
-        runEl.textContent = runText;
+    if (typeof setTopbarPart === 'function') {
+        setTopbarPart('run', runText);
+    } else {
+        const el = document.getElementById('topbar_line_text');
+        if (el && typeof setTopbarHintText === 'function') setTopbarHintText(el, runText);
+        else if (el) el.textContent = runText;
     }
     document.getElementById('diagnostics').textContent = normalized.diagnostics_text || txt('diagnostics_none', '');
     const shouldShowClarify = shouldAllowClarifyInteraction() && Array.isArray(normalized.clarify_questions) && normalized.clarify_questions.length > 0;
