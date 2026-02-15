@@ -324,7 +324,23 @@ async fn delete_project(data: web::Data<AppState>, path: web::Path<String>) -> i
 
 async fn get_ui_cache(data: web::Data<AppState>) -> impl Responder {
     let _guard = lock_recover(&data.projects_lock, "projects_lock");
-    let payload = read_ui_cache();
+    let mut payload = read_ui_cache();
+
+    // The main UI does not render diff content, and sending it back makes /ui_cache huge
+    // (especially after removing diff-length caps). Strip it to keep the homepage responsive.
+    let mut removed = false;
+    for (_k, v) in payload.project_ui_state.iter_mut() {
+        if let Some(obj) = v.as_object_mut() {
+            if obj.remove("diff_text").is_some() {
+                removed = true;
+            }
+        }
+    }
+    if removed {
+        // Best-effort cleanup so future reads are fast/small even if an older client persisted diff_text.
+        let _ = write_ui_cache(&payload);
+    }
+
     HttpResponse::Ok().json(payload)
 }
 
@@ -333,6 +349,14 @@ async fn put_ui_cache(data: web::Data<AppState>, body: web::Json<UiCachePatch>) 
     let patch = body.into_inner();
     let mut payload = read_ui_cache();
     web_ui_cache_logic::apply_ui_cache_patch(&mut payload, patch);
+
+    // Never persist diff text into ui_cache: it bloats the cache and slows down the main UI.
+    for (_k, v) in payload.project_ui_state.iter_mut() {
+        if let Some(obj) = v.as_object_mut() {
+            obj.remove("diff_text");
+        }
+    }
+
     match write_ui_cache(&payload) {
         Ok(_) => HttpResponse::Ok().body("saved"),
         Err(e) => HttpResponse::InternalServerError().body(format!("write ui cache failed: {}", e)),
@@ -588,8 +612,8 @@ async fn diff_text(data: web::Data<AppState>, query: web::Query<DiffDataQuery>) 
         return HttpResponse::BadRequest().body("invalid bucket");
     }
 
-    // Read cached info under lock; run git without holding the lock.
-    let (project_workspace, cached_diff_text) = {
+    // Read workspace under lock; run git without holding the lock.
+    let project_workspace = {
         let _guard = lock_recover(&data.projects_lock, "projects_lock");
         let cache = read_ui_cache();
 
@@ -599,28 +623,14 @@ async fn diff_text(data: web::Data<AppState>, query: web::Query<DiffDataQuery>) 
                 project_workspace = Some(p.workspace.clone());
             }
         }
-
-        let mut diff_text = String::new();
-        if let Some(v) = cache.project_ui_state.get(&bucket) {
-            if let Some(obj) = v.as_object() {
-                if let Some(s) = obj.get("diff_text").and_then(|x| x.as_str()) {
-                    diff_text = s.to_string();
-                }
-            }
-        }
-        (project_workspace, diff_text)
+        project_workspace
     };
 
-    // Prefer computing diff from git to avoid propagating any "[truncated ...]" markers inserted by other layers.
-    let diff_text = if let Some(ws) = project_workspace.as_deref() {
-        if let Ok(path) = require_managed_workspace(ws) {
-            crate::git_utils::diff_last_commit(&path).unwrap_or(cached_diff_text)
-        } else {
-            cached_diff_text
-        }
-    } else {
-        cached_diff_text
-    };
+    let diff_text = project_workspace
+        .as_deref()
+        .and_then(|ws| require_managed_workspace(ws).ok())
+        .and_then(|path| crate::git_utils::diff_last_commit(&path).ok())
+        .unwrap_or_default();
 
     HttpResponse::Ok()
         .content_type("text/plain; charset=utf-8")

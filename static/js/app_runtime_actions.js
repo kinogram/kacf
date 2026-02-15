@@ -406,9 +406,9 @@ async function submitClarify(e) {
 }
 
 function renderDiff(diffText) {
-    const bucket = currentLogBucket();
-    writeBucketUiState(bucket, { diff_text: String(diffText || '') });
-    // Do not render diff in the main UI; it is shown in a dedicated diff tab.
+    // Diff is shown in a dedicated diff tab; do not persist it into ui_cache.
+    // Persisting diff content makes /ui_cache huge and can freeze the main UI.
+    void diffText;
 }
 
 function escapeHtml(text) {
