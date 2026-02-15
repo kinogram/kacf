@@ -155,6 +155,7 @@
   "btn_export_report": "Export Release Report (MD)",
   "btn_view_diff": "View Diff ↗",
   "btn_back_to_main": "↖ Back to Main",
+  "icon_back_to_main": "↖",
   "tip_export_log": "Export the visible runtime log as a plain text file.",
   "tip_export_snapshot": "Export metrics and UI state as JSON for debugging.",
   "tip_export_report": "Export a markdown release summary report.",

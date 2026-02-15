@@ -155,6 +155,7 @@
   "btn_export_report": "导出发布报告（MD）",
   "btn_view_diff": "查看diff ↗",
   "btn_back_to_main": "↖ 退回主界面",
+  "icon_back_to_main": "↖",
   "tip_export_log": "将当前可见运行日志导出为文本文件。",
   "tip_export_snapshot": "导出指标与 UI 状态为 JSON，用于排查问题。",
   "tip_export_report": "导出 Markdown 格式的发布汇总报告。",

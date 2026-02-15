@@ -225,7 +225,15 @@
         const brand = document.getElementById('topbar_brand');
         if (brand) brand.textContent = txt('app_brand', 'KACF');
         const back = document.getElementById('back_to_main_btn');
-        if (back) back.textContent = txt('btn_back_to_main', '');
+        if (back) {
+            back.classList.add('btn-icon-only');
+            back.textContent = txt('icon_back_to_main', '↖');
+            const label = txt('btn_back_to_main', '');
+            if (label) {
+                back.setAttribute('aria-label', label);
+                back.title = label;
+            }
+        }
         const title = document.getElementById('diff_title');
         if (title) title.textContent = txt('diff_view_title', '');
         const sub = document.getElementById('diff_sub');
