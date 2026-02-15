@@ -91,9 +91,70 @@
         }
     }
 
-    function setTopbarHintText(el, text) {
+    function setTopbarHintText(el, text, opts) {
         if (!el) return;
-        el.textContent = String(text || '');
+        opts = opts || {};
+
+        const innerClass = 'marquee-inner';
+        let inner = el.querySelector(`:scope > span.${innerClass}`);
+        if (!inner) {
+            el.textContent = '';
+            inner = document.createElement('span');
+            inner.className = innerClass;
+            el.appendChild(inner);
+        }
+
+        const next = String(text || '');
+        const seg1Class = 'marquee-seg';
+        const gapPx = 24;
+
+        // If the rendered text is identical, avoid restarting the animation.
+        const seg1Existing = inner.querySelector(`:scope > span.${seg1Class}`);
+        const sameText = seg1Existing ? (seg1Existing.textContent === next) : (inner.textContent === next);
+        if (!opts.force && sameText && !opts.allowResetWhenSameText) return;
+
+        // Ensure we have exactly one segment for measurement and non-overflow rendering.
+        inner.replaceChildren();
+        const seg1 = document.createElement('span');
+        seg1.className = seg1Class;
+        seg1.textContent = next;
+        inner.appendChild(seg1);
+
+        el.classList.remove('marquee');
+        el.style.removeProperty('--marquee-step');
+        el.style.removeProperty('--marquee-duration');
+        el.style.setProperty('--marquee-gap', `${gapPx}px`);
+
+        // Defer measurement until layout is stable.
+        requestAnimationFrame(() => {
+            const maxW = Math.max(0, el.clientWidth);
+            const w = Math.max(0, seg1.scrollWidth);
+            const overflow = w - maxW;
+            if (overflow <= 8) return;
+
+            // Seamless marquee: duplicate the segment so the loop boundary has identical content.
+            const seg2 = document.createElement('span');
+            seg2.className = seg1Class;
+            seg2.textContent = next;
+            inner.appendChild(seg2);
+
+            const step = w + gapPx;
+            const duration = Math.max(6, Math.min(22, step / 35));
+            el.classList.add('marquee');
+            el.style.setProperty('--marquee-step', `${step}px`);
+            el.style.setProperty('--marquee-duration', `${duration}s`);
+        });
+    }
+
+    function refreshTopbarMarquees() {
+        const ids = ['runbar_text', 'running_project_text', 'unattended_state_text'];
+        ids.forEach(id => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            const seg = el.querySelector(':scope > span.marquee-inner > span.marquee-seg');
+            const cur = seg ? (seg.textContent || '') : (el.textContent || '');
+            setTopbarHintText(el, cur, { force: true, allowResetWhenSameText: true });
+        });
     }
 
     function renderUnattendedState(runtime) {
@@ -244,6 +305,11 @@
         };
         await tick();
         setInterval(tick, 1200);
+
+        // If viewport changes, re-evaluate marquee overflow thresholds.
+        window.addEventListener('resize', () => {
+            refreshTopbarMarquees();
+        });
     }
 
     init();
