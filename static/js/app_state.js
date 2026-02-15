@@ -965,7 +965,6 @@ window.KACF.state = {
     logMaxCharsSetting,
     maybeWarnLargeCharLimit,
     truncateTailChars,
-    sanitizeDiffText,
     sanitizeLogContent,
     sanitizeProjectLogsMap,
     sanitizeProjectUiStateMap,
