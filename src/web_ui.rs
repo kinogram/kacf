@@ -535,15 +535,18 @@ struct DiffDataResponse {
     diff_text: String,
 }
 
-fn truncate_tail_chars(input: &str, max_chars: usize) -> String {
+fn truncate_head_chars(input: &str, max_chars: usize) -> String {
     if max_chars == 0 {
         return String::new();
     }
-    let total = input.chars().count();
-    if total <= max_chars {
-        return input.to_string();
+    let mut out = String::new();
+    for (i, ch) in input.chars().enumerate() {
+        if i >= max_chars {
+            break;
+        }
+        out.push(ch);
     }
-    input.chars().skip(total - max_chars).collect()
+    out
 }
 
 async fn diff_data(data: web::Data<AppState>, query: web::Query<DiffDataQuery>) -> impl Responder {
@@ -551,44 +554,63 @@ async fn diff_data(data: web::Data<AppState>, query: web::Query<DiffDataQuery>) 
     if bucket.is_empty() || bucket.len() > 512 {
         return HttpResponse::BadRequest().body("invalid bucket");
     }
-    let _guard = lock_recover(&data.projects_lock, "projects_lock");
-    let cache = read_ui_cache();
+    let (project_label, project_workspace, run_state, run_text, cached_diff_text) = {
+        // Keep the lock only while reading cached state; don't hold it while running git.
+        let _guard = lock_recover(&data.projects_lock, "projects_lock");
+        let cache = read_ui_cache();
 
-    let mut project_label = String::new();
-    if let Some(id) = bucket.strip_prefix("project:") {
-        if let Some(p) = cache.projects.iter().find(|p| p.id == id) {
-            project_label = if !p.name.trim().is_empty() {
-                p.name.trim().to_string()
-            } else if !p.workspace.trim().is_empty() {
-                p.workspace.trim().to_string()
+        let mut project_label = String::new();
+        let mut project_workspace: Option<String> = None;
+        if let Some(id) = bucket.strip_prefix("project:") {
+            if let Some(p) = cache.projects.iter().find(|p| p.id == id) {
+                project_workspace = Some(p.workspace.clone());
+                project_label = if !p.name.trim().is_empty() {
+                    p.name.trim().to_string()
+                } else if !p.workspace.trim().is_empty() {
+                    p.workspace.trim().to_string()
+                } else {
+                    id.to_string()
+                };
             } else {
-                id.to_string()
-            };
+                project_label = id.to_string();
+            }
+        }
+
+        let mut run_state = "idle".to_string();
+        let mut run_text = String::new();
+        let mut diff_text = String::new();
+
+        if let Some(v) = cache.project_ui_state.get(&bucket) {
+            if let Some(obj) = v.as_object() {
+                if let Some(s) = obj.get("run_state").and_then(|x| x.as_str()) {
+                    run_state = s.to_string();
+                }
+                if let Some(s) = obj.get("run_text").and_then(|x| x.as_str()) {
+                    run_text = s.to_string();
+                }
+                if let Some(s) = obj.get("diff_text").and_then(|x| x.as_str()) {
+                    diff_text = s.to_string();
+                }
+            }
+        }
+
+        (project_label, project_workspace, run_state, run_text, diff_text)
+    };
+
+    // Prefer computing diff from git to avoid propagating any "[truncated ...]" markers
+    // inserted by other layers. Fall back to cached diff when needed.
+    let mut diff_text = if let Some(ws) = project_workspace.as_deref() {
+        if let Ok(path) = require_managed_workspace(ws) {
+            crate::git_utils::diff_last_commit(&path).unwrap_or(cached_diff_text)
         } else {
-            project_label = id.to_string();
+            cached_diff_text
         }
-    }
-
-    let mut run_state = "idle".to_string();
-    let mut run_text = String::new();
-    let mut diff_text = String::new();
-
-    if let Some(v) = cache.project_ui_state.get(&bucket) {
-        if let Some(obj) = v.as_object() {
-            if let Some(s) = obj.get("run_state").and_then(|x| x.as_str()) {
-                run_state = s.to_string();
-            }
-            if let Some(s) = obj.get("run_text").and_then(|x| x.as_str()) {
-                run_text = s.to_string();
-            }
-            if let Some(s) = obj.get("diff_text").and_then(|x| x.as_str()) {
-                diff_text = s.to_string();
-            }
-        }
-    }
+    } else {
+        cached_diff_text
+    };
 
     // Server-side safety cap (independent from any client-side limits).
-    diff_text = truncate_tail_chars(&diff_text, 20_000);
+    diff_text = truncate_head_chars(&diff_text, 20_000);
 
     HttpResponse::Ok().json(DiffDataResponse {
         ok: true,

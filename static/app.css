@@ -460,22 +460,54 @@
         .diff-view-panel {
             background: linear-gradient(180deg, #ffffff, #f8fafc);
         }
+        body.diff-page .shell {
+            max-width: 1180px;
+        }
+        .diff-main {
+            width: 100%;
+            margin-top: 14px;
+        }
+        .diff-article {
+            /* Article view: no "card" frame */
+            border: none;
+            border-radius: 0;
+            background: transparent;
+            box-shadow: none;
+            padding: 0;
+        }
+        .diff-h1 {
+            margin: 0;
+            font-size: 18px;
+            letter-spacing: 0.2px;
+            color: #24406d;
+            font-weight: 400;
+        }
+        .diff-sub {
+            margin: 8px 0 0;
+            color: var(--subtle);
+            font-size: 13px;
+            line-height: 1.45;
+        }
         .diff-view {
-            border: 1px solid var(--line);
-            border-radius: 12px;
-            background: #f8fafc;
-            padding: 14px;
-            min-height: 320px;
-            max-height: calc(100dvh - 220px);
-            overflow: auto;
+            /* Article view: diff is content, not a boxed widget */
+            border: none;
+            border-radius: 0;
+            background: transparent;
+            padding: 10px 0 0;
+            min-height: 0;
+            max-height: none;
+            overflow-y: visible;
+            overflow-x: auto;
             white-space: pre-wrap;
             font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
             font-size: 13px;
             line-height: 1.55;
             color: #1f2a3b;
-            box-shadow: inset 0 0 0 1px rgba(36, 64, 109, 0.08);
+            box-shadow: none;
         }
         .diff-view > div { white-space: pre; }
+        body.diff-page button { font-weight: 400; }
+        body.diff-page .topbar-brand { font-weight: 400; }
         .modal-mask {
             display: none;
             position: fixed;

@@ -204,6 +204,7 @@
     }
 
     async function init() {
+        document.body.classList.add('diff-page');
         const cache = await fetchUiCache();
         sharedConfig.language = normalizeLanguageCode(cache?.shared_config?.language || '');
         globalOptions.stop_after_minutes = String(cache?.global_options?.stop_after_minutes || '').trim();

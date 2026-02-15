@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <title>KACF - Diff</title>
+    <title></title>
     <link rel="stylesheet" href="/assets/app.css">
 </head>
 <body>
@@ -18,18 +18,15 @@
         </div>
         <button class="btn-ghost" id="back_to_main_btn"></button>
     </header>
-    <div class="app-shell">
-        <main class="main-column">
-            <section class="card diff-view-panel" style="margin-top:14px;">
-                <h2 class="title" id="diff_title"></h2>
-                <div class="hint" id="diff_sub"></div>
-                <div id="diff_view" class="diff-view"></div>
-            </section>
-        </main>
-    </div>
+    <main class="diff-main">
+        <article class="diff-article">
+            <h1 class="diff-h1" id="diff_title"></h1>
+            <p class="diff-sub" id="diff_sub"></p>
+            <div id="diff_view" class="diff-view"></div>
+        </article>
+    </main>
 </div>
 
 <script src="/assets/diff.js"></script>
 </body>
 </html>
-
