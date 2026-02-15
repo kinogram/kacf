@@ -120,16 +120,31 @@
         setTopbarHintText(el, line);
     }
 
+    function classifyDiffLine(line) {
+        if (line.startsWith('+') && !line.startsWith('+++')) return 'diff-line-add';
+        if (line.startsWith('-') && !line.startsWith('---')) return 'diff-line-del';
+        return 'diff-line-other';
+    }
+
     function renderDiff(diffText) {
         const el = document.getElementById('diff_view');
         if (!el) return;
         const safe = String(diffText || '');
         if (!safe.trim()) {
-            el.textContent = txt('diff_empty', '');
+            el.innerHTML = `<div class="hint">${escapeHtml(txt('diff_empty', ''))}</div>`;
             return;
         }
-        // Prefer a single <pre> text node: fast, selection-friendly, and handles huge diffs.
-        el.textContent = safe;
+        const lines = safe.split('\n');
+        el.innerHTML = lines
+            .map(line => `<div class="${classifyDiffLine(line)}">${escapeHtml(line)}</div>`)
+            .join('');
+    }
+
+    function escapeHtml(text) {
+        return String(text || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
     }
 
     function applyStaticCopy() {
@@ -164,16 +179,6 @@
         }
     }
 
-    async function fetchDiffText(bucket) {
-        try {
-            const resp = await fetch(`/diff_text?bucket=${encodeURIComponent(bucket)}`, { cache: 'no-store' });
-            if (!resp.ok) return '';
-            return await resp.text();
-        } catch (_e) {
-            return '';
-        }
-    }
-
     function renderTopbarFromBucketState(s) {
         const runbar = document.getElementById('runbar');
         if (runbar) runbar.dataset.state = String(s?.run_state || 'idle');
@@ -200,6 +205,8 @@
 
     async function init() {
         document.body.classList.add('diff-page');
+        // Avoid re-rendering identical diff content: re-writing innerHTML clears text selection.
+        let lastRenderedDiffText = null;
         const cache = await fetchUiCache();
         sharedConfig.language = normalizeLanguageCode(cache?.shared_config?.language || '');
         globalOptions.stop_after_minutes = String(cache?.global_options?.stop_after_minutes || '').trim();
@@ -223,14 +230,15 @@
             return;
         }
 
-        // Load diff once; keep topbar status live without repeatedly re-fetching diff content.
-        const initialDiff = await fetchDiffText(bucket);
-        renderDiff(initialDiff);
-
         const tick = async () => {
             const [uiState, diffData] = await Promise.all([fetchUiState(), fetchDiffData(bucket)]);
             if (diffData) {
                 renderTopbarFromBucketState(diffData);
+                const nextDiff = String(diffData.diff_text || '');
+                if (nextDiff !== lastRenderedDiffText) {
+                    renderDiff(nextDiff);
+                    lastRenderedDiffText = nextDiff;
+                }
             }
             renderUnattendedState(uiState?.runtime || null);
         };
