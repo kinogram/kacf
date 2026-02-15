@@ -225,7 +225,18 @@ fn truncate_for_log(s: &str, max: usize) -> String {
     if s.len() <= max {
         return s.to_string();
     }
-    format!("{}...[truncated {} chars]", &s[..max], s.len() - max)
+
+    // Keep UTF-8 boundaries to avoid panics on non-ASCII payloads.
+    let mut end = max.min(s.len());
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    let prefix = &s[..end];
+    format!(
+        "{}...[truncated {} chars]",
+        prefix,
+        s.len().saturating_sub(end)
+    )
 }
 
 fn shared_client() -> &'static reqwest::Client {

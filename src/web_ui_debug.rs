@@ -68,8 +68,13 @@ fn clamp_len(s: &str, max: usize) -> String {
     if s.len() <= max {
         return s.to_string();
     }
-    // Keep it ASCII-safe and deterministic.
-    let mut out = s[..max].to_string();
+
+    // Truncate by bytes but keep UTF-8 boundaries to avoid panics.
+    let mut end = max.min(s.len());
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    let mut out = s[..end].to_string();
     out.push_str("...");
     out
 }
@@ -161,6 +166,14 @@ mod tests {
         assert_eq!(clamp_len(&s, 20), s);
         let t = "b".repeat(30);
         assert_eq!(clamp_len(&t, 10), format!("{}...", "b".repeat(10)));
+    }
+
+    #[test]
+    fn clamp_len_is_utf8_safe() {
+        let s = "中文abc";
+        let out = clamp_len(s, 4);
+        assert!(out.ends_with("..."));
+        assert!(out.starts_with("中"));
     }
 
     #[test]
