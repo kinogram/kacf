@@ -532,7 +532,6 @@ struct DiffDataResponse {
     project_label: String,
     run_state: String,
     run_text: String,
-    diff_text: String,
 }
 
 async fn diff_data(data: web::Data<AppState>, query: web::Query<DiffDataQuery>) -> impl Responder {
@@ -540,16 +539,13 @@ async fn diff_data(data: web::Data<AppState>, query: web::Query<DiffDataQuery>) 
     if bucket.is_empty() || bucket.len() > 512 {
         return HttpResponse::BadRequest().body("invalid bucket");
     }
-    let (project_label, project_workspace, run_state, run_text, cached_diff_text) = {
-        // Keep the lock only while reading cached state; don't hold it while running git.
+    let (project_label, run_state, run_text) = {
         let _guard = lock_recover(&data.projects_lock, "projects_lock");
         let cache = read_ui_cache();
 
         let mut project_label = String::new();
-        let mut project_workspace: Option<String> = None;
         if let Some(id) = bucket.strip_prefix("project:") {
             if let Some(p) = cache.projects.iter().find(|p| p.id == id) {
-                project_workspace = Some(p.workspace.clone());
                 project_label = if !p.name.trim().is_empty() {
                     p.name.trim().to_string()
                 } else if !p.workspace.trim().is_empty() {
@@ -564,8 +560,6 @@ async fn diff_data(data: web::Data<AppState>, query: web::Query<DiffDataQuery>) 
 
         let mut run_state = "idle".to_string();
         let mut run_text = String::new();
-        let mut diff_text = String::new();
-
         if let Some(v) = cache.project_ui_state.get(&bucket) {
             if let Some(obj) = v.as_object() {
                 if let Some(s) = obj.get("run_state").and_then(|x| x.as_str()) {
@@ -574,17 +568,50 @@ async fn diff_data(data: web::Data<AppState>, query: web::Query<DiffDataQuery>) 
                 if let Some(s) = obj.get("run_text").and_then(|x| x.as_str()) {
                     run_text = s.to_string();
                 }
+            }
+        }
+        (project_label, run_state, run_text)
+    };
+
+    HttpResponse::Ok().json(DiffDataResponse {
+        ok: true,
+        bucket,
+        project_label,
+        run_state,
+        run_text,
+    })
+}
+
+async fn diff_text(data: web::Data<AppState>, query: web::Query<DiffDataQuery>) -> impl Responder {
+    let bucket = query.bucket.trim().to_string();
+    if bucket.is_empty() || bucket.len() > 512 {
+        return HttpResponse::BadRequest().body("invalid bucket");
+    }
+
+    // Read cached info under lock; run git without holding the lock.
+    let (project_workspace, cached_diff_text) = {
+        let _guard = lock_recover(&data.projects_lock, "projects_lock");
+        let cache = read_ui_cache();
+
+        let mut project_workspace: Option<String> = None;
+        if let Some(id) = bucket.strip_prefix("project:") {
+            if let Some(p) = cache.projects.iter().find(|p| p.id == id) {
+                project_workspace = Some(p.workspace.clone());
+            }
+        }
+
+        let mut diff_text = String::new();
+        if let Some(v) = cache.project_ui_state.get(&bucket) {
+            if let Some(obj) = v.as_object() {
                 if let Some(s) = obj.get("diff_text").and_then(|x| x.as_str()) {
                     diff_text = s.to_string();
                 }
             }
         }
-
-        (project_label, project_workspace, run_state, run_text, diff_text)
+        (project_workspace, diff_text)
     };
 
-    // Prefer computing diff from git to avoid propagating any "[truncated ...]" markers
-    // inserted by other layers. Fall back to cached diff when needed.
+    // Prefer computing diff from git to avoid propagating any "[truncated ...]" markers inserted by other layers.
     let diff_text = if let Some(ws) = project_workspace.as_deref() {
         if let Ok(path) = require_managed_workspace(ws) {
             crate::git_utils::diff_last_commit(&path).unwrap_or(cached_diff_text)
@@ -595,14 +622,9 @@ async fn diff_data(data: web::Data<AppState>, query: web::Query<DiffDataQuery>) 
         cached_diff_text
     };
 
-    HttpResponse::Ok().json(DiffDataResponse {
-        ok: true,
-        bucket,
-        project_label,
-        run_state,
-        run_text,
-        diff_text,
-    })
+    HttpResponse::Ok()
+        .content_type("text/plain; charset=utf-8")
+        .body(diff_text)
 }
 
 pub async fn run_web_server(
@@ -669,6 +691,7 @@ pub async fn run_web_server(
             .route("/ui_cache", web::put().to(put_ui_cache))
             .route("/ui_state", web::get().to(web_ui_session::get_ui_state))
             .route("/diff_data", web::get().to(diff_data))
+            .route("/diff_text", web::get().to(diff_text))
             .route("/health", web::get().to(health))
             .route("/metrics", web::get().to(metrics))
             .route("/clarify", web::post().to(web_ui_session::answer_clarify))
