@@ -482,37 +482,44 @@ async fn stream_events(
 
 async fn index_page() -> impl Responder {
     HttpResponse::Ok()
+        .insert_header(("Cache-Control", "no-store"))
         .content_type("text/html; charset=utf-8")
         .body(INDEX_HTML)
 }
 
 async fn diff_page() -> impl Responder {
     HttpResponse::Ok()
+        .insert_header(("Cache-Control", "no-store"))
         .content_type("text/html; charset=utf-8")
         .body(DIFF_HTML)
 }
 
 async fn app_css() -> impl Responder {
     HttpResponse::Ok()
+        .insert_header(("Cache-Control", "no-store"))
         .content_type("text/css; charset=utf-8")
         .body(APP_CSS)
 }
 
 async fn app_js() -> impl Responder {
     HttpResponse::Ok()
+        .insert_header(("Cache-Control", "no-store"))
         .content_type("application/javascript; charset=utf-8")
         .body(APP_JS)
 }
 
 async fn diff_js() -> impl Responder {
     HttpResponse::Ok()
+        .insert_header(("Cache-Control", "no-store"))
         .content_type("application/javascript; charset=utf-8")
         .body(DIFF_JS)
 }
 
 async fn list_languages() -> impl Responder {
     match list_language_packs() {
-        Ok(languages) => HttpResponse::Ok().json(LanguageListResponse { languages }),
+        Ok(languages) => HttpResponse::Ok()
+            .insert_header(("Cache-Control", "no-store"))
+            .json(LanguageListResponse { languages }),
         Err(e) => HttpResponse::InternalServerError().body(e),
     }
 }
@@ -524,6 +531,7 @@ async fn get_language_pack(path: web::Path<String>) -> impl Responder {
     }
     match read_language_pack(&code) {
         Ok(content) => HttpResponse::Ok()
+            .insert_header(("Cache-Control", "no-store"))
             .content_type("application/json; charset=utf-8")
             .body(content),
         Err(e) if e == "language not found" => HttpResponse::NotFound().body(e),
