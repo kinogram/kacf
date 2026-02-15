@@ -4,6 +4,7 @@ let saveTimer = null;
 let projectAutoSaveTimer = null;
 let projectAutoSaveInFlight = false;
 let stopRequested = false;
+let stopDisplayedAsStopped = false; // UI already finalized stop; ignore subsequent /done state flip.
 let stopAckTimer = null;
 let eventSource = null;
 let sseErrorCount = 0;

@@ -436,6 +436,7 @@ function markRunSessionStarted(label, resetFlags) {
     document.getElementById('revert_btn').disabled = false;
     if (resetFlags) {
         stopRequested = false;
+        stopDisplayedAsStopped = false;
         completionAlertShown = false;
     }
 }

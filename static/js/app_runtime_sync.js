@@ -386,6 +386,14 @@ function handleNeedClarifyEvent(evt) {
 }
 
 function handleDoneEvent(evt) {
+    if (stopDisplayedAsStopped) {
+        // UI already finalized as "stopped" immediately after /stop succeeded.
+        // Keep it stable and just clear flags.
+        stopDisplayedAsStopped = false;
+        stopRequested = false;
+        clearStopAckTimer();
+        return;
+    }
     const wasStopRequested = stopRequested;
     const outcome = evt.success
         ? 'success'

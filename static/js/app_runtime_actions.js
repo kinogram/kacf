@@ -40,24 +40,24 @@ function assertRuntimeActionDependencies() {
             'scheduleUiCacheSave',
         ],
         logPipeline: ['setStatus', 'setRunState', 'appendLog', 'renderCurrentLogView'],
-        runtimeState: [
-            'stopAfterMinutesSetting',
-            'markRunSessionStarted',
-            'clearUnattendedAutoResumeTimer',
-            'autoResumeAttemptsSetting',
-            'armManualRunStopTimer',
-            'renderUnattendedState',
-            'resetRunSessionUiState',
-            'resetStopTimerState',
-            'scheduleUnattendedAutoResume',
-            'applyInterruptedTerminalState',
-            'applyStopAcceptedStatus',
-            'setAutoSaveState',
-            'openGlobalConfigModal',
-            'saveGlobalConfig',
-            'closeGlobalConfigModal',
-            'getFormData',
-        ],
+	        runtimeState: [
+	            'stopAfterMinutesSetting',
+	            'markRunSessionStarted',
+	            'clearUnattendedAutoResumeTimer',
+	            'autoResumeAttemptsSetting',
+	            'armManualRunStopTimer',
+	            'renderUnattendedState',
+	            'resetRunSessionUiState',
+	            'resetStopTimerState',
+	            'resetUnattendedRunState',
+	            'scheduleUnattendedAutoResume',
+	            'applyInterruptedTerminalState',
+	            'setAutoSaveState',
+	            'openGlobalConfigModal',
+	            'saveGlobalConfig',
+	            'closeGlobalConfigModal',
+	            'getFormData',
+	        ],
         projects: [
             'ensureWorkspaceForCurrentProject',
             'saveCurrentProject',
@@ -149,13 +149,13 @@ const {
     renderUnattendedState,
     resetRunSessionUiState,
     resetStopTimerState,
-    scheduleUnattendedAutoResume,
-    applyInterruptedTerminalState,
-    applyStopAcceptedStatus,
-    setAutoSaveState,
-    openGlobalConfigModal,
-    saveGlobalConfig,
-    closeGlobalConfigModal,
+	    scheduleUnattendedAutoResume,
+	    applyInterruptedTerminalState,
+	    resetUnattendedRunState,
+	    setAutoSaveState,
+	    openGlobalConfigModal,
+	    saveGlobalConfig,
+	    closeGlobalConfigModal,
     getFormData,
 } = window.KACF.runtimeState;
 const {
@@ -298,26 +298,27 @@ async function resumeSession(opts) {
     }
 }
 
-async function stopSession() {
-    try {
-        const resp = await fetch('/stop', { method: 'POST' });
-        const ack = (await resp.text()).trim();
-        if (!resp.ok) throw new Error(`stop error ${resp.status}`);
-        stopRequested = true;
-        runtimeSyncCall('clearStopAckTimer');
-        stopAckTimer = setTimeout(() => {
-            if (!stopRequested) return;
-            applyInterruptedTerminalState({
-                runTextKey: 'run_interrupted_timeout',
-                statusKey: 'status_stop_ack_timeout',
-                statusClass: 'status-warn',
-            });
-        }, 6000);
-        applyStopAcceptedStatus(ack);
-    } catch (e) {
-        applyInterruptedTerminalState({
-            runTextKey: 'run_interrupted',
-            statusKey: 'status_stop_failed',
+	async function stopSession() {
+	    try {
+	        const resp = await fetch('/stop', { method: 'POST' });
+	        const ack = (await resp.text()).trim();
+	        if (!resp.ok) throw new Error(`stop error ${resp.status}`);
+	        // User preference: treat a successful /stop call as "stopped" immediately,
+	        // without waiting for a completion callback and without ack-timeout UI.
+	        stopRequested = true;
+	        stopDisplayedAsStopped = true;
+	        runtimeSyncCall('clearStopAckTimer');
+	        // Keep a minimal status hint; unlock the UI right away.
+	        resetUnattendedRunState();
+	        resetRunSessionUiState();
+	        setRunActionButtons(false);
+	        setRunState('idle', txt('run_idle', ''));
+	        setStatus(txt('status_stop_backend_done', ''), 'status-warn');
+	        void ack; // stop response is informational only; UI already finalized as stopped.
+	    } catch (e) {
+	        applyInterruptedTerminalState({
+	            runTextKey: 'run_interrupted',
+	            statusKey: 'status_stop_failed',
             statusClass: 'status-danger',
             message: String(e),
         });
