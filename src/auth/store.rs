@@ -368,8 +368,8 @@ impl AuthStore {
         if n.is_empty() {
             return Err("nickname is empty".to_string());
         }
-        // Prevent confusing impersonation.
-        if nickname_reserved(n) {
+        // Prevent confusing impersonation for non-admin accounts.
+        if role != AccountRole::Admin && nickname_reserved(n) {
             return Err("nickname not allowed".to_string());
         }
         let now = now_unix();
@@ -483,7 +483,7 @@ fn prune_sessions(db: &mut SessionsDb, now: u64) {
     }
 }
 
-fn nickname_reserved(nickname: &str) -> bool {
+pub(crate) fn nickname_reserved(nickname: &str) -> bool {
     let s = nickname.trim().to_lowercase();
     if s.is_empty() {
         return true;
@@ -522,7 +522,9 @@ fn read_json_or_default<T: for<'de> Deserialize<'de> + Default>(path: &Path) -> 
 
 #[cfg(test)]
 mod tests {
+    use super::{AuthStore, AuthSystemPaths};
     use super::nickname_reserved;
+    use crate::auth::types::{AccountRole, LoginOption};
 
     #[test]
     fn nickname_reservation_blocks_admin_like() {
@@ -531,5 +533,38 @@ mod tests {
         assert!(nickname_reserved("  aDmIn  "));
         assert!(nickname_reserved("my-admin-name"));
         assert!(!nickname_reserved("Kevin"));
+    }
+
+    #[test]
+    fn admin_can_use_admin_nickname_but_user_cannot() {
+        let root = std::env::temp_dir().join(format!("kacf_auth_test_{}", super::rand_id("t", 10)));
+        let paths = AuthSystemPaths::new(&root);
+        let store = AuthStore::new(paths);
+        store.ensure_dirs().expect("ensure dirs");
+        // Admin nickname "Admin" should be allowed.
+        let admin = store
+            .create_user(
+                "admin1",
+                "Admin",
+                "admin1@gmail.com",
+                AccountRole::Admin,
+                Some("pw".to_string()),
+                LoginOption::PasswordOnly,
+            )
+            .expect("admin should be created");
+        assert_eq!(admin.nickname, "Admin");
+        // Non-admin nickname "Admin" should be rejected.
+        let err = store
+            .create_user(
+                "user1",
+                "Admin",
+                "user1@gmail.com",
+                AccountRole::User,
+                Some("pw".to_string()),
+                LoginOption::PasswordOnly,
+            )
+            .expect_err("user nickname must be rejected");
+        assert!(err.contains("nickname"));
+        let _ = std::fs::remove_dir_all(root);
     }
 }

@@ -609,8 +609,8 @@ pub(crate) async fn account_update_profile(req: HttpRequest, body: web::Json<Acc
     if nickname.is_empty() {
         return HttpResponse::BadRequest().body("nickname is empty");
     }
-    let low = nickname.to_lowercase();
-    if low == "admin" || low == "administrator" || low.contains("admin") {
+    // Non-admin accounts cannot use admin-like nicknames.
+    if user.role != AccountRole::Admin && crate::auth::store::nickname_reserved(&nickname) {
         return HttpResponse::BadRequest().body("nickname not allowed");
     }
     user.nickname = nickname;
