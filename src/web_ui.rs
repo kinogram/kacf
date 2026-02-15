@@ -11,8 +11,8 @@ use async_stream::stream;
 use crossbeam_channel::{Receiver, Sender};
 use std::fs;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::deepseek_api;
@@ -240,7 +240,8 @@ pub(crate) fn start_from_payload(
     resume_from_checkpoint: bool,
 ) -> Result<(), String> {
     // Clear any previous stop request so the new run can proceed.
-    data.stop_now.store(false, std::sync::atomic::Ordering::Relaxed);
+    data.stop_now
+        .store(false, std::sync::atomic::Ordering::Relaxed);
     if payload.api_key.trim().is_empty() {
         return Err("api_key is empty".to_string());
     }
@@ -592,7 +593,10 @@ pub async fn run_web_server(
                 web::scope("/debug")
                     .app_data(web::Data::new(state.debug_client_logs.entries()))
                     .app_data(web::Data::new(state.debug_client_logs.bytes()))
-                    .route("/client_logs", web::post().to(web_ui_debug::post_client_log))
+                    .route(
+                        "/client_logs",
+                        web::post().to(web_ui_debug::post_client_log),
+                    )
                     .route("/client_logs", web::get().to(web_ui_debug::get_client_logs)),
             )
     })

@@ -14,4 +14,3 @@ pub(crate) fn lock_recover<'a, T>(m: &'a Mutex<T>, name: &'static str) -> MutexG
         }
     }
 }
-

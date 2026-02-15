@@ -125,8 +125,10 @@ pub async fn post_client_log(
         stack,
     };
 
-    let mut entries =
-        lock_recover(store_entries.get_ref().as_ref(), "debug_client_logs.entries");
+    let mut entries = lock_recover(
+        store_entries.get_ref().as_ref(),
+        "debug_client_logs.entries",
+    );
     let mut bytes = lock_recover(store_bytes.get_ref().as_ref(), "debug_client_logs.bytes");
     push_entry(&mut entries, &mut bytes, entry, 200, 256 * 1024);
     HttpResponse::Ok().json(serde_json::json!({ "ok": true }))
@@ -136,8 +138,11 @@ pub async fn get_client_logs(
     store_entries: web::Data<Arc<Mutex<Vec<ClientLogEntry>>>>,
     query: web::Query<ClientLogQuery>,
 ) -> impl Responder {
-    let limit = query.limit.unwrap_or(50).min(200).max(1);
-    let entries = lock_recover(store_entries.get_ref().as_ref(), "debug_client_logs.entries");
+    let limit = query.limit.unwrap_or(50).clamp(1, 200);
+    let entries = lock_recover(
+        store_entries.get_ref().as_ref(),
+        "debug_client_logs.entries",
+    );
     let slice = if entries.len() > limit {
         entries[entries.len() - limit..].to_vec()
     } else {

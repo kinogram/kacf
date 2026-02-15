@@ -6,7 +6,7 @@ use std::time::Duration;
 use crate::deepseek_api;
 use crate::protocol::AgentEvent;
 use crate::protocol_patch;
-use std::sync::{Arc, atomic::AtomicBool};
+use std::sync::{atomic::AtomicBool, Arc};
 
 #[derive(Debug)]
 struct StopRequested;

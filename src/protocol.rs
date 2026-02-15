@@ -2,11 +2,9 @@ use anyhow::{Context, Result};
 use crossbeam_channel::{Receiver, Sender};
 
 use crate::protocol_auto_revert;
-pub use crate::protocol_models::{AgentEvent, AgentRequest, ClarifyAnswer, ClarifyQuestion};
-use crate::protocol_models::{
-    EvalPipelineReport, ModelJson, RepairHeuristics, SessionCfg,
-};
 pub(crate) use crate::protocol_models::SessionState;
+pub use crate::protocol_models::{AgentEvent, AgentRequest, ClarifyAnswer, ClarifyQuestion};
+use crate::protocol_models::{EvalPipelineReport, ModelJson, RepairHeuristics, SessionCfg};
 use crate::protocol_repair_prompt;
 use crate::protocol_stream;
 use crate::protocol_system_prompt;
@@ -14,7 +12,7 @@ use crate::protocol_wait::{self, ClarifyWaitOutcome};
 use crate::{deepseek_api, git_utils, runner, workspace};
 use crate::{protocol_failure, protocol_patch};
 use crate::{protocol_history, protocol_session_state};
-use std::sync::{Arc, atomic::AtomicBool};
+use std::sync::{atomic::AtomicBool, Arc};
 
 /// Run the agent loop. This function listens for requests from the UI and
 /// interacts with the DeepSeek API, applying patches and evaluating the

@@ -30,7 +30,7 @@ mod workspace;
 
 use crossbeam_channel::unbounded;
 use protocol::{AgentEvent, AgentRequest};
-use std::sync::{Arc, atomic::AtomicBool};
+use std::sync::{atomic::AtomicBool, Arc};
 
 fn main() -> std::io::Result<()> {
     let (tx_req, rx_req) = unbounded::<AgentRequest>();
