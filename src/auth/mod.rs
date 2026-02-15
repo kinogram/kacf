@@ -13,7 +13,8 @@ pub(crate) mod types;
 pub(crate) use pages::{account_page, admin_page, login_page};
 pub(crate) use pages::{account_js, admin_js, auth_js};
 pub(crate) use routes::{
-    auth_me, bootstrap_admin, bootstrap_status, guest_start, login, logout, register,
+    auth_me, bootstrap_admin, bootstrap_status, guest_start, login, verify_email_code, logout,
+    register,
     admin_get_settings, admin_put_settings, admin_list_users, admin_create_user, admin_delete_user, admin_set_banned,
     admin_set_notice, admin_audit_tail,
     admin_set_password,

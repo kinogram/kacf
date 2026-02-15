@@ -767,6 +767,7 @@ pub async fn run_web_server(
             .route("/auth/bootstrap_admin", web::post().to(auth::bootstrap_admin))
             .route("/auth/register", web::post().to(auth::register))
             .route("/auth/login", web::post().to(auth::login))
+            .route("/auth/verify_email_code", web::post().to(auth::verify_email_code))
             .route("/auth/guest", web::post().to(auth::guest_start))
             .route("/auth/logout", web::post().to(auth::logout))
             .route("/auth/me", web::get().to(auth::auth_me))

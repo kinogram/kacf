@@ -30,6 +30,12 @@ pub(crate) struct LoginPayload {
     pub(crate) password: Option<String>,
 }
 
+#[derive(Deserialize)]
+pub(crate) struct VerifyEmailCodePayload {
+    pub(crate) identifier: String, // username or email
+    pub(crate) code: String,
+}
+
 fn data_root() -> PathBuf {
     std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
@@ -178,11 +184,79 @@ pub(crate) async fn login(req: HttpRequest, body: web::Json<LoginPayload>) -> im
                 .cookie(build_session_cookie(&session.session_id))
                 .json(serde_json::json!({"ok": true}))
         }
-        // TODO: implement email code + authenticator flows.
-        LoginOption::PasswordEmail2fa | LoginOption::EmailOnly => {
-            HttpResponse::NotImplemented().body("login option not implemented yet")
+        LoginOption::EmailOnly => {
+            let code = match store.create_email_code("login", &user.username, 10 * 60) {
+                Ok(v) => v,
+                Err(e) => return HttpResponse::InternalServerError().body(e),
+            };
+            let mut fields = HashMap::new();
+            fields.insert("username", user.username.clone());
+            store.audit("login_email_code_issued", &fields);
+            HttpResponse::Conflict().json(serde_json::json!({
+                "need": "email_code",
+                "dev_code": code
+            }))
+        }
+        LoginOption::PasswordEmail2fa => {
+            let pw = payload.password.unwrap_or_default();
+            let ok = user.password.as_deref().unwrap_or("") == pw;
+            if !ok {
+                return HttpResponse::Unauthorized().body("invalid credentials");
+            }
+            let code = match store.create_email_code("login", &user.username, 10 * 60) {
+                Ok(v) => v,
+                Err(e) => return HttpResponse::InternalServerError().body(e),
+            };
+            let mut fields = HashMap::new();
+            fields.insert("username", user.username.clone());
+            store.audit("login_password_ok_email_code_issued", &fields);
+            HttpResponse::Conflict().json(serde_json::json!({
+                "need": "email_code",
+                "dev_code": code
+            }))
         }
     }
+}
+
+pub(crate) async fn verify_email_code(req: HttpRequest, body: web::Json<VerifyEmailCodePayload>) -> impl Responder {
+    let store = resolve_store(&req);
+    let s = store.read_admin_settings();
+    if !s.login_enabled {
+        return HttpResponse::Forbidden().body("login disabled");
+    }
+    let payload = body.into_inner();
+    let ident = payload.identifier.trim();
+    if ident.is_empty() {
+        return HttpResponse::BadRequest().body("identifier is empty");
+    }
+    let user = if ident.contains('@') {
+        store.find_user_by_email(ident)
+    } else {
+        store.find_user_by_username(ident)
+    };
+    let Some(user) = user else {
+        return HttpResponse::Unauthorized().body("invalid credentials");
+    };
+    if user.role != AccountRole::Admin && !s.non_admin_login_enabled {
+        return HttpResponse::Forbidden().body("non-admin login disabled");
+    }
+    if user.banned {
+        return HttpResponse::Forbidden().body("account banned");
+    }
+    let ok = store.consume_email_code("login", &user.username, &payload.code);
+    if !ok {
+        return HttpResponse::Unauthorized().body("invalid code");
+    }
+    let session = match store.create_session_for_user(&user) {
+        Ok(v) => v,
+        Err(e) => return HttpResponse::InternalServerError().body(e),
+    };
+    let mut fields = HashMap::new();
+    fields.insert("username", user.username.clone());
+    store.audit("login_email_code_verified", &fields);
+    HttpResponse::Ok()
+        .cookie(build_session_cookie(&session.session_id))
+        .json(serde_json::json!({"ok": true}))
 }
 
 pub(crate) async fn guest_start(req: HttpRequest) -> impl Responder {

@@ -31,6 +31,7 @@ pub(crate) struct AuthSystemPaths {
     pub(crate) users_db: PathBuf,
     pub(crate) sessions_db: PathBuf,
     pub(crate) admin_settings: PathBuf,
+    pub(crate) challenges_db: PathBuf,
     pub(crate) audit_log: PathBuf,
     pub(crate) per_user_root_dir: PathBuf,
 }
@@ -44,6 +45,7 @@ impl AuthSystemPaths {
             users_db: system_dir.join("users.json"),
             sessions_db: system_dir.join("sessions.json"),
             admin_settings: system_dir.join("admin_settings.json"),
+            challenges_db: system_dir.join("challenges.json"),
             audit_log: system_dir.join("audit.log"),
             per_user_root_dir,
         }
@@ -69,6 +71,26 @@ struct SessionsDb {
 impl Default for SessionsDb {
     fn default() -> Self {
         Self { sessions: vec![] }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ChallengeEntry {
+    purpose: String,
+    key: String,
+    code: String,
+    expires_at_unix: u64,
+    created_at_unix: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ChallengesDb {
+    items: Vec<ChallengeEntry>,
+}
+
+impl Default for ChallengesDb {
+    fn default() -> Self {
+        Self { items: vec![] }
     }
 }
 
@@ -101,6 +123,64 @@ impl AuthStore {
             atomic_write(&self.paths.admin_settings, json)?;
         }
         Ok(())
+    }
+
+    pub(crate) fn create_email_code(&self, purpose: &str, key: &str, ttl_secs: u64) -> Result<String, String> {
+        let p = purpose.trim();
+        let k = key.trim();
+        if p.is_empty() || k.is_empty() {
+            return Err("invalid challenge key".to_string());
+        }
+        let code = format!("{:06}", rand::thread_rng().gen_range(0..1_000_000u32));
+        let now = now_unix();
+        let entry = ChallengeEntry {
+            purpose: p.to_string(),
+            key: k.to_string(),
+            code: code.clone(),
+            expires_at_unix: now.saturating_add(ttl_secs.max(30).min(1800)),
+            created_at_unix: now,
+        };
+        let _g = self.lock.lock().unwrap();
+        let mut db: ChallengesDb = read_json_or_default(&self.paths.challenges_db).unwrap_or_default();
+        // Replace any previous active challenge with same purpose+key.
+        db.items.retain(|x| !(x.purpose == entry.purpose && x.key == entry.key));
+        db.items.push(entry);
+        // prune expired and cap
+        db.items.retain(|x| x.expires_at_unix > now);
+        if db.items.len() > 5000 {
+            db.items.sort_by_key(|x| x.created_at_unix);
+            db.items.truncate(5000);
+        }
+        let json = serde_json::to_string_pretty(&db).map_err(|e| e.to_string())?;
+        atomic_write(&self.paths.challenges_db, json).map_err(|e| e.to_string())?;
+        Ok(code)
+    }
+
+    pub(crate) fn consume_email_code(&self, purpose: &str, key: &str, code: &str) -> bool {
+        let p = purpose.trim();
+        let k = key.trim();
+        let c = code.trim();
+        if p.is_empty() || k.is_empty() || c.is_empty() {
+            return false;
+        }
+        let now = now_unix();
+        let _g = self.lock.lock().unwrap();
+        let mut db: ChallengesDb = read_json_or_default(&self.paths.challenges_db).unwrap_or_default();
+        let mut ok = false;
+        db.items.retain(|x| {
+            if x.expires_at_unix <= now {
+                return false;
+            }
+            if x.purpose == p && x.key == k && x.code == c {
+                ok = true;
+                return false; // consume
+            }
+            true
+        });
+        if let Ok(json) = serde_json::to_string_pretty(&db) {
+            let _ = atomic_write(&self.paths.challenges_db, json);
+        }
+        ok
     }
 
     pub(crate) fn read_admin_settings(&self) -> AdminSettings {

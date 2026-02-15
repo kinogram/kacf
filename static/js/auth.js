@@ -89,6 +89,10 @@
         if (regBlock) regBlock.style.display = active === 'register' ? '' : 'none';
         showHint('login_hint', '', false);
         showHint('register_hint', '', false);
+        const codeBlock = document.getElementById('login_code_block');
+        const verifyBtn = document.getElementById('login_verify_btn');
+        if (codeBlock) codeBlock.style.display = 'none';
+        if (verifyBtn) verifyBtn.style.display = 'none';
     }
 
     async function initCopyAndUi() {
@@ -104,7 +108,9 @@
 
         setText('label_login_identifier', txt('label_login_identifier', 'Username or Email'));
         setText('label_login_password', txt('label_login_password', 'Password'));
+        setText('label_login_code', txt('label_login_code', 'Email code'));
         setText('login_btn', txt('btn_login', 'Login'));
+        setText('login_verify_btn', txt('btn_verify_code', 'Verify code'));
         setText('guest_btn', txt('btn_guest', 'Continue as guest'));
 
         setText('label_reg_username', txt('label_reg_username', 'Username'));
@@ -146,6 +152,34 @@
             const r = await postJson('/auth/login', {
                 identifier: readValue('login_identifier'),
                 password: readValue('login_password'),
+            });
+            if (r.ok) {
+                location.href = '/';
+            } else if (r.status === 409) {
+                let data = null;
+                try { data = JSON.parse(r.text); } catch (_e) {}
+                if (data && data.need === 'email_code') {
+                    const codeBlock = document.getElementById('login_code_block');
+                    const verifyBtn = document.getElementById('login_verify_btn');
+                    if (codeBlock) codeBlock.style.display = '';
+                    if (verifyBtn) verifyBtn.style.display = '';
+                    const hint = document.getElementById('login_code_hint');
+                    if (hint) hint.textContent = (data.dev_code ? `${txt('dev_code_hint', 'Dev code')}: ${data.dev_code}` : '');
+                    showHint('login_hint', txt('login_need_code', 'Please enter the email code.'), false);
+                } else {
+                    showHint('login_hint', r.text || `HTTP ${r.status}`, true);
+                }
+            } else {
+                showHint('login_hint', r.text || `HTTP ${r.status}`, true);
+            }
+        });
+
+        const verifyBtn = document.getElementById('login_verify_btn');
+        if (verifyBtn) verifyBtn.addEventListener('click', async () => {
+            showHint('login_hint', txt('auth_working', 'Working...'), false);
+            const r = await postJson('/auth/verify_email_code', {
+                identifier: readValue('login_identifier'),
+                code: readValue('login_code'),
             });
             if (r.ok) {
                 location.href = '/';
@@ -212,4 +246,3 @@
         }
     })();
 })();
-

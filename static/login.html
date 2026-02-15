@@ -64,8 +64,14 @@
                     <label for="login_password" id="label_login_password"></label>
                     <input id="login_password" type="password" autocomplete="current-password">
                 </div>
+                <div id="login_code_block" style="display:none;">
+                    <label for="login_code" id="label_login_code"></label>
+                    <input id="login_code" type="text" inputmode="numeric" autocomplete="one-time-code">
+                    <div class="hint" id="login_code_hint"></div>
+                </div>
                 <div class="buttons">
                     <button class="btn-primary" id="login_btn"></button>
+                    <button class="btn-primary" id="login_verify_btn" style="display:none;"></button>
                     <button class="btn-ghost" id="guest_btn"></button>
                 </div>
                 <div class="hint" id="login_hint"></div>
@@ -103,4 +109,3 @@
 <script src="/assets/auth.js"></script>
 </body>
 </html>
-
