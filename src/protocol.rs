@@ -49,7 +49,7 @@ pub async fn agent_loop(
                 success_regex,
             }) => {
                 stop_flag = false;
-                cfg = Some(SessionCfg {
+                let session_cfg = SessionCfg {
                     api_key,
                     base_url,
                     model,
@@ -61,11 +61,12 @@ pub async fn agent_loop(
                     goal,
                     eval_cmd,
                     success_regex,
-                });
+                };
+                cfg = Some(session_cfg.clone());
                 clarify_answers.clear();
                 let _ = tx_evt.send(AgentEvent::Log("[Agent] Start received".into()));
                 if let Err(e) = run_session(
-                    cfg.as_ref().unwrap(),
+                    &session_cfg,
                     &mut clarify_answers,
                     &rx_req,
                     &tx_evt,
