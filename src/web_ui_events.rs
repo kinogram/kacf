@@ -1,5 +1,6 @@
 use crossbeam_channel::Receiver;
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -12,6 +13,8 @@ pub(crate) const MAX_EVENTS_PER_PULL: usize = 300;
 pub(crate) const MAX_EVENTS_PER_STREAM_BATCH: usize = 120;
 const MAX_EVENT_BUFFER: usize = 5000;
 const MAX_EVENT_BUFFER_BYTES: usize = 8 * 1024 * 1024;
+
+pub(crate) type EventBuffer = VecDeque<(usize, SerializableEvent)>;
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -34,7 +37,7 @@ impl From<AgentEvent> for SerializableEvent {
 }
 
 pub(crate) fn pull_events(
-    events: &[(usize, SerializableEvent)],
+    events: &EventBuffer,
     from_id: usize,
     limit: usize,
 ) -> Vec<(usize, SerializableEvent)> {
@@ -49,7 +52,7 @@ pub(crate) fn pull_events(
 pub(crate) fn spawn_event_collector(
     rx_evt: Receiver<AgentEvent>,
     runtime: Arc<Mutex<RuntimeStatus>>,
-    events: Arc<Mutex<Vec<(usize, SerializableEvent)>>>,
+    events: Arc<Mutex<EventBuffer>>,
     event_bytes: Arc<Mutex<usize>>,
     next_event_id: Arc<Mutex<usize>>,
 ) {
@@ -145,7 +148,7 @@ pub(crate) fn spawn_event_collector(
 }
 
 fn push_event_with_limits(
-    events: &Arc<Mutex<Vec<(usize, SerializableEvent)>>>,
+    events: &Arc<Mutex<EventBuffer>>,
     event_bytes: &Arc<Mutex<usize>>,
     next_event_id: &Arc<Mutex<usize>>,
     serial: SerializableEvent,
@@ -153,15 +156,38 @@ fn push_event_with_limits(
     let mut evts = lock_recover(events, "events");
     let mut bytes = lock_recover(event_bytes, "event_bytes");
     let mut next_id = lock_recover(next_event_id, "next_event_id");
-    *bytes += serializable_event_size(&serial);
-    evts.push((*next_id, serial));
-    while evts.len() > MAX_EVENT_BUFFER || *bytes > MAX_EVENT_BUFFER_BYTES {
-        if let Some((_, removed)) = evts.first() {
-            *bytes = bytes.saturating_sub(serializable_event_size(removed));
+
+    push_event_with_limits_inner(
+        &mut evts,
+        &mut bytes,
+        &mut next_id,
+        serial,
+        MAX_EVENT_BUFFER,
+        MAX_EVENT_BUFFER_BYTES,
+    );
+}
+
+fn push_event_with_limits_inner(
+    events: &mut EventBuffer,
+    bytes: &mut usize,
+    next_id: &mut usize,
+    serial: SerializableEvent,
+    max_events: usize,
+    max_bytes: usize,
+) {
+    let size = serializable_event_size(&serial);
+    *bytes = bytes.saturating_add(size);
+    events.push_back((*next_id, serial));
+
+    while events.len() > max_events || *bytes > max_bytes {
+        if let Some((_, removed)) = events.pop_front() {
+            *bytes = bytes.saturating_sub(serializable_event_size(&removed));
+        } else {
+            break;
         }
-        evts.remove(0);
     }
-    *next_id += 1;
+
+    *next_id = next_id.saturating_add(1);
 }
 
 fn serializable_event_size(evt: &SerializableEvent) -> usize {
@@ -195,4 +221,68 @@ fn now_unix() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pull_events_filters_and_limits() {
+        let mut buf: EventBuffer = Default::default();
+        buf.push_back((1, SerializableEvent::Log { line: "a".into() }));
+        buf.push_back((2, SerializableEvent::Log { line: "b".into() }));
+        buf.push_back((3, SerializableEvent::Log { line: "c".into() }));
+
+        let out = pull_events(&buf, 2, 2);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].0, 2);
+        assert_eq!(out[1].0, 3);
+    }
+
+    #[test]
+    fn push_event_evicts_oldest_by_count() {
+        let mut buf: EventBuffer = Default::default();
+        let mut bytes = 0usize;
+        let mut next_id = 0usize;
+
+        for i in 0..5 {
+            push_event_with_limits_inner(
+                &mut buf,
+                &mut bytes,
+                &mut next_id,
+                SerializableEvent::Log {
+                    line: format!("l{i}"),
+                },
+                3,
+                10_000,
+            );
+        }
+        assert_eq!(buf.len(), 3);
+        assert_eq!(buf.front().map(|x| x.0), Some(2));
+        assert_eq!(buf.back().map(|x| x.0), Some(4));
+    }
+
+    #[test]
+    fn push_event_evicts_oldest_by_bytes() {
+        let mut buf: EventBuffer = Default::default();
+        let mut bytes = 0usize;
+        let mut next_id = 0usize;
+
+        // Each entry is ~100 bytes, so max_bytes=250 keeps at most 2.
+        for _ in 0..4 {
+            push_event_with_limits_inner(
+                &mut buf,
+                &mut bytes,
+                &mut next_id,
+                SerializableEvent::Log {
+                    line: "x".repeat(100),
+                },
+                100,
+                250,
+            );
+        }
+        assert!(buf.len() <= 2);
+        assert!(bytes <= 250);
+    }
 }

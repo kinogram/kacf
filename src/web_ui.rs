@@ -21,7 +21,7 @@ use crate::protocol::{AgentEvent, AgentRequest};
 use crate::web_ui_analytics;
 use crate::web_ui_cache_logic;
 use crate::web_ui_debug;
-use crate::web_ui_events::{self, SerializableEvent};
+use crate::web_ui_events::{self, EventBuffer, SerializableEvent};
 use crate::web_ui_languages;
 use crate::web_ui_models;
 pub(crate) use crate::web_ui_models::{
@@ -86,7 +86,7 @@ const MANAGED_WORKSPACES_DIR: &str = "workspaces";
 #[derive(Clone)]
 pub struct AppState {
     pub(crate) tx_req: Sender<AgentRequest>,
-    pub(crate) events: Arc<Mutex<Vec<(usize, SerializableEvent)>>>,
+    pub(crate) events: Arc<Mutex<EventBuffer>>,
     pub(crate) event_bytes: Arc<Mutex<usize>>,
     pub(crate) next_event_id: Arc<Mutex<usize>>,
     pub(crate) runtime: Arc<Mutex<RuntimeStatus>>,
@@ -538,7 +538,7 @@ pub async fn run_web_server(
         .unwrap_or(8080);
     let state = AppState {
         tx_req,
-        events: Arc::new(Mutex::new(Vec::new())),
+        events: Arc::new(Mutex::new(Default::default())),
         event_bytes: Arc::new(Mutex::new(0)),
         next_event_id: Arc::new(Mutex::new(0)),
         runtime: Arc::new(Mutex::new(RuntimeStatus::default())),
