@@ -11,13 +11,10 @@ pub enum AgentRequest {
         base_url: String,
         model: String,
         language: String,
-        auto_revert_profile: String,
         unattended_mode: bool,
         resume_from_checkpoint: bool,
         workspace: PathBuf,
         goal: String,
-        eval_cmd: String,
-        success_regex: String,
     },
     Clarify {
         answers: Vec<ClarifyAnswer>,
@@ -73,13 +70,11 @@ pub(crate) struct SessionCfg {
     pub(crate) base_url: String,
     pub(crate) model: String,
     pub(crate) language: String,
-    pub(crate) auto_revert_profile: String,
     pub(crate) unattended_mode: bool,
     pub(crate) resume_from_checkpoint: bool,
     pub(crate) workspace: PathBuf,
     pub(crate) goal: String,
     pub(crate) eval_cmd: String,
-    pub(crate) success_regex: String,
 }
 
 #[derive(Serialize, Deserialize)]

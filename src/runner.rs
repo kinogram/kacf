@@ -1,5 +1,4 @@
 use anyhow::{anyhow, Context, Result};
-use regex::Regex;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -105,18 +104,6 @@ fn read_eval_timeout_secs() -> u64 {
         .and_then(|v| v.parse::<u64>().ok())
         .filter(|v| *v >= 10 && *v <= 1800)
         .unwrap_or(120)
-}
-
-/// Evaluate a regex pattern against the given text. Returns true if the pattern
-/// matches anywhere in the text. Invalid regex patterns return false.
-pub fn regex_match(pattern: &str, text: &str) -> bool {
-    if pattern.trim().is_empty() {
-        return true;
-    }
-    Regex::new(pattern)
-        .ok()
-        .map(|re| re.is_match(text))
-        .unwrap_or(false)
 }
 
 /// Very simple shell-like splitting for a command string. Supports quoted

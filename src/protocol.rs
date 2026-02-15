@@ -14,6 +14,10 @@ use crate::{protocol_failure, protocol_patch};
 use crate::{protocol_history, protocol_session_state};
 use std::sync::{atomic::AtomicBool, Arc};
 
+// User-friendly defaults: keep these fixed (no UI inputs).
+const FIXED_AUTO_REVERT_PROFILE: &str = "balanced";
+const FIXED_EVAL_CMD: &str = "bash scripts/run_tests.sh";
+
 /// Run the agent loop. This function listens for requests from the UI and
 /// interacts with the DeepSeek API, applying patches and evaluating the
 /// resulting project. It sends events back to the UI to update state.
@@ -38,13 +42,10 @@ pub async fn agent_loop(
                 base_url,
                 model,
                 language,
-                auto_revert_profile,
                 unattended_mode,
                 resume_from_checkpoint,
                 workspace,
                 goal,
-                eval_cmd,
-                success_regex,
             }) => {
                 stop_flag = false;
                 let session_cfg = SessionCfg {
@@ -52,13 +53,11 @@ pub async fn agent_loop(
                     base_url,
                     model,
                     language,
-                    auto_revert_profile,
                     unattended_mode,
                     resume_from_checkpoint,
                     workspace,
                     goal,
-                    eval_cmd,
-                    success_regex,
+                    eval_cmd: FIXED_EVAL_CMD.to_string(),
                 };
                 cfg = Some(session_cfg.clone());
                 clarify_answers.clear();
@@ -135,7 +134,7 @@ async fn run_session(
     stop_flag: &mut bool,
     stop_now: &Arc<AtomicBool>,
 ) -> Result<()> {
-    protocol_auto_revert::set_current_auto_revert_profile(&cfg.auto_revert_profile);
+    protocol_auto_revert::set_current_auto_revert_profile(FIXED_AUTO_REVERT_PROFILE);
     workspace::ensure_dir(&cfg.workspace)?;
     // Ensure a git repository is initialized so we can commit diffs.
     git_utils::init_repo_if_needed(&cfg.workspace)?;
@@ -409,7 +408,7 @@ async fn run_session(
                         let _ = tx_evt.send(AgentEvent::Log(format!("[Agent] diff failed: {e}")));
                     }
                 }
-                // 评测流水线：可选预检 + 主评测。
+                // 评测流水线：固定执行 scripts/run_tests.sh（由模型维护）。
                 let eval_report = run_eval_pipeline(cfg, tx_evt)?;
                 let result = eval_report.result;
                 let _ = tx_evt.send(AgentEvent::Log(format!(
@@ -420,12 +419,7 @@ async fn run_session(
                     truncate(&result.stderr, 2000)
                 )));
                 let ok = result.exit_code == 0
-                    && !eval_has_fatal_runtime_marker(&result.stdout, &result.stderr)
-                    && (cfg.success_regex.trim().is_empty()
-                        || runner::regex_match(
-                            &cfg.success_regex,
-                            &(result.stdout.clone() + "\n" + &result.stderr),
-                        ));
+                    && !eval_has_fatal_runtime_marker(&result.stdout, &result.stderr);
                 if result.exit_code == 0
                     && eval_has_fatal_runtime_marker(&result.stdout, &result.stderr)
                 {
@@ -447,12 +441,7 @@ async fn run_session(
                         verify_t0.elapsed().as_millis()
                     )));
                     let verify_ok = verify.exit_code == 0
-                        && !eval_has_fatal_runtime_marker(&verify.stdout, &verify.stderr)
-                        && (cfg.success_regex.trim().is_empty()
-                            || runner::regex_match(
-                                &cfg.success_regex,
-                                &(verify.stdout.clone() + "\n" + &verify.stderr),
-                            ));
+                        && !eval_has_fatal_runtime_marker(&verify.stdout, &verify.stderr);
                     if verify.exit_code == 0
                         && eval_has_fatal_runtime_marker(&verify.stdout, &verify.stderr)
                     {
@@ -686,28 +675,6 @@ fn extract_feedback_text(answers: &[ClarifyAnswer]) -> String {
 }
 
 fn run_eval_pipeline(cfg: &SessionCfg, tx_evt: &Sender<AgentEvent>) -> Result<EvalPipelineReport> {
-    if let Some(precheck_cmd) = read_precheck_cmd() {
-        let _ = tx_evt.send(AgentEvent::Log(format!(
-            "[Eval-Precheck] 开始执行: {}",
-            precheck_cmd
-        )));
-        let t0 = std::time::Instant::now();
-        let pre = runner::run_eval(&cfg.workspace, &precheck_cmd)?;
-        let _ = tx_evt.send(AgentEvent::Log(format!(
-            "[Perf] eval_precheck={}ms",
-            t0.elapsed().as_millis()
-        )));
-        let _ = tx_evt.send(AgentEvent::Log(format!(
-            "[Eval-Precheck] cmd='{}' exit={}",
-            precheck_cmd, pre.exit_code
-        )));
-        if pre.exit_code != 0 {
-            return Ok(EvalPipelineReport {
-                result: pre,
-                stage: "precheck".to_string(),
-            });
-        }
-    }
     let _ = tx_evt.send(AgentEvent::Log(format!(
         "[Eval-Main] 开始执行: {}",
         cfg.eval_cmd
@@ -722,14 +689,6 @@ fn run_eval_pipeline(cfg: &SessionCfg, tx_evt: &Sender<AgentEvent>) -> Result<Ev
         result: main,
         stage: "main".to_string(),
     })
-}
-
-fn read_precheck_cmd() -> Option<String> {
-    let cmd = std::env::var("AUTOCODING_PRECHECK_CMD").ok()?;
-    if cmd.trim().is_empty() {
-        return None;
-    }
-    Some(cmd)
 }
 
 fn failure_severity(category: &str) -> u8 {

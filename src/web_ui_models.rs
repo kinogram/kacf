@@ -7,18 +7,10 @@ pub(crate) struct StartPayload {
     pub(crate) model: String,
     #[serde(default)]
     pub(crate) language: String,
-    #[serde(default = "default_auto_revert_profile")]
-    pub(crate) auto_revert_profile: String,
     #[serde(default)]
     pub(crate) unattended_mode: bool,
-    #[serde(default)]
-    pub(crate) precheck_cmd: String,
-    #[serde(default)]
-    pub(crate) release_gate_threshold: String,
     pub(crate) workspace: String,
     pub(crate) goal: String,
-    pub(crate) eval_cmd: String,
-    pub(crate) success_regex: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,18 +20,10 @@ pub(crate) struct DraftPayload {
     pub(crate) model: String,
     #[serde(default)]
     pub(crate) language: String,
-    #[serde(default = "default_auto_revert_profile")]
-    pub(crate) auto_revert_profile: String,
     #[serde(default)]
     pub(crate) unattended_mode: bool,
-    #[serde(default)]
-    pub(crate) precheck_cmd: String,
-    #[serde(default)]
-    pub(crate) release_gate_threshold: String,
     pub(crate) workspace: String,
     pub(crate) goal: String,
-    pub(crate) eval_cmd: String,
-    pub(crate) success_regex: String,
     pub(crate) remote: String,
     pub(crate) remote_url: String,
     pub(crate) branch: String,
@@ -65,20 +49,11 @@ impl DraftPayload {
             base_url: self.base_url,
             model: self.model,
             language: self.language,
-            auto_revert_profile: self.auto_revert_profile,
             unattended_mode: self.unattended_mode,
-            precheck_cmd: self.precheck_cmd,
-            release_gate_threshold: self.release_gate_threshold,
             workspace: self.workspace,
             goal: self.goal,
-            eval_cmd: self.eval_cmd,
-            success_regex: self.success_regex,
         }
     }
-}
-
-pub(crate) fn default_auto_revert_profile() -> String {
-    "balanced".to_string()
 }
 
 #[derive(Debug, Deserialize)]
@@ -218,13 +193,8 @@ pub(crate) struct MetricsResponse {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct ProjectConfig {
-    pub(crate) auto_revert_profile: String,
     #[serde(default)]
     pub(crate) unattended_mode: bool,
-    #[serde(default)]
-    pub(crate) precheck_cmd: String,
-    #[serde(default)]
-    pub(crate) release_gate_threshold: String,
     pub(crate) updated_at_unix: u64,
 }
 

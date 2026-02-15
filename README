@@ -53,9 +53,10 @@ http://localhost:8080
 
 ### 配置区（项目级）
 
-- 回滚策略模板、预检命令、历史裁剪、发布门禁阈值
-- 目标需求、评测命令、成功正则
-- 这些配置会保存到项目快照和工作区配置文件。
+- 目标需求（Goal）
+- Git 推送配置（remote/remote_url/branch）
+- 评测命令固定为 `bash scripts/run_tests.sh`：评测脚本由模型在工作区内维护
+- 自动回滚策略与发布门禁阈值为内置固定值（不再提供 UI 配置项）
 
 ### 全局设置（跨项目）
 
@@ -194,14 +195,11 @@ bash scripts/metrics_gate.sh
 - `AUTOCODING_PORT`：Web 服务端口（默认 `8080`）
 - `AUTOCODING_API_TIMEOUT_SECS`：模型 API 超时秒数（默认 `90`）
 - `AUTOCODING_EVAL_TIMEOUT_SECS`：评测命令超时秒数（默认 `120`）
-- `AUTOCODING_PRECHECK_CMD`：评测前预检命令（可选）
 - `AUTOCODING_HISTORY_MAX_MESSAGES`：会话历史最大消息数（默认 `40`）
 - `AUTOCODING_HISTORY_MAX_CHARS`：会话历史最大字符数（默认 `70000`）
-- `AUTOCODING_RELEASE_GATE_THRESHOLD`：发布门禁阈值（`0-100`，默认 `75`）
 
 自动回滚相关：
 
-- `AUTOCODING_AUTO_REVERT_PROFILE`：`conservative|balanced|aggressive`
 - `AUTOCODING_AUTO_REVERT_ON_REPEAT`
 - `AUTOCODING_AUTO_REVERT_REPEAT_COUNT`
 - `AUTOCODING_AUTO_REVERT_MIN_SEVERITY`

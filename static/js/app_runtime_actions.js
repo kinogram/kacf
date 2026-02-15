@@ -422,7 +422,7 @@ function escapeHtml(text) {
 }
 
 function bindAutoSave() {
-    const ids = ['auto_revert_profile', 'precheck_cmd', 'release_gate_threshold', 'unattended_mode', 'goal', 'eval_cmd', 'success_regex', 'remote', 'remote_url', 'branch'];
+    const ids = ['unattended_mode', 'goal', 'remote', 'remote_url', 'branch'];
     ids.forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;

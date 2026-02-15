@@ -66,49 +66,15 @@
 
             <div class="grid">
                 <section class="card">
-            <h2 class="title" id="section_config_title"></h2>
-            <p class="sub" id="section_config_sub"></p>
-
-            <div class="row two">
-                <div>
-                    <label for="auto_revert_profile" id="label_auto_revert_profile"></label>
-                    <select id="auto_revert_profile">
-                        <option value="balanced" selected>balanced</option>
-                        <option value="conservative">conservative</option>
-                        <option value="aggressive">aggressive</option>
-                    </select>
-                </div>
-                <div></div>
-            </div>
-
-            <div class="row two">
-                <div>
-                    <label for="precheck_cmd" id="label_precheck_cmd"></label>
-                    <input id="precheck_cmd" type="text" placeholder="">
-                </div>
-                <div>
-                    <label for="release_gate_threshold" id="label_release_gate_threshold"></label>
-                    <input id="release_gate_threshold" type="text" placeholder="">
-                </div>
-            </div>
-
-            <div>
-                <label for="goal" id="label_goal"></label>
-                <textarea id="goal" placeholder=""></textarea>
-            </div>
-
-            <div class="row two">
-                <div>
-                    <label for="eval_cmd" id="label_eval_cmd"></label>
-                    <input id="eval_cmd" type="text" value="bash scripts/run_tests.sh">
-                </div>
-                <div>
-                    <label for="success_regex" id="label_success_regex"></label>
-                    <input id="success_regex" type="text" placeholder="">
-                </div>
-            </div>
-
-            <hr style="border:none;border-top:1px solid var(--line);margin:14px 0;">
+	            <h2 class="title" id="section_config_title"></h2>
+	            <p class="sub" id="section_config_sub"></p>
+	
+	            <div>
+	                <label for="goal" id="label_goal"></label>
+	                <textarea id="goal" placeholder=""></textarea>
+	            </div>
+	
+	            <hr style="border:none;border-top:1px solid var(--line);margin:14px 0;">
 
             <h3 class="title" style="font-size:16px;" id="section_git_title"></h3>
             <div class="row three">

@@ -65,14 +65,9 @@ function getFormData() {
         base_url: document.getElementById('base_url').value.trim(),
         model: document.getElementById('model').value.trim(),
         language: normalizeLanguageCode(sharedConfig.language || currentLanguage),
-        auto_revert_profile: document.getElementById('auto_revert_profile').value.trim(),
-        precheck_cmd: document.getElementById('precheck_cmd').value.trim(),
-        release_gate_threshold: document.getElementById('release_gate_threshold').value.trim(),
         unattended_mode: !!document.getElementById('unattended_mode')?.checked,
         workspace: document.getElementById('workspace').value.trim(),
         goal: document.getElementById('goal').value.trim(),
-        eval_cmd: document.getElementById('eval_cmd').value.trim(),
-        success_regex: document.getElementById('success_regex').value.trim(),
         remote: document.getElementById('remote').value.trim(),
         remote_url: document.getElementById('remote_url').value.trim(),
         branch: document.getElementById('branch').value.trim(),
@@ -81,7 +76,7 @@ function getFormData() {
 
 function applyFormData(d) {
     if (!d) return;
-    const fields = ['api_key', 'base_url', 'model', 'auto_revert_profile', 'precheck_cmd', 'release_gate_threshold', 'workspace', 'goal', 'eval_cmd', 'success_regex', 'remote', 'remote_url', 'branch'];
+    const fields = ['api_key', 'base_url', 'model', 'workspace', 'goal', 'remote', 'remote_url', 'branch'];
     fields.forEach(k => {
         if (typeof d[k] === 'string' && document.getElementById(k)) {
             document.getElementById(k).value = d[k];
@@ -199,8 +194,6 @@ function applyStaticCopyToDom() {
     });
     const placeholderMap = [
         ['project_name', 'ph_project_name'],
-        ['precheck_cmd', 'ph_precheck_cmd'],
-        ['release_gate_threshold', 'ph_release_gate_threshold'],
         ['global_auto_resume_attempts', 'ph_global_auto_resume_attempts'],
         ['global_stop_after_minutes', 'ph_global_stop_after_minutes'],
         ['global_history_max_messages', 'ph_history_max_messages'],
@@ -208,7 +201,6 @@ function applyStaticCopyToDom() {
         ['global_log_max_chars', 'ph_global_log_max_chars'],
         ['global_diff_max_chars', 'ph_global_diff_max_chars'],
         ['goal', 'ph_goal'],
-        ['success_regex', 'ph_success_regex'],
         ['api_key', 'ph_api_key'],
         ['project_search', 'project_search_placeholder']
     ];

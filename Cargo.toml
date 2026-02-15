@@ -17,7 +17,6 @@ crossbeam-channel = "0.5"
 anyhow = "1.0"
 thiserror = "1.0"
 time = { version = "0.3", features = ["formatting"] }
-regex = "1.10"
 walkdir = "2.5"
 wait-timeout = "0.2"
 actix-web = { version = "4", features = ["macros"] }

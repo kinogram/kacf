@@ -83,6 +83,9 @@ const UI_CACHE_FILENAME: &str = ".autocoding_webui_cache.json";
 const MANAGED_ROOT_DIR: &str = "autocoding_data";
 const MANAGED_WORKSPACES_DIR: &str = "workspaces";
 
+// User-friendly defaults: keep these fixed (no UI inputs).
+const FIXED_RELEASE_GATE_THRESHOLD: u8 = 75;
+
 #[derive(Clone)]
 pub struct AppState {
     pub(crate) tx_req: Sender<AgentRequest>,
@@ -144,16 +147,10 @@ fn require_managed_workspace(workspace: &str) -> Result<PathBuf, String> {
 
 fn save_project_config(
     workspace: &str,
-    profile: &str,
     unattended_mode: bool,
-    precheck_cmd: &str,
-    release_gate_threshold: &str,
 ) -> std::io::Result<()> {
     let cfg = ProjectConfig {
-        auto_revert_profile: profile.to_string(),
         unattended_mode,
-        precheck_cmd: precheck_cmd.to_string(),
-        release_gate_threshold: release_gate_threshold.to_string(),
         updated_at_unix: now_unix(),
     };
     web_ui_store::save_project_config(
@@ -251,33 +248,24 @@ pub(crate) fn start_from_payload(
             return Err("session already running".to_string());
         }
     }
-    let auto_revert_profile = payload.auto_revert_profile.clone();
     let workspace_full = require_managed_workspace(&payload.workspace)?;
     web_ui_runtime_env::apply_runtime_config_envs(
-        &payload.precheck_cmd,
         global_history_max_messages,
         global_history_max_chars,
-        &payload.release_gate_threshold,
     );
     let req = AgentRequest::Start {
         api_key: payload.api_key,
         base_url: payload.base_url,
         model: payload.model,
         language: payload.language,
-        auto_revert_profile: auto_revert_profile.clone(),
         unattended_mode: payload.unattended_mode,
         resume_from_checkpoint,
         workspace: workspace_full.clone(),
         goal: payload.goal.clone(),
-        eval_cmd: payload.eval_cmd,
-        success_regex: payload.success_regex,
     };
     if let Err(e) = save_project_config(
         &payload.workspace,
-        &auto_revert_profile,
         payload.unattended_mode,
-        &payload.precheck_cmd,
-        &payload.release_gate_threshold,
     ) {
         eprintln!("save project config failed: {}", e);
     }
@@ -505,11 +493,7 @@ async fn get_language_pack(path: web::Path<String>) -> impl Responder {
 }
 
 pub(crate) fn read_gate_threshold() -> u8 {
-    std::env::var("AUTOCODING_RELEASE_GATE_THRESHOLD")
-        .ok()
-        .and_then(|v| v.parse::<u8>().ok())
-        .filter(|v| *v <= 100)
-        .unwrap_or(75)
+    FIXED_RELEASE_GATE_THRESHOLD
 }
 
 pub(crate) fn release_gate(

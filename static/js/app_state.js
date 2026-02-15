@@ -105,10 +105,9 @@ const PROJECT_CONTROL_IDS = [
     'project_delete_btn',
 ];
 const CONFIG_EDIT_IDS = [
-    'api_key', 'model', 'base_url', 'workspace', 'auto_revert_profile',
-    'precheck_cmd', 'release_gate_threshold',
+    'api_key', 'model', 'base_url', 'workspace',
     'unattended_mode',
-    'goal', 'eval_cmd', 'success_regex', 'remote', 'remote_url', 'branch',
+    'goal', 'remote', 'remote_url', 'branch',
     'open_global_config_btn', 'language_select',
 ];
 
@@ -696,14 +695,9 @@ function defaultFormData() {
         api_key: sharedConfig.api_key || '',
         base_url: sharedConfig.base_url || 'https://api.deepseek.com',
         model: sharedConfig.model || 'deepseek-reasoner',
-        auto_revert_profile: 'balanced',
-        precheck_cmd: '',
-        release_gate_threshold: '',
         unattended_mode: false,
         workspace: '',
         goal: '',
-        eval_cmd: 'bash scripts/run_tests.sh',
-        success_regex: '',
         remote: 'origin',
         remote_url: '',
         branch: 'main',

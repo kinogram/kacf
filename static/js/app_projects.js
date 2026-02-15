@@ -95,16 +95,14 @@ function renderProjectAccordion() {
     </div>
   </div>
   <div class="project-goal" title="${escapeHtml(goalText)}">${escapeHtml(txt('project_goal_prefix', ''))}${escapeHtml(goalText)}</div>
-  <div class="meta">
-    ${escapeHtml(txt('project_meta_workspace', ''))}: ${escapeHtml(p.workspace || '-')}<br>
-    ${escapeHtml(txt('project_meta_updated', ''))}: ${escapeHtml(dt)}<br>
-    ${escapeHtml(txt('project_meta_eval', ''))}: ${escapeHtml(snap.eval_cmd || '-')}<br>
-    ${escapeHtml(txt('project_meta_revert', ''))}: ${escapeHtml(snap.auto_revert_profile || '-')}
-	  </div>
-	  <div class="buttons">
-	    <button class="btn-ghost" onclick="selectProject('${p.id}', true)">${escapeHtml(txt('btn_project_open_card', ''))}</button>
-	    <button class="btn-ghost" onclick="deleteProjectById('${p.id}')">${escapeHtml(txt('btn_project_delete_card', ''))}</button>
-	  </div>
+		  <div class="meta">
+		    ${escapeHtml(txt('project_meta_workspace', ''))}: ${escapeHtml(p.workspace || '-')}<br>
+		    ${escapeHtml(txt('project_meta_updated', ''))}: ${escapeHtml(dt)}
+			  </div>
+		  <div class="buttons">
+		    <button class="btn-ghost" onclick="selectProject('${p.id}', true)">${escapeHtml(txt('btn_project_open_card', ''))}</button>
+		    <button class="btn-ghost" onclick="deleteProjectById('${p.id}')">${escapeHtml(txt('btn_project_delete_card', ''))}</button>
+		  </div>
 	</div>`;
         })
         .join('');
@@ -435,15 +433,6 @@ async function loadProjectConfigForWorkspace() {
         const resp = await fetch(`/project_config?workspace=${encodeURIComponent(ws)}`);
         if (!resp.ok) return;
         const cfg = await resp.json();
-        if (cfg && typeof cfg.auto_revert_profile === 'string' && cfg.auto_revert_profile) {
-            document.getElementById('auto_revert_profile').value = cfg.auto_revert_profile;
-        }
-        if (cfg && typeof cfg.precheck_cmd === 'string') {
-            document.getElementById('precheck_cmd').value = cfg.precheck_cmd;
-        }
-        if (cfg && typeof cfg.release_gate_threshold === 'string') {
-            document.getElementById('release_gate_threshold').value = cfg.release_gate_threshold;
-        }
         if (cfg && typeof cfg.unattended_mode === 'boolean') {
             document.getElementById('unattended_mode').checked = cfg.unattended_mode;
         }
