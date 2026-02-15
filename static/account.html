@@ -43,6 +43,68 @@
 
             <hr style="border:none;border-top:1px solid var(--line);margin:14px 0;">
 
+            <h2 class="title" id="account_security_title"></h2>
+            <p class="sub" id="account_security_sub"></p>
+
+            <div class="row two">
+                <div>
+                    <label for="acct_new_username" id="label_acct_new_username"></label>
+                    <input id="acct_new_username" type="text" autocomplete="username">
+                </div>
+                <div style="display:flex;align-items:flex-end;">
+                    <button class="btn-primary" id="acct_change_username_btn" style="width:100%;"></button>
+                </div>
+            </div>
+            <div class="hint" id="acct_username_hint"></div>
+
+            <div class="row two" style="margin-top:10px;">
+                <div>
+                    <label for="acct_new_email" id="label_acct_new_email"></label>
+                    <input id="acct_new_email" type="email" autocomplete="email">
+                </div>
+                <div style="display:flex;align-items:flex-end;gap:8px;">
+                    <button class="btn-ghost" id="acct_request_new_email_code_btn" style="flex:1;"></button>
+                    <button class="btn-primary" id="acct_confirm_new_email_btn" style="flex:1;"></button>
+                </div>
+            </div>
+            <div class="row two">
+                <div>
+                    <label for="acct_new_email_code" id="label_acct_new_email_code"></label>
+                    <input id="acct_new_email_code" type="text" inputmode="numeric" autocomplete="one-time-code">
+                </div>
+                <div>
+                    <label for="acct_current_email_code" id="label_acct_current_email_code"></label>
+                    <input id="acct_current_email_code" type="text" inputmode="numeric" autocomplete="one-time-code">
+                </div>
+            </div>
+            <div class="buttons">
+                <button class="btn-ghost" id="acct_request_current_email_code_btn"></button>
+            </div>
+            <div class="hint" id="acct_email_hint"></div>
+
+            <hr style="border:none;border-top:1px solid var(--line);margin:14px 0;">
+
+            <h2 class="title" id="account_login_option_title"></h2>
+            <p class="sub" id="account_login_option_sub"></p>
+            <div class="row two">
+                <div>
+                    <label for="acct_login_option" id="label_acct_login_option"></label>
+                    <select id="acct_login_option">
+                        <option value="password_only"></option>
+                        <option value="password_email_2fa"></option>
+                        <option value="email_only"></option>
+                    </select>
+                </div>
+                <div>
+                    <label for="acct_new_password_for_option" id="label_acct_new_password_for_option"></label>
+                    <input id="acct_new_password_for_option" type="password" autocomplete="new-password">
+                </div>
+            </div>
+            <div class="buttons">
+                <button class="btn-primary" id="acct_change_login_option_btn"></button>
+            </div>
+            <div class="hint" id="acct_login_option_hint"></div>
+
             <h2 class="title" id="account_password_title"></h2>
             <p class="sub" id="account_password_sub"></p>
             <div class="row two">
@@ -66,4 +128,3 @@
 <script src="/assets/account.js"></script>
 </body>
 </html>
-

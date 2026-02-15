@@ -797,6 +797,27 @@ pub async fn run_web_server(
                 "/account/api/password",
                 web::post().to(auth::account_change_password),
             )
+            .route("/account/api/self", web::get().to(auth::account_self))
+            .route(
+                "/account/api/request_current_email_code",
+                web::post().to(auth::account_request_current_email_code),
+            )
+            .route(
+                "/account/api/change_username",
+                web::post().to(auth::account_change_username),
+            )
+            .route(
+                "/account/api/request_new_email_code",
+                web::post().to(auth::account_request_new_email_code),
+            )
+            .route(
+                "/account/api/confirm_email_change",
+                web::post().to(auth::account_confirm_email_change),
+            )
+            .route(
+                "/account/api/change_login_option",
+                web::post().to(auth::account_change_login_option),
+            )
             .route("/start", web::post().to(web_ui_session::start_session))
             .route("/stop", web::post().to(web_ui_session::stop_session))
             .route("/resume", web::post().to(web_ui_session::resume_session))

@@ -19,6 +19,8 @@ pub(crate) use routes::{
     admin_set_notice, admin_audit_tail,
     admin_set_password,
     account_update_profile, account_change_password,
+    account_self, account_request_current_email_code, account_change_username,
+    account_request_new_email_code, account_confirm_email_change, account_change_login_option,
 };
 pub(crate) use store::{AuthStore, AuthSystemPaths};
 pub(crate) use types::{AccountRole, AuthMeResponse, LoginOption, SessionRecord, UserRecord};

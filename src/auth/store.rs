@@ -293,6 +293,54 @@ impl AuthStore {
         Ok(())
     }
 
+    pub(crate) fn rename_user(&self, old_username: &str, new_username: &str) -> Result<UserRecord, String> {
+        let old_u = old_username.trim();
+        let new_u = new_username.trim();
+        if old_u.is_empty() || new_u.is_empty() {
+            return Err("username is empty".to_string());
+        }
+        if old_u == new_u {
+            return Err("username unchanged".to_string());
+        }
+
+        let _g = self.lock.lock().unwrap();
+        let mut db: UsersDb = read_json_or_default(&self.paths.users_db).unwrap_or_default();
+        if db.users.iter().any(|x| x.username == new_u) {
+            return Err("username already exists".to_string());
+        }
+        let Some(idx) = db.users.iter().position(|x| x.username == old_u) else {
+            return Err("user not found".to_string());
+        };
+
+        // Move on-disk user root dir (if any).
+        let old_dir = self.paths.per_user_root_dir.join(old_u);
+        let new_dir = self.paths.per_user_root_dir.join(new_u);
+        if old_dir.exists() {
+            if new_dir.exists() {
+                return Err("new user directory already exists".to_string());
+            }
+            fs::rename(&old_dir, &new_dir).map_err(|e| format!("rename user dir failed: {}", e))?;
+        } else {
+            // Ensure new dir exists for consistency.
+            fs::create_dir_all(&new_dir).map_err(|e| format!("create user dir failed: {}", e))?;
+        }
+
+        let mut user = db.users[idx].clone();
+        user.username = new_u.to_string();
+        user.updated_at_unix = now_unix();
+        db.users[idx] = user.clone();
+        let json = serde_json::to_string_pretty(&db).map_err(|e| e.to_string())?;
+        atomic_write(&self.paths.users_db, json).map_err(|e| e.to_string())?;
+
+        // Drop all sessions for old username (force re-login).
+        let mut sdb: SessionsDb = read_json_or_default(&self.paths.sessions_db).unwrap_or_default();
+        sdb.sessions.retain(|s| s.username.as_deref() != Some(old_u));
+        let sjson = serde_json::to_string_pretty(&sdb).map_err(|e| e.to_string())?;
+        atomic_write(&self.paths.sessions_db, sjson).map_err(|e| e.to_string())?;
+
+        Ok(user)
+    }
+
     pub(crate) fn create_user(
         &self,
         username: &str,

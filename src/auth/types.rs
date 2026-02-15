@@ -19,6 +19,16 @@ pub(crate) enum LoginOption {
     // TotpOnly,
 }
 
+impl LoginOption {
+    pub(crate) fn requires_password(&self) -> bool {
+        matches!(self, LoginOption::PasswordOnly | LoginOption::PasswordEmail2fa)
+    }
+
+    pub(crate) fn requires_email_code(&self) -> bool {
+        matches!(self, LoginOption::EmailOnly | LoginOption::PasswordEmail2fa)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct UserRecord {
     pub(crate) username: String,

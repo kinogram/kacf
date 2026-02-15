@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
+use serde::Serialize;
 use serde::Deserialize;
 
 use crate::auth::session::{build_clear_session_cookie, build_session_cookie, read_session_cookie};
@@ -623,6 +624,7 @@ pub(crate) async fn account_update_profile(req: HttpRequest, body: web::Json<Acc
 pub(crate) struct AccountChangePasswordPayload {
     pub(crate) old_password: String,
     pub(crate) new_password: String,
+    pub(crate) current_email_code: Option<String>,
 }
 
 pub(crate) async fn account_change_password(req: HttpRequest, body: web::Json<AccountChangePasswordPayload>) -> impl Responder {
@@ -644,15 +646,19 @@ pub(crate) async fn account_change_password(req: HttpRequest, body: web::Json<Ac
     if user.banned {
         return HttpResponse::Forbidden().body("account banned");
     }
-    if user.login_option != LoginOption::PasswordOnly {
-        return HttpResponse::NotImplemented().body("password change only implemented for password_only");
-    }
     let p = body.into_inner();
     let old_pw = p.old_password;
     let new_pw = p.new_password;
-    let ok = user.password.as_deref().unwrap_or("") == old_pw;
-    if !ok {
-        return HttpResponse::Unauthorized().body("old password incorrect");
+    if !user.login_option.requires_password() {
+        return HttpResponse::BadRequest().body("password not enabled for this account");
+    }
+    if let Err(e) = verify_identity(
+        &user,
+        &store,
+        Some(&old_pw),
+        p.current_email_code.as_deref(),
+    ) {
+        return HttpResponse::Unauthorized().body(e);
     }
     if new_pw.trim().is_empty() {
         return HttpResponse::BadRequest().body("new password is empty");
@@ -661,5 +667,321 @@ pub(crate) async fn account_change_password(req: HttpRequest, body: web::Json<Ac
     if let Err(e) = store.upsert_user(user) {
         return HttpResponse::InternalServerError().body(format!("save failed: {}", e));
     }
+    HttpResponse::Ok().body("ok")
+}
+
+#[derive(Serialize)]
+pub(crate) struct AccountSelfResponse {
+    username: String,
+    nickname: String,
+    email: String,
+    role: AccountRole,
+    banned: bool,
+    login_option: LoginOption,
+}
+
+pub(crate) async fn account_self(req: HttpRequest) -> impl Responder {
+    let store = resolve_store(&req);
+    let sid = read_session_cookie(&req).unwrap_or_default();
+    let Some(sess) = store.resolve_session(&sid) else {
+        return HttpResponse::Unauthorized().body("not logged in");
+    };
+    if sess.role == AccountRole::Guest {
+        return HttpResponse::Forbidden().body("guest session");
+    }
+    let Some(username) = sess.username.as_deref() else {
+        return HttpResponse::Unauthorized().body("invalid session");
+    };
+    let user = match store.find_user_by_username(username) {
+        Some(u) => u,
+        None => return HttpResponse::Unauthorized().body("unknown user"),
+    };
+    HttpResponse::Ok().json(AccountSelfResponse {
+        username: user.username,
+        nickname: user.nickname,
+        email: user.email,
+        role: user.role,
+        banned: user.banned,
+        login_option: user.login_option,
+    })
+}
+
+fn username_allowed(username: &str) -> bool {
+    let u = username.trim();
+    if u.is_empty() || u.len() > 64 {
+        return false;
+    }
+    u.chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.')
+}
+
+fn verify_identity(
+    user: &crate::auth::UserRecord,
+    store: &AuthStore,
+    old_password: Option<&str>,
+    current_email_code: Option<&str>,
+) -> Result<(), String> {
+    if user.login_option.requires_password() {
+        let pw = old_password.unwrap_or("").trim();
+        if user.password.as_deref().unwrap_or("") != pw {
+            return Err("old password incorrect".to_string());
+        }
+    }
+    if user.login_option.requires_email_code() {
+        let code = current_email_code.unwrap_or("").trim();
+        if !store.consume_email_code("verify_current_email", &user.username, code) {
+            return Err("invalid current email code".to_string());
+        }
+    }
+    Ok(())
+}
+
+pub(crate) async fn account_request_current_email_code(req: HttpRequest) -> impl Responder {
+    let store = resolve_store(&req);
+    let sid = read_session_cookie(&req).unwrap_or_default();
+    let Some(sess) = store.resolve_session(&sid) else {
+        return HttpResponse::Unauthorized().body("not logged in");
+    };
+    if sess.role == AccountRole::Guest {
+        return HttpResponse::Forbidden().body("guest session");
+    }
+    let Some(username) = sess.username.as_deref() else {
+        return HttpResponse::Unauthorized().body("invalid session");
+    };
+    let user = match store.find_user_by_username(username) {
+        Some(u) => u,
+        None => return HttpResponse::Unauthorized().body("unknown user"),
+    };
+    if user.banned {
+        return HttpResponse::Forbidden().body("account banned");
+    }
+    let code = match store.create_email_code("verify_current_email", &user.username, 10 * 60) {
+        Ok(v) => v,
+        Err(e) => return HttpResponse::InternalServerError().body(e),
+    };
+    let mut fields = HashMap::new();
+    fields.insert("username", user.username);
+    store.audit("account_current_email_code_issued", &fields);
+    HttpResponse::Ok().json(serde_json::json!({"dev_code": code}))
+}
+
+#[derive(Deserialize)]
+pub(crate) struct AccountUsernamePayload {
+    pub(crate) new_username: String,
+    pub(crate) old_password: Option<String>,
+    pub(crate) current_email_code: Option<String>,
+}
+
+pub(crate) async fn account_change_username(req: HttpRequest, body: web::Json<AccountUsernamePayload>) -> impl Responder {
+    let store = resolve_store(&req);
+    let sid = read_session_cookie(&req).unwrap_or_default();
+    let Some(sess) = store.resolve_session(&sid) else {
+        return HttpResponse::Unauthorized().body("not logged in");
+    };
+    if sess.role == AccountRole::Guest {
+        return HttpResponse::Forbidden().body("guest session");
+    }
+    let Some(username) = sess.username.as_deref() else {
+        return HttpResponse::Unauthorized().body("invalid session");
+    };
+    let user = match store.find_user_by_username(username) {
+        Some(u) => u,
+        None => return HttpResponse::Unauthorized().body("unknown user"),
+    };
+    if user.banned {
+        return HttpResponse::Forbidden().body("account banned");
+    }
+    let p = body.into_inner();
+    let new_u = p.new_username.trim();
+    if !username_allowed(new_u) {
+        return HttpResponse::BadRequest().body("username not allowed");
+    }
+    if let Err(e) = verify_identity(
+        &user,
+        &store,
+        p.old_password.as_deref(),
+        p.current_email_code.as_deref(),
+    ) {
+        return HttpResponse::Unauthorized().body(e);
+    }
+    let updated = match store.rename_user(&user.username, new_u) {
+        Ok(v) => v,
+        Err(e) => return HttpResponse::BadRequest().body(e),
+    };
+    // Replace session cookie with a new session for renamed username.
+    let session = match store.create_session_for_user(&updated) {
+        Ok(v) => v,
+        Err(e) => return HttpResponse::InternalServerError().body(e),
+    };
+    let mut fields = HashMap::new();
+    fields.insert("old", user.username);
+    fields.insert("new", updated.username.clone());
+    store.audit("account_change_username", &fields);
+    HttpResponse::Ok()
+        .cookie(build_session_cookie(&session.session_id))
+        .json(serde_json::json!({"ok": true, "username": updated.username}))
+}
+
+#[derive(Deserialize)]
+pub(crate) struct AccountRequestNewEmailCodePayload {
+    pub(crate) new_email: String,
+}
+
+pub(crate) async fn account_request_new_email_code(req: HttpRequest, body: web::Json<AccountRequestNewEmailCodePayload>) -> impl Responder {
+    let store = resolve_store(&req);
+    let sid = read_session_cookie(&req).unwrap_or_default();
+    let Some(sess) = store.resolve_session(&sid) else {
+        return HttpResponse::Unauthorized().body("not logged in");
+    };
+    if sess.role == AccountRole::Guest {
+        return HttpResponse::Forbidden().body("guest session");
+    }
+    let Some(username) = sess.username.as_deref() else {
+        return HttpResponse::Unauthorized().body("invalid session");
+    };
+    let user = match store.find_user_by_username(username) {
+        Some(u) => u,
+        None => return HttpResponse::Unauthorized().body("unknown user"),
+    };
+    if user.banned {
+        return HttpResponse::Forbidden().body("account banned");
+    }
+    let new_email = body.new_email.trim().to_lowercase();
+    if !email_allowed(&new_email) {
+        return HttpResponse::BadRequest().body("email not allowed");
+    }
+    let key = format!("{}:{}", user.username, new_email);
+    let code = match store.create_email_code("verify_new_email", &key, 10 * 60) {
+        Ok(v) => v,
+        Err(e) => return HttpResponse::InternalServerError().body(e),
+    };
+    let mut fields = HashMap::new();
+    fields.insert("username", user.username);
+    store.audit("account_new_email_code_issued", &fields);
+    HttpResponse::Ok().json(serde_json::json!({"dev_code": code}))
+}
+
+#[derive(Deserialize)]
+pub(crate) struct AccountConfirmEmailChangePayload {
+    pub(crate) new_email: String,
+    pub(crate) new_email_code: String,
+    pub(crate) old_password: Option<String>,
+    pub(crate) current_email_code: Option<String>,
+}
+
+pub(crate) async fn account_confirm_email_change(req: HttpRequest, body: web::Json<AccountConfirmEmailChangePayload>) -> impl Responder {
+    let store = resolve_store(&req);
+    let sid = read_session_cookie(&req).unwrap_or_default();
+    let Some(sess) = store.resolve_session(&sid) else {
+        return HttpResponse::Unauthorized().body("not logged in");
+    };
+    if sess.role == AccountRole::Guest {
+        return HttpResponse::Forbidden().body("guest session");
+    }
+    let Some(username) = sess.username.as_deref() else {
+        return HttpResponse::Unauthorized().body("invalid session");
+    };
+    let mut user = match store.find_user_by_username(username) {
+        Some(u) => u,
+        None => return HttpResponse::Unauthorized().body("unknown user"),
+    };
+    if user.banned {
+        return HttpResponse::Forbidden().body("account banned");
+    }
+    let p = body.into_inner();
+    if let Err(e) = verify_identity(
+        &user,
+        &store,
+        p.old_password.as_deref(),
+        p.current_email_code.as_deref(),
+    ) {
+        return HttpResponse::Unauthorized().body(e);
+    }
+    let new_email = p.new_email.trim().to_lowercase();
+    if !email_allowed(&new_email) {
+        return HttpResponse::BadRequest().body("email not allowed");
+    }
+    let key = format!("{}:{}", user.username, new_email);
+    if !store.consume_email_code("verify_new_email", &key, &p.new_email_code) {
+        return HttpResponse::Unauthorized().body("invalid new email code");
+    }
+    // Prevent duplicate email.
+    if let Some(existing) = store.find_user_by_email(&new_email) {
+        if existing.username != user.username {
+            return HttpResponse::BadRequest().body("email already exists");
+        }
+    }
+    user.email = new_email;
+    if let Err(e) = store.upsert_user(user.clone()) {
+        return HttpResponse::InternalServerError().body(format!("save failed: {}", e));
+    }
+    let mut fields = HashMap::new();
+    fields.insert("username", user.username);
+    store.audit("account_change_email", &fields);
+    HttpResponse::Ok().body("ok")
+}
+
+#[derive(Deserialize)]
+pub(crate) struct AccountChangeLoginOptionPayload {
+    pub(crate) new_option: String,
+    pub(crate) old_password: Option<String>,
+    pub(crate) current_email_code: Option<String>,
+    pub(crate) new_password: Option<String>,
+}
+
+pub(crate) async fn account_change_login_option(req: HttpRequest, body: web::Json<AccountChangeLoginOptionPayload>) -> impl Responder {
+    let store = resolve_store(&req);
+    let sid = read_session_cookie(&req).unwrap_or_default();
+    let Some(sess) = store.resolve_session(&sid) else {
+        return HttpResponse::Unauthorized().body("not logged in");
+    };
+    if sess.role == AccountRole::Guest {
+        return HttpResponse::Forbidden().body("guest session");
+    }
+    let Some(username) = sess.username.as_deref() else {
+        return HttpResponse::Unauthorized().body("invalid session");
+    };
+    let mut user = match store.find_user_by_username(username) {
+        Some(u) => u,
+        None => return HttpResponse::Unauthorized().body("unknown user"),
+    };
+    if user.banned {
+        return HttpResponse::Forbidden().body("account banned");
+    }
+    let p = body.into_inner();
+    if let Err(e) = verify_identity(
+        &user,
+        &store,
+        p.old_password.as_deref(),
+        p.current_email_code.as_deref(),
+    ) {
+        return HttpResponse::Unauthorized().body(e);
+    }
+    let next = match p.new_option.as_str() {
+        "password_only" => LoginOption::PasswordOnly,
+        "password_email_2fa" => LoginOption::PasswordEmail2fa,
+        "email_only" => LoginOption::EmailOnly,
+        _ => return HttpResponse::BadRequest().body("invalid login option"),
+    };
+    if next.requires_password() {
+        if user.password.as_deref().unwrap_or("").is_empty() {
+            let np = p.new_password.unwrap_or_default();
+            if np.trim().is_empty() {
+                return HttpResponse::BadRequest().body("password required for this login option");
+            }
+            user.password = Some(np);
+        }
+    } else {
+        // No-password account: remove stored password.
+        user.password = None;
+    }
+    user.login_option = next;
+    if let Err(e) = store.upsert_user(user.clone()) {
+        return HttpResponse::InternalServerError().body(format!("save failed: {}", e));
+    }
+    let mut fields = HashMap::new();
+    fields.insert("username", user.username);
+    fields.insert("login_option", format!("{:?}", user.login_option));
+    store.audit("account_change_login_option", &fields);
     HttpResponse::Ok().body("ok")
 }
