@@ -733,6 +733,7 @@ function nowText() {
 function setTopbarHintText(el, text, opts) {
     if (!el) return;
     opts = opts || {};
+
     const innerClass = 'marquee-inner';
     let inner = el.querySelector(`:scope > span.${innerClass}`);
     if (!inner) {
@@ -743,24 +744,43 @@ function setTopbarHintText(el, text, opts) {
     }
 
     const next = String(text || '');
-    const sameText = inner.textContent === next;
+    const seg1Class = 'marquee-seg';
+    const gapPx = 24;
+
+    // If the rendered text is identical, avoid restarting the animation.
+    const seg1Existing = inner.querySelector(`:scope > span.${seg1Class}`);
+    const sameText = seg1Existing ? (seg1Existing.textContent === next) : (inner.textContent === next);
     if (!opts.force && sameText && !opts.allowResetWhenSameText) return;
 
-    inner.textContent = next;
+    // Ensure we have exactly one segment for measurement and non-overflow rendering.
+    inner.replaceChildren();
+    const seg1 = document.createElement('span');
+    seg1.className = seg1Class;
+    seg1.textContent = next;
+    inner.appendChild(seg1);
+
     el.classList.remove('marquee');
-    el.style.removeProperty('--marquee-shift');
+    el.style.removeProperty('--marquee-step');
     el.style.removeProperty('--marquee-duration');
+    el.style.setProperty('--marquee-gap', `${gapPx}px`);
 
     // Defer measurement until layout is stable.
     requestAnimationFrame(() => {
         const maxW = Math.max(0, el.clientWidth);
-        const w = Math.max(0, inner.scrollWidth);
+        const w = Math.max(0, seg1.scrollWidth);
         const overflow = w - maxW;
         if (overflow <= 8) return;
-        const shift = overflow + 24; // extra gap so the tail clears before looping
-        const duration = Math.max(6, Math.min(18, shift / 35)); // scale with content length
+
+        // Seamless marquee: duplicate the segment so the loop boundary has identical content.
+        const seg2 = document.createElement('span');
+        seg2.className = seg1Class;
+        seg2.textContent = next;
+        inner.appendChild(seg2);
+
+        const step = w + gapPx;
+        const duration = Math.max(6, Math.min(22, step / 35));
         el.classList.add('marquee');
-        el.style.setProperty('--marquee-shift', `${shift}px`);
+        el.style.setProperty('--marquee-step', `${step}px`);
         el.style.setProperty('--marquee-duration', `${duration}s`);
     });
 }
