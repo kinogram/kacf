@@ -133,7 +133,6 @@ function applyStaticCopyToDom() {
         ['section_clarify_title', 'section_clarify_title'],
         ['section_log_title', 'section_log_title'],
         ['hint_log_exports', 'hint_log_exports'],
-        ['section_diff_title', 'section_diff_title'],
         ['section_global_title', 'section_global_title'],
         ['label_api_key', 'label_api_key'],
         ['label_model', 'label_model'],
@@ -142,7 +141,6 @@ function applyStaticCopyToDom() {
         ['label_global_auto_resume_attempts', 'label_global_auto_resume_attempts'],
         ['label_global_stop_after_minutes', 'label_global_stop_after_minutes'],
         ['label_global_log_max_chars', 'label_global_log_max_chars'],
-        ['label_global_diff_max_chars', 'label_global_diff_max_chars'],
     ];
     staticMap.forEach(([id, key]) => {
         const el = document.getElementById(id);
@@ -166,6 +164,7 @@ function applyStaticCopyToDom() {
         ['export_log_btn', 'btn_export_log'],
         ['export_snapshot_btn', 'btn_export_snapshot'],
         ['export_report_btn', 'btn_export_report'],
+        ['view_diff_btn', 'btn_view_diff'],
     ];
     buttonTextMap.forEach(([id, key]) => {
         const el = document.getElementById(id);
@@ -199,7 +198,6 @@ function applyStaticCopyToDom() {
         ['global_history_max_messages', 'ph_history_max_messages'],
         ['global_history_max_chars', 'ph_history_max_chars'],
         ['global_log_max_chars', 'ph_global_log_max_chars'],
-        ['global_diff_max_chars', 'ph_global_diff_max_chars'],
         ['goal', 'ph_goal'],
         ['api_key', 'ph_api_key'],
         ['project_search', 'project_search_placeholder']
@@ -248,11 +246,10 @@ function closeGlobalConfigModal() {
 async function saveGlobalConfig() {
     updateGlobalOptionsFromInputs();
     maybeWarnLargeCharLimit(txt('label_global_config', ''));
-    if (logMaxCharsSetting() > LARGE_CHAR_LIMIT_WARNING_THRESHOLD || diffMaxCharsSetting() > LARGE_CHAR_LIMIT_WARNING_THRESHOLD) {
+    if (logMaxCharsSetting() > LARGE_CHAR_LIMIT_WARNING_THRESHOLD) {
         alert(fmt('warn_large_char_limit_alert', '', {
             threshold: LARGE_CHAR_LIMIT_WARNING_THRESHOLD,
             log_limit: logMaxCharsSetting(),
-            diff_limit: diffMaxCharsSetting(),
         }));
     }
     const wantedLanguage = normalizeLanguageCode(document.getElementById('language_select')?.value || currentLanguage);

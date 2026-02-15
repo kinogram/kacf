@@ -318,7 +318,6 @@ function renderUiForViewBucket() {
         runEl.textContent = runText;
     }
     document.getElementById('diagnostics').textContent = normalized.diagnostics_text || txt('diagnostics_none', '');
-    renderDiffPanel(normalized.diff_text || '');
     const shouldShowClarify = shouldAllowClarifyInteraction() && Array.isArray(normalized.clarify_questions) && normalized.clarify_questions.length > 0;
     renderClarifyQuestions(shouldShowClarify ? (normalized.clarify_questions || []) : [], bucket, false);
 }

@@ -27,16 +27,15 @@ const FALLBACK_LOG_DEDUP_MS = 30000;
 const BACKEND_FAILURE_THRESHOLD = 3;
 const SSE_ERROR_LIMIT = 6;
 const SSE_CONNECT_GRACE_MS = 10000;
-const DEFAULT_LOG_MAX_CHARS = 50000;
-const DEFAULT_DIFF_MAX_CHARS = 50000;
-const LARGE_CHAR_LIMIT_WARNING_THRESHOLD = 50000;
+const DEFAULT_LOG_MAX_CHARS = 20000;
+const DEFAULT_DIFF_MAX_CHARS = 20000; // fixed (no UI option) but still caps diff payloads for safety.
+const LARGE_CHAR_LIMIT_WARNING_THRESHOLD = 30000;
 const GLOBAL_OPTION_DEFAULTS = {
     auto_resume_attempts: '',
     stop_after_minutes: '',
     history_max_messages: '40',
     history_max_chars: '70000',
     log_max_chars: String(DEFAULT_LOG_MAX_CHARS),
-    diff_max_chars: String(DEFAULT_DIFF_MAX_CHARS),
 };
 const GLOBAL_OPTION_INPUT_ID_BY_KEY = {
     auto_resume_attempts: 'global_auto_resume_attempts',
@@ -44,7 +43,6 @@ const GLOBAL_OPTION_INPUT_ID_BY_KEY = {
     history_max_messages: 'global_history_max_messages',
     history_max_chars: 'global_history_max_chars',
     log_max_chars: 'global_log_max_chars',
-    diff_max_chars: 'global_diff_max_chars',
 };
 let activeRunLogBucket = '';
 let activeRunProjectLabel = '';
@@ -91,6 +89,7 @@ const BACKEND_COMM_BUTTON_IDS = [
     'revert_btn',
     'push_btn',
     'clarify_submit_btn',
+    'view_diff_btn',
     'project_new_btn',
     'project_save_btn',
     'project_load_btn',
@@ -253,21 +252,15 @@ function logMaxCharsSetting() {
     return parseBoundedInt(globalOptions.log_max_chars, 1, 2_000_000, DEFAULT_LOG_MAX_CHARS);
 }
 
-function diffMaxCharsSetting() {
-    return parseBoundedInt(globalOptions.diff_max_chars, 1, 2_000_000, DEFAULT_DIFF_MAX_CHARS);
-}
-
 function maybeWarnLargeCharLimit(source) {
     const logLimit = logMaxCharsSetting();
-    const diffLimit = diffMaxCharsSetting();
-    if (logLimit <= LARGE_CHAR_LIMIT_WARNING_THRESHOLD && diffLimit <= LARGE_CHAR_LIMIT_WARNING_THRESHOLD) {
+    if (logLimit <= LARGE_CHAR_LIMIT_WARNING_THRESHOLD) {
         return;
     }
     setStatus(fmt('status_large_char_limit_warning', '', {
         source: source || txt('label_global_config', ''),
         threshold: LARGE_CHAR_LIMIT_WARNING_THRESHOLD,
         log_limit: logLimit,
-        diff_limit: diffLimit,
     }), 'status-warn');
 }
 
@@ -279,7 +272,7 @@ function truncateTailChars(raw, maxChars) {
 }
 
 function sanitizeDiffText(raw) {
-    return truncateTailChars(raw, diffMaxCharsSetting());
+    return truncateTailChars(raw, DEFAULT_DIFF_MAX_CHARS);
 }
 
 function sanitizeLogContent(raw) {
@@ -979,7 +972,6 @@ window.KACF.state = {
     parseBoundedInt,
     normalizeGlobalOptions,
     logMaxCharsSetting,
-    diffMaxCharsSetting,
     maybeWarnLargeCharLimit,
     truncateTailChars,
     sanitizeDiffText,

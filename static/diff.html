@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>KACF - Diff</title>
+    <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+<div class="shell">
+    <header class="topbar" id="topbar">
+        <div class="topbar-brand" id="topbar_brand" aria-label=""></div>
+        <div class="topbar-status" role="status" aria-live="polite">
+            <div class="runbar" id="runbar" data-state="idle"><div class="runbar-fill"></div></div>
+            <div class="hint" id="runbar_text"></div>
+            <div class="hint" id="running_project_text"></div>
+            <div class="hint" id="unattended_state_text"></div>
+        </div>
+        <button class="btn-ghost" id="back_to_main_btn"></button>
+    </header>
+    <div class="app-shell">
+        <main class="main-column">
+            <section class="card diff-view-panel" style="margin-top:14px;">
+                <h2 class="title" id="diff_title"></h2>
+                <div class="hint" id="diff_sub"></div>
+                <div id="diff_view" class="diff-view"></div>
+            </section>
+        </main>
+    </div>
+</div>
+
+<script src="/assets/diff.js"></script>
+</body>
+</html>
+

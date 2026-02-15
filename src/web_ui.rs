@@ -39,7 +39,10 @@ use crate::web_ui_store;
 
 /// Index HTML page embedded at compile time.
 const INDEX_HTML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/index.html"));
+const DIFF_HTML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/diff.html"));
 const APP_CSS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/app.css"));
+const DIFF_JS: &str =
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/js/diff_view.js"));
 const APP_JS: &str = concat!(
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -459,6 +462,12 @@ async fn index_page() -> impl Responder {
         .body(INDEX_HTML)
 }
 
+async fn diff_page() -> impl Responder {
+    HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(DIFF_HTML)
+}
+
 async fn app_css() -> impl Responder {
     HttpResponse::Ok()
         .content_type("text/css; charset=utf-8")
@@ -469,6 +478,12 @@ async fn app_js() -> impl Responder {
     HttpResponse::Ok()
         .content_type("application/javascript; charset=utf-8")
         .body(APP_JS)
+}
+
+async fn diff_js() -> impl Responder {
+    HttpResponse::Ok()
+        .content_type("application/javascript; charset=utf-8")
+        .body(DIFF_JS)
 }
 
 async fn list_languages() -> impl Responder {
@@ -503,6 +518,86 @@ pub(crate) fn release_gate(
     running: bool,
 ) -> (bool, String) {
     web_ui_analytics::release_gate(readiness_score, gate_threshold, blockers, running)
+}
+
+#[derive(serde::Deserialize)]
+struct DiffDataQuery {
+    bucket: String,
+}
+
+#[derive(serde::Serialize)]
+struct DiffDataResponse {
+    ok: bool,
+    bucket: String,
+    project_label: String,
+    run_state: String,
+    run_text: String,
+    diff_text: String,
+}
+
+fn truncate_tail_chars(input: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    let total = input.chars().count();
+    if total <= max_chars {
+        return input.to_string();
+    }
+    input.chars().skip(total - max_chars).collect()
+}
+
+async fn diff_data(data: web::Data<AppState>, query: web::Query<DiffDataQuery>) -> impl Responder {
+    let bucket = query.bucket.trim().to_string();
+    if bucket.is_empty() || bucket.len() > 512 {
+        return HttpResponse::BadRequest().body("invalid bucket");
+    }
+    let _guard = lock_recover(&data.projects_lock, "projects_lock");
+    let cache = read_ui_cache();
+
+    let mut project_label = String::new();
+    if let Some(id) = bucket.strip_prefix("project:") {
+        if let Some(p) = cache.projects.iter().find(|p| p.id == id) {
+            project_label = if !p.name.trim().is_empty() {
+                p.name.trim().to_string()
+            } else if !p.workspace.trim().is_empty() {
+                p.workspace.trim().to_string()
+            } else {
+                id.to_string()
+            };
+        } else {
+            project_label = id.to_string();
+        }
+    }
+
+    let mut run_state = "idle".to_string();
+    let mut run_text = String::new();
+    let mut diff_text = String::new();
+
+    if let Some(v) = cache.project_ui_state.get(&bucket) {
+        if let Some(obj) = v.as_object() {
+            if let Some(s) = obj.get("run_state").and_then(|x| x.as_str()) {
+                run_state = s.to_string();
+            }
+            if let Some(s) = obj.get("run_text").and_then(|x| x.as_str()) {
+                run_text = s.to_string();
+            }
+            if let Some(s) = obj.get("diff_text").and_then(|x| x.as_str()) {
+                diff_text = s.to_string();
+            }
+        }
+    }
+
+    // Server-side safety cap (independent from any client-side limits).
+    diff_text = truncate_tail_chars(&diff_text, 20_000);
+
+    HttpResponse::Ok().json(DiffDataResponse {
+        ok: true,
+        bucket,
+        project_label,
+        run_state,
+        run_text,
+        diff_text,
+    })
 }
 
 pub async fn run_web_server(
@@ -542,8 +637,10 @@ pub async fn run_web_server(
         App::new()
             .app_data(web::Data::new(state.clone()))
             .route("/", web::get().to(index_page))
+            .route("/diff", web::get().to(diff_page))
             .route("/assets/app.css", web::get().to(app_css))
             .route("/assets/app.js", web::get().to(app_js))
+            .route("/assets/diff.js", web::get().to(diff_js))
             .route("/assets/languages/list", web::get().to(list_languages))
             .route(
                 "/assets/languages/{code}.json",
@@ -566,6 +663,7 @@ pub async fn run_web_server(
             .route("/ui_cache", web::get().to(get_ui_cache))
             .route("/ui_cache", web::put().to(put_ui_cache))
             .route("/ui_state", web::get().to(web_ui_session::get_ui_state))
+            .route("/diff_data", web::get().to(diff_data))
             .route("/health", web::get().to(health))
             .route("/metrics", web::get().to(metrics))
             .route("/clarify", web::post().to(web_ui_session::answer_clarify))

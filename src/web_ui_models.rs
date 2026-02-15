@@ -246,8 +246,6 @@ pub(crate) struct GlobalOptions {
     pub(crate) history_max_chars: String,
     #[serde(default)]
     pub(crate) log_max_chars: String,
-    #[serde(default)]
-    pub(crate) diff_max_chars: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

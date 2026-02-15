@@ -33,7 +33,6 @@ function assertRuntimeActionDependencies() {
             'writeBucketUiState',
             'renderClarifyQuestions',
             'renderUiForViewBucket',
-            'renderDiffPanel',
             'resetBucketRuntimeUiState',
             'bindGlobalOptionInput',
             'applyGlobalOptionsToInputs',
@@ -133,7 +132,6 @@ const {
     writeBucketUiState,
     renderClarifyQuestions,
     renderUiForViewBucket,
-    renderDiffPanel,
     resetBucketRuntimeUiState,
     bindGlobalOptionInput,
     applyGlobalOptionsToInputs,
@@ -411,8 +409,7 @@ function renderDiff(diffText) {
     const bucket = currentLogBucket();
     const safe = sanitizeDiffText(diffText || '');
     writeBucketUiState(bucket, { diff_text: safe });
-    if (viewLogBucket() !== bucket) return;
-    renderDiffPanel(safe);
+    // Do not render diff in the main UI; it is shown in a dedicated diff tab.
 }
 
 function escapeHtml(text) {
@@ -468,6 +465,15 @@ function bindEvents() {
     document.getElementById('export_log_btn').addEventListener('click', exportLogs);
     document.getElementById('export_snapshot_btn').addEventListener('click', exportSnapshot);
     document.getElementById('export_report_btn').addEventListener('click', exportReleaseReport);
+    document.getElementById('view_diff_btn').addEventListener('click', () => {
+        const bucket = currentLogBucket();
+        const url = `/diff?bucket=${encodeURIComponent(bucket)}`;
+        // Open a new tab: avoid diff rendering in the main UI (resource-heavy).
+        const w = window.open(url, '_blank', 'noopener');
+        if (!w) {
+            setStatus(txt('status_open_diff_failed', ''), 'status-danger');
+        }
+    });
     document.getElementById('project_new_btn').addEventListener('click', createNewProject);
     document.getElementById('project_save_btn').addEventListener('click', () => { saveCurrentProject(); });
     document.getElementById('project_load_btn').addEventListener('click', loadSelectedProject);
@@ -510,10 +516,6 @@ function bindEvents() {
     bindGlobalOptionInput('global_log_max_chars', () => {
         maybeWarnLargeCharLimit(txt('label_global_log_max_chars', ''));
         renderCurrentLogView();
-    });
-    bindGlobalOptionInput('global_diff_max_chars', () => {
-        maybeWarnLargeCharLimit(txt('label_global_diff_max_chars', ''));
-        renderUiForViewBucket();
     });
     document.getElementById('language_select').addEventListener('change', async () => {
         const next = normalizeLanguageCode(document.getElementById('language_select').value);

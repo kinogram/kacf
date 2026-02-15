@@ -1,5 +1,5 @@
-const DEFAULT_LOG_MAX_CHARS: usize = 50_000;
-const DEFAULT_DIFF_MAX_CHARS: usize = 50_000;
+const DEFAULT_LOG_MAX_CHARS: usize = 20_000;
+const DEFAULT_DIFF_MAX_CHARS: usize = 20_000; // fixed (no UI option) but still caps diff payloads for safety.
 
 fn truncate_tail_chars(input: &str, max_chars: usize) -> String {
     if max_chars == 0 {
@@ -46,16 +46,12 @@ pub(crate) fn apply_ui_cache_patch(
     if let Some(v) = patch.global_options {
         payload.global_options = Some(v);
     }
-    let (log_max_chars, diff_max_chars) = payload
+    let log_max_chars = payload
         .global_options
         .as_ref()
-        .map(|g| {
-            (
-                parse_limit(&g.log_max_chars, DEFAULT_LOG_MAX_CHARS),
-                parse_limit(&g.diff_max_chars, DEFAULT_DIFF_MAX_CHARS),
-            )
-        })
-        .unwrap_or((DEFAULT_LOG_MAX_CHARS, DEFAULT_DIFF_MAX_CHARS));
+        .map(|g| parse_limit(&g.log_max_chars, DEFAULT_LOG_MAX_CHARS))
+        .unwrap_or(DEFAULT_LOG_MAX_CHARS);
+    let diff_max_chars = DEFAULT_DIFF_MAX_CHARS;
     if let Some(v) = patch.project_logs {
         payload.project_logs = v
             .into_iter()
@@ -99,7 +95,7 @@ mod tests {
             &mut payload,
             UiCachePatch {
                 global_options: Some(GlobalOptions {
-                    log_max_chars: "50000".to_string(),
+                    log_max_chars: "20000".to_string(),
                     ..GlobalOptions::default()
                 }),
                 project_logs: Some(logs),
@@ -111,7 +107,7 @@ mod tests {
             .get("project:a")
             .cloned()
             .unwrap_or_default();
-        assert!(out.chars().count() <= 50_001);
+        assert!(out.chars().count() <= 20_001);
     }
 
     #[test]
@@ -129,7 +125,7 @@ mod tests {
             &mut payload,
             UiCachePatch {
                 global_options: Some(GlobalOptions {
-                    diff_max_chars: "50000".to_string(),
+                    // Diff cap is fixed now; keep GlobalOptions present to exercise the path.
                     ..GlobalOptions::default()
                 }),
                 project_ui_state: Some(ui_state),
@@ -142,6 +138,6 @@ mod tests {
             .and_then(|v| v.get("diff_text"))
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        assert!(out.chars().count() <= 50_000);
+        assert!(out.chars().count() <= 20_000);
     }
 }
