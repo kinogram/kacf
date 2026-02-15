@@ -48,10 +48,18 @@ pub(crate) fn compact_assistant_text(s: &str, max: usize) -> String {
     if s.len() <= max {
         return s.to_string();
     }
+
+    // Truncate by bytes but keep UTF-8 boundaries to avoid panics.
+    let mut end = max.min(s.len());
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    let prefix = &s[..end];
     format!(
-        "{}\n...[history truncated {} chars]",
-        &s[..max],
-        s.len() - max
+        "{}
+...[history truncated {} chars]",
+        prefix,
+        s.len().saturating_sub(end)
     )
 }
 
@@ -103,6 +111,14 @@ mod tests {
         let out = compact_assistant_text(&s, 20);
         assert!(out.contains("truncated"));
         assert!(out.len() < s.len() + 80);
+    }
+
+    #[test]
+    fn compact_assistant_text_is_utf8_safe() {
+        let s = "中文abcdef";
+        let out = compact_assistant_text(s, 4);
+        assert!(out.contains("truncated"));
+        assert!(out.starts_with("中"));
     }
 
     #[test]
