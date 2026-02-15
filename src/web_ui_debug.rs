@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::lock_utils::lock_recover;
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ClientLogEntry {
     pub ts_unix: u64,
@@ -123,8 +125,9 @@ pub async fn post_client_log(
         stack,
     };
 
-    let mut entries = store_entries.lock().unwrap();
-    let mut bytes = store_bytes.lock().unwrap();
+    let mut entries =
+        lock_recover(store_entries.get_ref().as_ref(), "debug_client_logs.entries");
+    let mut bytes = lock_recover(store_bytes.get_ref().as_ref(), "debug_client_logs.bytes");
     push_entry(&mut entries, &mut bytes, entry, 200, 256 * 1024);
     HttpResponse::Ok().json(serde_json::json!({ "ok": true }))
 }
@@ -134,7 +137,7 @@ pub async fn get_client_logs(
     query: web::Query<ClientLogQuery>,
 ) -> impl Responder {
     let limit = query.limit.unwrap_or(50).min(200).max(1);
-    let entries = store_entries.lock().unwrap();
+    let entries = lock_recover(store_entries.get_ref().as_ref(), "debug_client_logs.entries");
     let slice = if entries.len() > limit {
         entries[entries.len() - limit..].to_vec()
     } else {
@@ -180,4 +183,3 @@ mod tests {
         assert!(bytes > 0);
     }
 }
-

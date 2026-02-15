@@ -1,5 +1,6 @@
 use actix_web::{web, HttpResponse, Responder};
 
+use crate::lock_utils::lock_recover;
 use crate::protocol::{AgentRequest, ClarifyAnswer};
 use crate::web_ui::{
     merge_shared_config_into_draft, normalize_resume_draft_defaults, read_global_history_limits,
@@ -13,7 +14,7 @@ pub(crate) async fn start_session(
 ) -> impl Responder {
     let payload = body.into_inner();
     let (history_max_messages, history_max_chars) = {
-        let _guard = data.projects_lock.lock().unwrap();
+        let _guard = lock_recover(&data.projects_lock, "projects_lock");
         let cache = read_ui_cache();
         read_global_history_limits(cache.global_options.as_ref())
     };
@@ -53,7 +54,7 @@ pub(crate) async fn resume_session(
         return HttpResponse::BadRequest().body("project_id is empty");
     }
     let (mut draft, history_max_messages, history_max_chars) = {
-        let _guard = data.projects_lock.lock().unwrap();
+        let _guard = lock_recover(&data.projects_lock, "projects_lock");
         let cache = read_ui_cache();
         let (history_max_messages, history_max_chars) =
             read_global_history_limits(cache.global_options.as_ref());
@@ -99,7 +100,7 @@ pub(crate) async fn resume_session(
 }
 
 pub(crate) async fn get_ui_state(data: web::Data<AppState>) -> impl Responder {
-    let runtime = data.runtime.lock().unwrap().clone();
+    let runtime = lock_recover(&data.runtime, "runtime").clone();
     let resume = if runtime.last_workspace.trim().is_empty() {
         None
     } else {
@@ -167,7 +168,7 @@ pub(crate) async fn revert_last(data: web::Data<AppState>) -> impl Responder {
 }
 
 pub(crate) async fn stop_session(data: web::Data<AppState>) -> impl Responder {
-    let mut runtime = data.runtime.lock().unwrap();
+    let mut runtime = lock_recover(&data.runtime, "runtime");
     runtime.running = false;
     data.stop_now
         .store(true, std::sync::atomic::Ordering::Relaxed);

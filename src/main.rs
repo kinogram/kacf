@@ -1,5 +1,6 @@
 mod deepseek_api;
 mod git_utils;
+mod lock_utils;
 mod protocol;
 mod protocol_auto_revert;
 mod protocol_failure;

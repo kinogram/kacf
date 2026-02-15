@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::lock_utils::lock_recover;
 use crate::protocol::{AgentEvent, ClarifyQuestion};
 use crate::web_ui::RuntimeStatus;
 use crate::web_ui_analytics;
@@ -60,7 +61,7 @@ pub(crate) fn spawn_event_collector(
                 }
             }
             {
-                let mut runtime = runtime.lock().unwrap();
+                let mut runtime = lock_recover(&runtime, "runtime");
                 runtime.total_events += 1;
                 match &evt {
                     AgentEvent::Log(line) => {
@@ -118,7 +119,7 @@ pub(crate) fn spawn_event_collector(
         // If event channel closes unexpectedly while UI still thinks it's running,
         // force a terminal event so the WebUI can converge to a stopped state.
         let should_emit_done = {
-            let mut runtime = runtime.lock().unwrap();
+            let mut runtime = lock_recover(&runtime, "runtime");
             if runtime.running {
                 runtime.running = false;
                 if runtime.last_error.trim().is_empty() {
@@ -149,9 +150,9 @@ fn push_event_with_limits(
     next_event_id: &Arc<Mutex<usize>>,
     serial: SerializableEvent,
 ) {
-    let mut evts = events.lock().unwrap();
-    let mut bytes = event_bytes.lock().unwrap();
-    let mut next_id = next_event_id.lock().unwrap();
+    let mut evts = lock_recover(events, "events");
+    let mut bytes = lock_recover(event_bytes, "event_bytes");
+    let mut next_id = lock_recover(next_event_id, "next_event_id");
     *bytes += serializable_event_size(&serial);
     evts.push((*next_id, serial));
     while evts.len() > MAX_EVENT_BUFFER || *bytes > MAX_EVENT_BUFFER_BYTES {

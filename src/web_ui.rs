@@ -16,6 +16,7 @@ use std::sync::atomic::AtomicBool;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::deepseek_api;
+use crate::lock_utils::lock_recover;
 use crate::protocol::{AgentEvent, AgentRequest};
 use crate::web_ui_analytics;
 use crate::web_ui_cache_logic;
@@ -244,7 +245,7 @@ pub(crate) fn start_from_payload(
         return Err("api_key is empty".to_string());
     }
     {
-        let runtime = data.runtime.lock().unwrap();
+        let runtime = lock_recover(&data.runtime, "runtime");
         if runtime.running {
             return Err("session already running".to_string());
         }
@@ -282,7 +283,7 @@ pub(crate) fn start_from_payload(
     data.tx_req
         .send(req)
         .map_err(|e| format!("send start failed: {}", e))?;
-    let mut runtime = data.runtime.lock().unwrap();
+    let mut runtime = lock_recover(&data.runtime, "runtime");
     runtime.running = true;
     runtime.last_start_unix = now_unix();
     runtime.last_workspace = payload.workspace;
@@ -292,14 +293,14 @@ pub(crate) fn start_from_payload(
 }
 
 async fn list_projects(data: web::Data<AppState>) -> impl Responder {
-    let _guard = data.projects_lock.lock().unwrap();
+    let _guard = lock_recover(&data.projects_lock, "projects_lock");
     let mut items = read_ui_cache().projects;
     web_ui_projects::sort_projects_by_updated_desc(&mut items);
     HttpResponse::Ok().json(items)
 }
 
 async fn upsert_project(data: web::Data<AppState>, body: web::Json<WebProject>) -> impl Responder {
-    let _guard = data.projects_lock.lock().unwrap();
+    let _guard = lock_recover(&data.projects_lock, "projects_lock");
     let item = match web_ui_projects::normalize_project_for_upsert(body.into_inner(), now_unix()) {
         Ok(v) => v,
         Err(e) => return HttpResponse::BadRequest().body(e),
@@ -313,7 +314,7 @@ async fn upsert_project(data: web::Data<AppState>, body: web::Json<WebProject>) 
 }
 
 async fn delete_project(data: web::Data<AppState>, path: web::Path<String>) -> impl Responder {
-    let _guard = data.projects_lock.lock().unwrap();
+    let _guard = lock_recover(&data.projects_lock, "projects_lock");
     let id = path.into_inner();
     let mut cache = read_ui_cache();
     if let Err(e) = web_ui_projects::delete_project_from_cache(&mut cache, &id) {
@@ -330,13 +331,13 @@ async fn delete_project(data: web::Data<AppState>, path: web::Path<String>) -> i
 }
 
 async fn get_ui_cache(data: web::Data<AppState>) -> impl Responder {
-    let _guard = data.projects_lock.lock().unwrap();
+    let _guard = lock_recover(&data.projects_lock, "projects_lock");
     let payload = read_ui_cache();
     HttpResponse::Ok().json(payload)
 }
 
 async fn put_ui_cache(data: web::Data<AppState>, body: web::Json<UiCachePatch>) -> impl Responder {
-    let _guard = data.projects_lock.lock().unwrap();
+    let _guard = lock_recover(&data.projects_lock, "projects_lock");
     let patch = body.into_inner();
     let mut payload = read_ui_cache();
     web_ui_cache_logic::apply_ui_cache_patch(&mut payload, patch);
@@ -401,9 +402,9 @@ async fn health() -> impl Responder {
 }
 
 async fn metrics(data: web::Data<AppState>) -> impl Responder {
-    let runtime = data.runtime.lock().unwrap().clone();
-    let events_len = data.events.lock().unwrap().len();
-    let next_id = *data.next_event_id.lock().unwrap();
+    let runtime = lock_recover(&data.runtime, "runtime").clone();
+    let events_len = lock_recover(&data.events, "events").len();
+    let next_id = *lock_recover(&data.next_event_id, "next_event_id");
     let body =
         web_ui_runtime_metrics::build_metrics_response(&runtime, events_len, next_id, now_unix());
     HttpResponse::Ok().json(body)
@@ -414,7 +415,7 @@ async fn get_events(
     query: web::Query<std::collections::HashMap<String, String>>,
 ) -> impl Responder {
     let from_id: usize = query.get("from").and_then(|v| v.parse().ok()).unwrap_or(0);
-    let events = data.events.lock().unwrap();
+    let events = lock_recover(&data.events, "events");
     let list = web_ui_events::pull_events(&events, from_id, web_ui_events::MAX_EVENTS_PER_PULL);
     HttpResponse::Ok().json(list)
 }
@@ -439,7 +440,7 @@ async fn stream_events(
         yield Ok(web::Bytes::from_static(b"data: {\"heartbeat\":true}\n\n"));
         loop {
             let batch: Vec<(usize, SerializableEvent)> = {
-                let events = data.events.lock().unwrap();
+                let events = lock_recover(&data.events, "events");
                 web_ui_events::pull_events(&events, next_id, web_ui_events::MAX_EVENTS_PER_STREAM_BATCH)
             };
             if batch.is_empty() {
