@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>KACF - Administrator</title>
+    <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+<div class="shell auth-shell">
+    <header class="topbar">
+        <a class="btn-ghost" href="/" id="admin_back_btn"></a>
+        <div class="topbar-brand" id="admin_brand"></div>
+        <div style="flex:1"></div>
+        <button class="btn-ghost" id="admin_logout_btn"></button>
+    </header>
+    <main class="main-column">
+        <section class="hero">
+            <h1 id="admin_title"></h1>
+            <p id="admin_sub"></p>
+        </section>
+
+        <section class="card">
+            <h2 class="title" id="admin_settings_title"></h2>
+            <div class="row three">
+                <div>
+                    <label><input type="checkbox" id="admin_toggle_login"> <span id="label_admin_toggle_login"></span></label>
+                </div>
+                <div>
+                    <label><input type="checkbox" id="admin_toggle_registration"> <span id="label_admin_toggle_registration"></span></label>
+                </div>
+                <div>
+                    <label><input type="checkbox" id="admin_toggle_guest"> <span id="label_admin_toggle_guest"></span></label>
+                </div>
+            </div>
+            <div class="row one">
+                <div>
+                    <label><input type="checkbox" id="admin_toggle_non_admin_login"> <span id="label_admin_toggle_non_admin_login"></span></label>
+                </div>
+            </div>
+            <div class="buttons">
+                <button class="btn-primary" id="admin_save_settings_btn"></button>
+            </div>
+            <div class="hint" id="admin_settings_hint"></div>
+
+            <hr style="border:none;border-top:1px solid var(--line);margin:14px 0;">
+
+            <h2 class="title" id="admin_users_title"></h2>
+            <div class="row three">
+                <div>
+                    <label for="admin_new_username" id="label_admin_new_username"></label>
+                    <input id="admin_new_username" type="text">
+                </div>
+                <div>
+                    <label for="admin_new_email" id="label_admin_new_email"></label>
+                    <input id="admin_new_email" type="email">
+                </div>
+                <div>
+                    <label for="admin_new_password" id="label_admin_new_password"></label>
+                    <input id="admin_new_password" type="text">
+                </div>
+            </div>
+            <div class="row two">
+                <div>
+                    <label for="admin_new_nickname" id="label_admin_new_nickname"></label>
+                    <input id="admin_new_nickname" type="text">
+                </div>
+                <div>
+                    <label for="admin_new_role" id="label_admin_new_role"></label>
+                    <select id="admin_new_role">
+                        <option value="user">User</option>
+                        <option value="admin">Admin</option>
+                    </select>
+                </div>
+            </div>
+            <div class="buttons">
+                <button class="btn-primary" id="admin_create_user_btn"></button>
+            </div>
+            <div class="hint" id="admin_create_user_hint"></div>
+
+            <hr style="border:none;border-top:1px solid var(--line);margin:14px 0;">
+
+            <div class="table-wrap">
+                <table class="table" id="admin_users_table">
+                    <thead>
+                    <tr>
+                        <th id="th_user"></th>
+                        <th id="th_role"></th>
+                        <th id="th_email"></th>
+                        <th id="th_password"></th>
+                        <th id="th_banned"></th>
+                        <th id="th_actions"></th>
+                    </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+
+            <hr style="border:none;border-top:1px solid var(--line);margin:14px 0;">
+
+            <h2 class="title" id="admin_audit_title"></h2>
+            <p class="sub" id="admin_audit_sub"></p>
+            <div class="buttons">
+                <button class="btn-ghost" id="admin_refresh_audit_btn"></button>
+            </div>
+            <pre class="codeblock" id="admin_audit_log" style="max-height:360px;overflow:auto;margin:0;"></pre>
+        </section>
+    </main>
+</div>
+<script src="/assets/admin.js"></script>
+</body>
+</html>

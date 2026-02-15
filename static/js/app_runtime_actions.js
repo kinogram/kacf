@@ -671,7 +671,13 @@ async function exportReleaseReport() {
 }
 
 async function init() {
-    await fetchUiCacheFromServer();
+    const me = await (window.KACF && window.KACF.auth && window.KACF.auth.ensureAuthForApp
+        ? window.KACF.auth.ensureAuthForApp()
+        : Promise.resolve(null));
+    const isGuest = !!(window.KACF && window.KACF.auth && window.KACF.auth.isGuestMode && window.KACF.auth.isGuestMode());
+    if (!isGuest) {
+        await fetchUiCacheFromServer(); // loads sharedConfig.language for initLanguagePack
+    }
     await initLanguagePack();
     try {
         sidebarCollapsed = localStorage.getItem('kacf_sidebar_collapsed') === '1';
@@ -680,6 +686,20 @@ async function init() {
     }
     sidebarMobileOpen = false;
     applyStaticCopyToDom();
+    try { window.KACF.auth && window.KACF.auth.renderAccountMenu && window.KACF.auth.renderAccountMenu(); } catch (_e) {}
+    if (me && me.forced_notice) {
+        await showForcedNoticeModal(String(me.forced_notice || ''), Number(me.forced_notice_min_seconds || 0));
+    }
+
+    if (isGuest) {
+        // Guest mode: read-only with sample content, no backend realtime channels.
+        renderGuestDemo();
+        bindEvents();
+        setProjectControlsDisabled(true);
+        setConfigInputsDisabled(true);
+        applyReadOnlyMode();
+        return;
+    }
     applySharedConfigToInputs();
     applyGlobalOptionsToInputs();
     await refreshProjectsFromServer();
@@ -718,6 +738,91 @@ async function init() {
     window.addEventListener('beforeunload', () =>
         runtimeSyncCall('closeEventStream')
     );
+}
+
+async function showForcedNoticeModal(message, minSeconds) {
+    const msg = String(message || '').trim();
+    if (!msg) return;
+    const secs = Math.max(0, Math.min(300, Number(minSeconds || 0)));
+    const overlay = document.createElement('div');
+    overlay.style.position = 'fixed';
+    overlay.style.left = '0';
+    overlay.style.top = '0';
+    overlay.style.right = '0';
+    overlay.style.bottom = '0';
+    overlay.style.zIndex = '80';
+    overlay.style.background = 'rgba(0,0,0,0.55)';
+    overlay.style.display = 'flex';
+    overlay.style.alignItems = 'center';
+    overlay.style.justifyContent = 'center';
+    overlay.style.padding = '18px';
+
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.style.maxWidth = '720px';
+    card.style.width = '100%';
+    card.style.margin = '0';
+
+    const h = document.createElement('h2');
+    h.className = 'title';
+    h.textContent = txt('notice_title', 'Notice');
+    card.appendChild(h);
+
+    const p = document.createElement('pre');
+    p.className = 'codeblock';
+    p.style.whiteSpace = 'pre-wrap';
+    p.textContent = msg;
+    card.appendChild(p);
+
+    const hint = document.createElement('div');
+    hint.className = 'hint';
+    hint.style.marginTop = '10px';
+    card.appendChild(hint);
+
+    const btnRow = document.createElement('div');
+    btnRow.className = 'buttons';
+    btnRow.style.marginTop = '10px';
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'btn-primary';
+    closeBtn.textContent = txt('notice_close', 'Close');
+    closeBtn.disabled = secs > 0;
+    btnRow.appendChild(closeBtn);
+    card.appendChild(btnRow);
+
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+
+    let left = secs;
+    const tick = () => {
+        if (left <= 0) {
+            hint.textContent = '';
+            closeBtn.disabled = false;
+            return;
+        }
+        hint.textContent = fmt('notice_wait_left', 'Please wait {seconds}s...', { seconds: left });
+        left -= 1;
+        setTimeout(tick, 1000);
+    };
+    tick();
+
+    closeBtn.addEventListener('click', () => {
+        try { document.body.removeChild(overlay); } catch (_e) {}
+    });
+}
+
+function renderGuestDemo() {
+    // Minimal demo content: keep UI stable and clearly non-destructive.
+    try {
+        document.getElementById('project_name').value = txt('project_default_name', 'Demo Project').replace('{index}', '1');
+        document.getElementById('goal').value = txt('guest_demo_goal', 'Guest mode demo: all inputs are read-only. Login to create and run projects.');
+        document.getElementById('remote_url').value = 'https://example.com/repo.git';
+        document.getElementById('workspace').value = '';
+        setStatus(txt('readonly_guest_mode', ''), 'status-warn');
+        appendLog(txt('banner_guest_mode', ''));
+        renderProjectAccordion();
+        renderCurrentLogView();
+        renderUiForViewBucket();
+    } catch (_e) {}
 }
 
 init();

@@ -18,6 +18,7 @@ let lastRealtimeFallbackAt = 0;
 let backendFailureCount = 0;
 let backendOfflineNotified = false;
 let backendOffline = false;
+let guestMode = false;
 let backendReconnectReloading = false;
 const POLL_MS_ACTIVE = 1000;
 const POLL_MS_IDLE = 3000;
@@ -60,7 +61,7 @@ let uiCacheLastHeavySyncMs = 0;
 const LOG_BUCKET_MAX_COUNT = 40;
 const UI_STATE_BUCKET_MAX_COUNT = 60;
 const LOG_TOTAL_MAX_CHARS = 400000;
-const WORKSPACE_ROOT = './autocoding_data/workspaces';
+let WORKSPACE_ROOT = './autocoding_data/workspaces';
 let projectNameManualOverride = false;
 let lastAutoProjectName = '';
 let availableLanguages = [];
@@ -95,7 +96,6 @@ const BACKEND_COMM_BUTTON_IDS = [
     'project_save_btn',
     'project_load_btn',
     'project_delete_btn',
-    'open_global_config_btn',
     'save_global_config_btn',
 ];
 const PROJECT_CONTROL_IDS = [
@@ -409,12 +409,35 @@ function buildIconSvg(name) {
         return svg;
     }
 
+    if (name === 'user') {
+        const NS = 'http://www.w3.org/2000/svg';
+        const circle = document.createElementNS(NS, 'circle');
+        circle.setAttribute('cx', '12');
+        circle.setAttribute('cy', '8');
+        circle.setAttribute('r', '4');
+        circle.setAttribute('fill', 'none');
+        circle.setAttribute('stroke', 'currentColor');
+        circle.setAttribute('stroke-width', '2');
+        svg.appendChild(circle);
+        const path = document.createElementNS(NS, 'path');
+        path.setAttribute('d', 'M4 21v-1a7 7 0 0 1 7-7h2a7 7 0 0 1 7 7v1');
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke', 'currentColor');
+        path.setAttribute('stroke-width', '2');
+        path.setAttribute('stroke-linecap', 'round');
+        path.setAttribute('stroke-linejoin', 'round');
+        svg.appendChild(path);
+        return svg;
+    }
+
     const path = document.createElementNS(NS, 'path');
     const dMap = {
         'chevron-left': 'M15 6l-6 6 6 6',
         'chevron-right': 'M9 6l6 6-6 6',
         'x': 'M6 6l12 12M18 6l-12 12',
         'menu': 'M4 7h16M4 12h16M4 17h16',
+        'link': 'M10 13a5 5 0 0 0 7.07 0l1.41-1.41a5 5 0 0 0-7.07-7.07L10 5',
+        'shield': 'M12 2l7 4v6c0 5-3 9-7 10C8 21 5 17 5 12V6l7-4',
     };
     const d = dMap[name] || '';
     if (!d) return null;
@@ -451,6 +474,29 @@ function setIconButton(btn, iconName, label) {
     }
 
     btn.title = label || '';
+    if (label) btn.setAttribute('aria-label', label);
+}
+
+function setButtonWithIcon(btn, iconName, label) {
+    if (!btn) return;
+    // Clear previous content reliably.
+    while (btn.firstChild) btn.removeChild(btn.firstChild);
+    btn.classList.remove('btn-icon-only');
+
+    const svg = buildIconSvg(iconName);
+    if (svg) {
+        const span = document.createElement('span');
+        span.className = 'btn-icon';
+        span.setAttribute('aria-hidden', 'true');
+        span.appendChild(svg);
+        btn.appendChild(span);
+    }
+    const text = document.createElement('span');
+    text.className = 'btn-label';
+    text.textContent = label || '';
+    btn.appendChild(text);
+
+    btn.title = '';
     if (label) btn.setAttribute('aria-label', label);
 }
 
@@ -814,7 +860,7 @@ function applyBackendOfflineMode() {
     BACKEND_COMM_BUTTON_IDS.forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
-        if (backendOffline) {
+        if (backendOffline || guestMode) {
             if (el.dataset.backendOfflineLocked !== '1') {
                 el.dataset.backendOfflinePrevDisabled = el.disabled ? '1' : '0';
                 el.dataset.backendOfflineLocked = '1';
@@ -869,12 +915,15 @@ function isReadOnlyView() {
 function applyReadOnlyMode() {
     setOfflineInputLock(false);
     const viewReadOnly = isReadOnlyView();
-    const readOnly = backendOffline || viewReadOnly;
-    const lockConfigInputs = backendOffline || runSessionActive || viewReadOnly;
-    const lockProjectControls = backendOffline || runSessionActive;
+    const locked = backendOffline || guestMode;
+    const readOnly = locked || viewReadOnly;
+    const lockConfigInputs = locked || runSessionActive || viewReadOnly;
+    const lockProjectControls = locked || runSessionActive;
     const hint = document.getElementById('readonly_mode_text');
     if (hint) {
-        if (backendOffline) {
+        if (guestMode) {
+            hint.textContent = txt('readonly_guest_mode', '');
+        } else if (backendOffline) {
             hint.textContent = txt('readonly_backend_offline', '');
         } else {
             hint.textContent = readOnly
@@ -891,17 +940,34 @@ function applyReadOnlyMode() {
     document.getElementById('clarify_submit_btn').disabled = readOnly;
     setProjectControlsDisabled(lockProjectControls);
     applyBackendOfflineMode();
-    setOfflineInputLock(backendOffline);
+    setOfflineInputLock(locked);
     const offlineBanner = document.getElementById('backend_offline_banner');
     if (offlineBanner) {
-        offlineBanner.textContent = txt(
-            'banner_backend_offline',
-            ''
-        );
-        offlineBanner.style.display = backendOffline ? 'block' : 'none';
+        if (guestMode) {
+            offlineBanner.textContent = txt('banner_guest_mode', '');
+            offlineBanner.style.display = 'block';
+            offlineBanner.style.background = '#eef6ff';
+            offlineBanner.style.borderColor = '#a7d3ff';
+            offlineBanner.style.color = '#0b3a6b';
+        } else {
+            offlineBanner.textContent = txt('banner_backend_offline', '');
+            offlineBanner.style.display = backendOffline ? 'block' : 'none';
+            offlineBanner.style.background = '#ffe9e7';
+            offlineBanner.style.borderColor = '#ffb8b2';
+            offlineBanner.style.color = '#8a1f17';
+        }
     }
     updateGoRunningProjectButton();
 }
+
+function setGuestModeLocked(on) {
+    guestMode = !!on;
+    applyReadOnlyMode();
+}
+
+window.KACF = window.KACF || {};
+window.KACF.state = window.KACF.state || {};
+window.KACF.state.setGuestModeLocked = setGuestModeLocked;
 
 function updateGoRunningProjectButton() {
     const btn = document.getElementById('go_running_project_btn');

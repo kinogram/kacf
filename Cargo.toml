@@ -23,6 +23,7 @@ actix-web = { version = "4", features = ["macros"] }
 clap = { version = "4.3", features = ["derive"] }
 enigo = { version = "0.1.1", optional = true }
 async-stream = "0.3"
+rand = "0.8"
 
 [[bin]]
 name = "input_cli"

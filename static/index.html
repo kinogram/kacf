@@ -20,7 +20,22 @@
         </div>
         <!-- Global settings: gear icon only; accessible label is set via language pack at runtime. -->
         <button class="btn-ghost btn-icon-only" id="open_global_config_btn">⚙</button>
+        <!-- Account menu: icon-only; label is set via language pack at runtime. -->
+        <button class="btn-ghost btn-icon-only" id="open_account_btn"></button>
     </header>
+    <div class="account-menu" id="account_menu" style="display:none;">
+        <div class="account-menu-title" id="account_menu_title"></div>
+        <div class="account-menu-body" id="account_menu_body"></div>
+        <div class="buttons">
+            <button class="btn-ghost" id="account_manage_btn"></button>
+            <button class="btn-ghost" id="account_admin_panel_btn" style="display:none;"></button>
+            <button class="btn-ghost" id="account_switch_btn"></button>
+            <button class="btn-ghost" id="account_logout_btn"></button>
+            <button class="btn-ghost" id="account_exit_guest_btn" style="display:none;"></button>
+            <button class="btn-ghost" id="account_github_btn"></button>
+            <button class="btn-ghost" id="account_devhome_btn"></button>
+        </div>
+    </div>
     <div class="sidebar-overlay" id="sidebar_overlay"></div>
     <div class="app-shell">
         <aside class="sidebar" id="project_sidebar">

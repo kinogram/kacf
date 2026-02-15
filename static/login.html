@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>KACF - Login</title>
+    <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+<div class="shell auth-shell">
+    <header class="topbar">
+        <div class="topbar-brand" id="auth_brand"></div>
+        <div style="flex:1"></div>
+        <div class="hint" id="auth_lang_hint"></div>
+    </header>
+    <main class="main-column">
+        <section class="hero">
+            <h1 id="auth_welcome_title"></h1>
+            <p id="auth_welcome_sub"></p>
+        </section>
+
+        <section class="card">
+            <div class="tabs">
+                <button class="tab active" id="tab_login"></button>
+                <button class="tab" id="tab_register"></button>
+            </div>
+
+            <div id="bootstrap_admin_block" style="display:none;">
+                <h2 class="title" id="bootstrap_title"></h2>
+                <p class="sub" id="bootstrap_sub"></p>
+                <div class="row two">
+                    <div>
+                        <label for="boot_username" id="label_boot_username"></label>
+                        <input id="boot_username" type="text" autocomplete="username">
+                    </div>
+                    <div>
+                        <label for="boot_nickname" id="label_boot_nickname"></label>
+                        <input id="boot_nickname" type="text" autocomplete="nickname">
+                    </div>
+                </div>
+                <div class="row two">
+                    <div>
+                        <label for="boot_email" id="label_boot_email"></label>
+                        <input id="boot_email" type="email" autocomplete="email">
+                    </div>
+                    <div>
+                        <label for="boot_password" id="label_boot_password"></label>
+                        <input id="boot_password" type="password" autocomplete="new-password">
+                    </div>
+                </div>
+                <div class="buttons">
+                    <button class="btn-primary" id="bootstrap_btn"></button>
+                </div>
+                <div class="hint" id="bootstrap_hint"></div>
+                <hr style="border:none;border-top:1px solid var(--line);margin:14px 0;">
+            </div>
+
+            <div id="login_block">
+                <div>
+                    <label for="login_identifier" id="label_login_identifier"></label>
+                    <input id="login_identifier" type="text" autocomplete="username">
+                </div>
+                <div>
+                    <label for="login_password" id="label_login_password"></label>
+                    <input id="login_password" type="password" autocomplete="current-password">
+                </div>
+                <div class="buttons">
+                    <button class="btn-primary" id="login_btn"></button>
+                    <button class="btn-ghost" id="guest_btn"></button>
+                </div>
+                <div class="hint" id="login_hint"></div>
+            </div>
+
+            <div id="register_block" style="display:none;">
+                <div class="row two">
+                    <div>
+                        <label for="reg_username" id="label_reg_username"></label>
+                        <input id="reg_username" type="text" autocomplete="username">
+                    </div>
+                    <div>
+                        <label for="reg_nickname" id="label_reg_nickname"></label>
+                        <input id="reg_nickname" type="text" autocomplete="nickname">
+                    </div>
+                </div>
+                <div class="row two">
+                    <div>
+                        <label for="reg_email" id="label_reg_email"></label>
+                        <input id="reg_email" type="email" autocomplete="email">
+                    </div>
+                    <div>
+                        <label for="reg_password" id="label_reg_password"></label>
+                        <input id="reg_password" type="password" autocomplete="new-password">
+                    </div>
+                </div>
+                <div class="buttons">
+                    <button class="btn-primary" id="register_btn"></button>
+                </div>
+                <div class="hint" id="register_hint"></div>
+            </div>
+        </section>
+    </main>
+</div>
+<script src="/assets/auth.js"></script>
+</body>
+</html>
+

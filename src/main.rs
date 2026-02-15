@@ -24,8 +24,10 @@ mod web_ui_projects;
 mod web_ui_runtime_env;
 mod web_ui_runtime_metrics;
 mod web_ui_session;
+mod web_ui_authz;
 mod web_ui_slug;
 mod web_ui_store;
+mod auth;
 mod workspace;
 
 use crossbeam_channel::unbounded;

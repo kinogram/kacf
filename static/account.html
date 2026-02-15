@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>KACF - Account</title>
+    <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+<div class="shell auth-shell">
+    <header class="topbar">
+        <a class="btn-ghost" href="/" id="account_back_btn"></a>
+        <div class="topbar-brand" id="account_brand"></div>
+        <div style="flex:1"></div>
+        <button class="btn-ghost" id="account_logout_btn"></button>
+    </header>
+    <main class="main-column">
+        <section class="hero">
+            <h1 id="account_title"></h1>
+            <p id="account_sub"></p>
+        </section>
+
+        <section class="card">
+            <h2 class="title" id="account_profile_title"></h2>
+            <div class="row two">
+                <div>
+                    <label for="acct_username" id="label_acct_username"></label>
+                    <input id="acct_username" type="text" readonly>
+                </div>
+                <div>
+                    <label for="acct_email" id="label_acct_email"></label>
+                    <input id="acct_email" type="text" readonly>
+                </div>
+            </div>
+            <div>
+                <label for="acct_nickname" id="label_acct_nickname"></label>
+                <input id="acct_nickname" type="text">
+            </div>
+            <div class="buttons">
+                <button class="btn-primary" id="acct_save_profile_btn"></button>
+            </div>
+            <div class="hint" id="acct_profile_hint"></div>
+
+            <hr style="border:none;border-top:1px solid var(--line);margin:14px 0;">
+
+            <h2 class="title" id="account_password_title"></h2>
+            <p class="sub" id="account_password_sub"></p>
+            <div class="row two">
+                <div>
+                    <label for="acct_old_password" id="label_acct_old_password"></label>
+                    <input id="acct_old_password" type="password" autocomplete="current-password">
+                </div>
+                <div>
+                    <label for="acct_new_password" id="label_acct_new_password"></label>
+                    <input id="acct_new_password" type="password" autocomplete="new-password">
+                </div>
+            </div>
+            <div class="buttons">
+                <button class="btn-primary" id="acct_change_password_btn"></button>
+                <button class="btn-ghost" id="acct_recover_btn"></button>
+            </div>
+            <div class="hint" id="acct_password_hint"></div>
+        </section>
+    </main>
+</div>
+<script src="/assets/account.js"></script>
+</body>
+</html>
+

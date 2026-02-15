@@ -1,26 +1,39 @@
-use actix_web::{web, HttpResponse, Responder};
+use actix_web::{web, HttpRequest, HttpResponse, Responder};
 
 use crate::lock_utils::lock_recover;
 use crate::protocol::{AgentRequest, ClarifyAnswer};
 use crate::web_ui::{
     merge_shared_config_into_draft, normalize_resume_draft_defaults, read_global_history_limits,
-    read_project_config, read_resume_info, read_ui_cache, start_from_payload, AppState,
-    ProjectConfigQuery, PushPayload, ResumePayload, StartPayload, UiStateResponse,
+    read_project_config_for_root, read_resume_info_for_root, read_ui_cache_for_root, start_from_payload,
+    AppState, ProjectConfigQuery, PushPayload, ResumePayload, StartPayload, UiStateResponse,
 };
+use crate::web_ui_authz;
 
 pub(crate) async fn start_session(
+    req: HttpRequest,
     data: web::Data<AppState>,
     body: web::Json<StartPayload>,
 ) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if !ctx.can_write {
+        return HttpResponse::Forbidden().body("read-only session");
+    }
+    if let Err(e) = web_ui_authz::ensure_user_dirs(&ctx) {
+        return HttpResponse::InternalServerError().body(format!("init user dirs failed: {}", e));
+    }
     let payload = body.into_inner();
     let (history_max_messages, history_max_chars) = {
         let _guard = lock_recover(&data.projects_lock, "projects_lock");
-        let cache = read_ui_cache();
+        let cache = read_ui_cache_for_root(&ctx.managed_root_dir);
         read_global_history_limits(cache.global_options.as_ref())
     };
     match start_from_payload(
         &data,
         payload,
+        &ctx.managed_root_dir,
         &history_max_messages,
         &history_max_chars,
         false,
@@ -38,24 +51,39 @@ pub(crate) async fn start_session(
     }
 }
 
-pub(crate) async fn get_project_config(query: web::Query<ProjectConfigQuery>) -> impl Responder {
-    match read_project_config(&query.workspace) {
+pub(crate) async fn get_project_config(req: HttpRequest, data: web::Data<AppState>, query: web::Query<ProjectConfigQuery>) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    match read_project_config_for_root(&query.workspace, &ctx.managed_root_dir) {
         Some(cfg) => HttpResponse::Ok().json(cfg),
         None => HttpResponse::NotFound().body("project config not found"),
     }
 }
 
 pub(crate) async fn resume_session(
+    req: HttpRequest,
     data: web::Data<AppState>,
     body: web::Json<ResumePayload>,
 ) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if !ctx.can_write {
+        return HttpResponse::Forbidden().body("read-only session");
+    }
+    if let Err(e) = web_ui_authz::ensure_user_dirs(&ctx) {
+        return HttpResponse::InternalServerError().body(format!("init user dirs failed: {}", e));
+    }
     let payload = body.into_inner();
     if payload.project_id.trim().is_empty() {
         return HttpResponse::BadRequest().body("project_id is empty");
     }
     let (mut draft, history_max_messages, history_max_chars) = {
         let _guard = lock_recover(&data.projects_lock, "projects_lock");
-        let cache = read_ui_cache();
+        let cache = read_ui_cache_for_root(&ctx.managed_root_dir);
         let (history_max_messages, history_max_chars) =
             read_global_history_limits(cache.global_options.as_ref());
         let Some(project) = cache
@@ -76,11 +104,12 @@ pub(crate) async fn resume_session(
     if draft.api_key.trim().is_empty() {
         return HttpResponse::BadRequest().body("api_key is empty in snapshot");
     }
-    let resume = read_resume_info(&draft.workspace, &draft.goal);
+    let resume = read_resume_info_for_root(&draft.workspace, &ctx.managed_root_dir, &draft.goal);
     if resume.as_ref().map(|x| x.resumable).unwrap_or(false) {
         match start_from_payload(
             &data,
             draft.into_start(),
+            &ctx.managed_root_dir,
             &history_max_messages,
             &history_max_chars,
             true,
@@ -99,20 +128,32 @@ pub(crate) async fn resume_session(
     }
 }
 
-pub(crate) async fn get_ui_state(data: web::Data<AppState>) -> impl Responder {
+pub(crate) async fn get_ui_state(req: HttpRequest, data: web::Data<AppState>) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
     let runtime = lock_recover(&data.runtime, "runtime").clone();
     let resume = if runtime.last_workspace.trim().is_empty() {
         None
     } else {
-        read_resume_info(&runtime.last_workspace, &runtime.last_goal)
+        read_resume_info_for_root(&runtime.last_workspace, &ctx.managed_root_dir, &runtime.last_goal)
     };
     HttpResponse::Ok().json(UiStateResponse { runtime, resume })
 }
 
 pub(crate) async fn answer_clarify(
+    req: HttpRequest,
     data: web::Data<AppState>,
     body: web::Json<crate::web_ui_models::ClarifyPayload>,
 ) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if !ctx.can_write {
+        return HttpResponse::Forbidden().body("read-only session");
+    }
     let mut answers_vec = Vec::new();
     if let Some(map) = body.answers.as_object() {
         for (id, value) in map {
@@ -145,9 +186,17 @@ pub(crate) async fn answer_clarify(
 }
 
 pub(crate) async fn push_remote(
+    req: HttpRequest,
     data: web::Data<AppState>,
     body: web::Json<PushPayload>,
 ) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if !ctx.can_write {
+        return HttpResponse::Forbidden().body("read-only session");
+    }
     let payload = body.into_inner();
     let req = AgentRequest::PushRemote {
         remote: payload.remote,
@@ -160,14 +209,28 @@ pub(crate) async fn push_remote(
     HttpResponse::Ok().body("push sent")
 }
 
-pub(crate) async fn revert_last(data: web::Data<AppState>) -> impl Responder {
+pub(crate) async fn revert_last(req: HttpRequest, data: web::Data<AppState>) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if !ctx.can_write {
+        return HttpResponse::Forbidden().body("read-only session");
+    }
     if let Err(e) = data.tx_req.send(AgentRequest::RevertLast) {
         return HttpResponse::InternalServerError().body(format!("send revert failed: {}", e));
     }
     HttpResponse::Ok().body("revert sent")
 }
 
-pub(crate) async fn stop_session(data: web::Data<AppState>) -> impl Responder {
+pub(crate) async fn stop_session(req: HttpRequest, data: web::Data<AppState>) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if !ctx.can_write {
+        return HttpResponse::Forbidden().body("read-only session");
+    }
     let mut runtime = lock_recover(&data.runtime, "runtime");
     runtime.running = false;
     data.stop_now

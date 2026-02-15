@@ -36,6 +36,8 @@ use crate::web_ui_runtime_metrics;
 use crate::web_ui_session;
 use crate::web_ui_slug;
 use crate::web_ui_store;
+use crate::auth;
+use crate::web_ui_authz;
 
 /// Index HTML page embedded at compile time.
 const INDEX_HTML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/index.html"));
@@ -44,6 +46,11 @@ const APP_JS: &str = concat!(
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/static/js/app_state.js"
+    )),
+    "\n",
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/static/js/app_auth.js"
     )),
     "\n",
     include_str!(concat!(
@@ -96,6 +103,7 @@ pub struct AppState {
     pub(crate) projects_lock: Arc<Mutex<()>>,
     pub(crate) debug_client_logs: web_ui_debug::DebugLogStore,
     pub(crate) stop_now: Arc<AtomicBool>,
+    pub(crate) auth: auth::AuthStore,
 }
 
 type DraftPayload = web_ui_models::DraftPayload;
@@ -171,6 +179,43 @@ pub(crate) fn read_project_config(workspace: &str) -> Option<ProjectConfig> {
     )
 }
 
+fn require_managed_workspace_for_root(
+    workspace: &str,
+    managed_root_dir: &str,
+) -> Result<PathBuf, String> {
+    web_ui_store::require_managed_workspace(workspace, managed_root_dir, MANAGED_WORKSPACES_DIR)
+}
+
+fn save_project_config_for_root(
+    workspace: &str,
+    managed_root_dir: &str,
+    unattended_mode: bool,
+) -> std::io::Result<()> {
+    let cfg = ProjectConfig {
+        unattended_mode,
+        updated_at_unix: now_unix(),
+    };
+    web_ui_store::save_project_config(
+        workspace,
+        managed_root_dir,
+        MANAGED_WORKSPACES_DIR,
+        PROJECT_CONFIG_FILENAME,
+        &cfg,
+    )
+}
+
+pub(crate) fn read_project_config_for_root(
+    workspace: &str,
+    managed_root_dir: &str,
+) -> Option<ProjectConfig> {
+    web_ui_store::read_project_config(
+        workspace,
+        managed_root_dir,
+        MANAGED_WORKSPACES_DIR,
+        PROJECT_CONFIG_FILENAME,
+    )
+}
+
 fn sanitize_language_code(raw: &str) -> Option<String> {
     web_ui_languages::sanitize_language_code(raw)
 }
@@ -193,6 +238,14 @@ pub(crate) fn read_ui_cache() -> UiCachePayload {
 
 fn write_ui_cache(payload: &UiCachePayload) -> std::io::Result<()> {
     web_ui_store::write_ui_cache(MANAGED_ROOT_DIR, UI_CACHE_FILENAME, payload)
+}
+
+pub(crate) fn read_ui_cache_for_root(managed_root_dir: &str) -> UiCachePayload {
+    web_ui_store::read_ui_cache(managed_root_dir, UI_CACHE_FILENAME)
+}
+
+fn write_ui_cache_for_root(managed_root_dir: &str, payload: &UiCachePayload) -> std::io::Result<()> {
+    web_ui_store::write_ui_cache(managed_root_dir, UI_CACHE_FILENAME, payload)
 }
 
 pub(crate) fn read_global_history_limits(opts: Option<&GlobalOptions>) -> (String, String) {
@@ -229,9 +282,38 @@ pub(crate) fn read_resume_info(workspace: &str, goal: &str) -> Option<ResumeInfo
     })
 }
 
+pub(crate) fn read_resume_info_for_root(
+    workspace: &str,
+    managed_root_dir: &str,
+    goal: &str,
+) -> Option<ResumeInfo> {
+    let path = require_managed_workspace_for_root(workspace, managed_root_dir)
+        .ok()?
+        .join(SESSION_STATE_FILENAME);
+    let content = fs::read_to_string(path).ok()?;
+    let meta: ResumeMeta = serde_json::from_str(&content).ok()?;
+    if !goal.trim().is_empty() && !meta.goal.trim().is_empty() && meta.goal.trim() != goal.trim() {
+        return Some(ResumeInfo {
+            resumable: false,
+            updated_at_unix: meta.updated_at_unix,
+            iteration: meta.iteration,
+            message_count: meta.message_count,
+            last_status: Some("发现历史断点，但目标与当前输入不一致".to_string()),
+        });
+    }
+    Some(ResumeInfo {
+        resumable: true,
+        updated_at_unix: meta.updated_at_unix,
+        iteration: meta.iteration,
+        message_count: meta.message_count,
+        last_status: meta.last_status,
+    })
+}
+
 pub(crate) fn start_from_payload(
     data: &web::Data<AppState>,
     payload: StartPayload,
+    managed_root_dir: &str,
     global_history_max_messages: &str,
     global_history_max_chars: &str,
     resume_from_checkpoint: bool,
@@ -248,7 +330,7 @@ pub(crate) fn start_from_payload(
             return Err("session already running".to_string());
         }
     }
-    let workspace_full = require_managed_workspace(&payload.workspace)?;
+    let workspace_full = require_managed_workspace_for_root(&payload.workspace, managed_root_dir)?;
     web_ui_runtime_env::apply_runtime_config_envs(
         global_history_max_messages,
         global_history_max_chars,
@@ -263,8 +345,9 @@ pub(crate) fn start_from_payload(
         workspace: workspace_full.clone(),
         goal: payload.goal.clone(),
     };
-    if let Err(e) = save_project_config(
+    if let Err(e) = save_project_config_for_root(
         &payload.workspace,
+        managed_root_dir,
         payload.unattended_mode,
     ) {
         eprintln!("save project config failed: {}", e);
@@ -281,31 +364,66 @@ pub(crate) fn start_from_payload(
     Ok(())
 }
 
-async fn list_projects(data: web::Data<AppState>) -> impl Responder {
+async fn list_projects(req: HttpRequest, data: web::Data<AppState>) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if let Err(e) = web_ui_authz::ensure_user_dirs(&ctx) {
+        return HttpResponse::InternalServerError().body(format!("init user dirs failed: {}", e));
+    }
     let _guard = lock_recover(&data.projects_lock, "projects_lock");
-    let mut items = read_ui_cache().projects;
+    let mut items = read_ui_cache_for_root(&ctx.managed_root_dir).projects;
     web_ui_projects::sort_projects_by_updated_desc(&mut items);
     HttpResponse::Ok().json(items)
 }
 
-async fn upsert_project(data: web::Data<AppState>, body: web::Json<WebProject>) -> impl Responder {
+async fn upsert_project(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+    body: web::Json<WebProject>,
+) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if !ctx.can_write {
+        return HttpResponse::Forbidden().body("read-only session");
+    }
+    if let Err(e) = web_ui_authz::ensure_user_dirs(&ctx) {
+        return HttpResponse::InternalServerError().body(format!("init user dirs failed: {}", e));
+    }
     let _guard = lock_recover(&data.projects_lock, "projects_lock");
     let item = match web_ui_projects::normalize_project_for_upsert(body.into_inner(), now_unix()) {
         Ok(v) => v,
         Err(e) => return HttpResponse::BadRequest().body(e),
     };
-    let mut cache = read_ui_cache();
+    let mut cache = read_ui_cache_for_root(&ctx.managed_root_dir);
     web_ui_projects::upsert_project_in_cache(&mut cache, item.clone());
-    if let Err(e) = write_ui_cache(&cache) {
+    if let Err(e) = write_ui_cache_for_root(&ctx.managed_root_dir, &cache) {
         return HttpResponse::InternalServerError().body(format!("write projects failed: {}", e));
     }
     HttpResponse::Ok().json(item)
 }
 
-async fn delete_project(data: web::Data<AppState>, path: web::Path<String>) -> impl Responder {
+async fn delete_project(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+    path: web::Path<String>,
+) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if !ctx.can_write {
+        return HttpResponse::Forbidden().body("read-only session");
+    }
+    if let Err(e) = web_ui_authz::ensure_user_dirs(&ctx) {
+        return HttpResponse::InternalServerError().body(format!("init user dirs failed: {}", e));
+    }
     let _guard = lock_recover(&data.projects_lock, "projects_lock");
     let id = path.into_inner();
-    let mut cache = read_ui_cache();
+    let mut cache = read_ui_cache_for_root(&ctx.managed_root_dir);
     if let Err(e) = web_ui_projects::delete_project_from_cache(&mut cache, &id) {
         return if e == "project id is empty" {
             HttpResponse::BadRequest().body(e)
@@ -313,24 +431,42 @@ async fn delete_project(data: web::Data<AppState>, path: web::Path<String>) -> i
             HttpResponse::NotFound().body(e)
         };
     }
-    if let Err(e) = write_ui_cache(&cache) {
+    if let Err(e) = write_ui_cache_for_root(&ctx.managed_root_dir, &cache) {
         return HttpResponse::InternalServerError().body(format!("write projects failed: {}", e));
     }
     HttpResponse::Ok().body("deleted")
 }
 
-async fn get_ui_cache(data: web::Data<AppState>) -> impl Responder {
+async fn get_ui_cache(req: HttpRequest, data: web::Data<AppState>) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
     let _guard = lock_recover(&data.projects_lock, "projects_lock");
-    let payload = read_ui_cache();
+    let payload = read_ui_cache_for_root(&ctx.managed_root_dir);
     HttpResponse::Ok().json(payload)
 }
 
-async fn put_ui_cache(data: web::Data<AppState>, body: web::Json<UiCachePatch>) -> impl Responder {
+async fn put_ui_cache(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+    body: web::Json<UiCachePatch>,
+) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if !ctx.can_write {
+        return HttpResponse::Forbidden().body("read-only session");
+    }
+    if let Err(e) = web_ui_authz::ensure_user_dirs(&ctx) {
+        return HttpResponse::InternalServerError().body(format!("init user dirs failed: {}", e));
+    }
     let _guard = lock_recover(&data.projects_lock, "projects_lock");
     let patch = body.into_inner();
-    let mut payload = read_ui_cache();
+    let mut payload = read_ui_cache_for_root(&ctx.managed_root_dir);
     web_ui_cache_logic::apply_ui_cache_patch(&mut payload, patch);
-    match write_ui_cache(&payload) {
+    match write_ui_cache_for_root(&ctx.managed_root_dir, &payload) {
         Ok(_) => HttpResponse::Ok().body("saved"),
         Err(e) => HttpResponse::InternalServerError().body(format!("write ui cache failed: {}", e)),
     }
@@ -453,7 +589,15 @@ async fn stream_events(
         .streaming(s)
 }
 
-async fn index_page() -> impl Responder {
+async fn index_page(req: HttpRequest, data: web::Data<AppState>) -> impl Responder {
+    // If there's no valid session cookie, send the user to /login.
+    let sid = auth::session::read_session_cookie(&req).unwrap_or_default();
+    let ok = data.auth.resolve_session(&sid).is_some();
+    if !ok {
+        return HttpResponse::Found()
+            .insert_header(("Location", "/login"))
+            .finish();
+    }
     HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
         .body(INDEX_HTML)
@@ -511,11 +655,13 @@ pub async fn run_web_server(
     stop_now: Arc<AtomicBool>,
 ) -> std::io::Result<()> {
     fs::create_dir_all(managed_root_path())?;
-    fs::create_dir_all(managed_workspaces_path())?;
     load_language_packs_checked().map_err(|e| {
         eprintln!("[KACF] ERROR: {}", e);
         std::io::Error::new(std::io::ErrorKind::InvalidData, e)
     })?;
+    let auth_paths = auth::AuthSystemPaths::new(&managed_root_path());
+    let auth_store = auth::AuthStore::new(auth_paths);
+    auth_store.ensure_dirs()?;
     let port = std::env::var("AUTOCODING_PORT")
         .ok()
         .and_then(|v| v.parse::<u16>().ok())
@@ -529,6 +675,7 @@ pub async fn run_web_server(
         projects_lock: Arc::new(Mutex::new(())),
         debug_client_logs: web_ui_debug::DebugLogStore::new(),
         stop_now,
+        auth: auth_store,
     };
     web_ui_events::spawn_event_collector(
         rx_evt,
@@ -542,12 +689,51 @@ pub async fn run_web_server(
         App::new()
             .app_data(web::Data::new(state.clone()))
             .route("/", web::get().to(index_page))
+            .route("/login", web::get().to(auth::login_page))
+            .route("/account", web::get().to(auth::account_page))
+            .route("/admin", web::get().to(auth::admin_page))
             .route("/assets/app.css", web::get().to(app_css))
             .route("/assets/app.js", web::get().to(app_js))
+            .route("/assets/auth.js", web::get().to(auth::auth_js))
+            .route("/assets/account.js", web::get().to(auth::account_js))
+            .route("/assets/admin.js", web::get().to(auth::admin_js))
             .route("/assets/languages/list", web::get().to(list_languages))
             .route(
                 "/assets/languages/{code}.json",
                 web::get().to(get_language_pack),
+            )
+            .route("/auth/bootstrap_status", web::get().to(auth::bootstrap_status))
+            .route("/auth/bootstrap_admin", web::post().to(auth::bootstrap_admin))
+            .route("/auth/register", web::post().to(auth::register))
+            .route("/auth/login", web::post().to(auth::login))
+            .route("/auth/guest", web::post().to(auth::guest_start))
+            .route("/auth/logout", web::post().to(auth::logout))
+            .route("/auth/me", web::get().to(auth::auth_me))
+            .route("/admin/api/settings", web::get().to(auth::admin_get_settings))
+            .route("/admin/api/settings", web::post().to(auth::admin_put_settings))
+            .route("/admin/api/users", web::get().to(auth::admin_list_users))
+            .route("/admin/api/users", web::post().to(auth::admin_create_user))
+            .route(
+                "/admin/api/users/{username}",
+                web::delete().to(auth::admin_delete_user),
+            )
+            .route(
+                "/admin/api/users/{username}/ban",
+                web::post().to(auth::admin_set_banned),
+            )
+            .route(
+                "/admin/api/users/{username}/notice",
+                web::post().to(auth::admin_set_notice),
+            )
+            .route(
+                "/admin/api/users/{username}/password",
+                web::post().to(auth::admin_set_password),
+            )
+            .route("/admin/api/audit", web::get().to(auth::admin_audit_tail))
+            .route("/account/api/profile", web::post().to(auth::account_update_profile))
+            .route(
+                "/account/api/password",
+                web::post().to(auth::account_change_password),
             )
             .route("/start", web::post().to(web_ui_session::start_session))
             .route("/stop", web::post().to(web_ui_session::stop_session))

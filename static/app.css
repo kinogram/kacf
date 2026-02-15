@@ -35,7 +35,7 @@
             margin: 0 auto;
             padding: var(--shell-pad-top) var(--shell-pad-x) 18px;
         }
-        .topbar {
+.topbar {
             position: sticky;
             top: 0;
             z-index: 1500;
@@ -49,7 +49,110 @@
             backdrop-filter: blur(10px);
             -webkit-backdrop-filter: blur(10px);
             box-shadow: 0 10px 26px rgba(20, 60, 130, 0.10);
-        }
+}
+
+/* Auth/account/admin pages reuse the same CSS but need a few extras. */
+.auth-shell .main-column {
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+.tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.tab {
+    border: 1px solid var(--line);
+    background: transparent;
+    color: var(--muted);
+    padding: 10px 12px;
+    border-radius: 10px;
+    cursor: pointer;
+}
+
+.tab.active {
+    color: var(--text);
+    border-color: rgba(0,0,0,0.18);
+    background: rgba(0,0,0,0.04);
+}
+
+.table-wrap {
+    overflow: auto;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+}
+
+table.table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 720px;
+}
+
+table.table th,
+table.table td {
+    border-bottom: 1px solid var(--line);
+    padding: 10px 10px;
+    text-align: left;
+    vertical-align: top;
+    font-size: 13px;
+}
+
+table.table thead th {
+    background: rgba(0,0,0,0.03);
+    position: sticky;
+    top: 0;
+}
+
+.account-menu {
+    position: fixed;
+    top: calc(var(--topbar-h, 56px) + 10px);
+    right: 14px;
+    width: min(420px, calc(100vw - 24px));
+    z-index: 50;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    box-shadow: 0 18px 60px rgba(0,0,0,0.18);
+    padding: 12px;
+}
+
+.account-menu-title {
+    font-weight: 700;
+    font-size: 14px;
+    margin-bottom: 8px;
+}
+
+.account-menu-body {
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    margin-bottom: 10px;
+}
+
+.codeblock {
+    background: rgba(0,0,0,0.04);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 10px 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 12px;
+    line-height: 1.45;
+    white-space: pre;
+}
+
+.btn-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 8px;
+}
+
+.btn-label {
+    display: inline-block;
+}
         .topbar-brand {
             font-weight: 900;
             letter-spacing: 0.6px;
@@ -457,6 +560,58 @@
         .diff-line-add { color: #0b7a2f; }
         .diff-line-del { color: #b3261e; }
         .diff-line-other { color: #2e3f5f; }
+        .diff-view-panel {
+            background: linear-gradient(180deg, #ffffff, #f8fafc);
+        }
+        body.diff-page .shell {
+            max-width: 1180px;
+        }
+        .diff-main {
+            width: 100%;
+            margin-top: 14px;
+        }
+        .diff-article {
+            /* Article view: no "card" frame */
+            border: none;
+            border-radius: 0;
+            background: transparent;
+            box-shadow: none;
+            padding: 0;
+        }
+        .diff-h1 {
+            margin: 0;
+            font-size: 18px;
+            letter-spacing: 0.2px;
+            color: #24406d;
+            font-weight: 400;
+        }
+        .diff-sub {
+            margin: 8px 0 0;
+            color: var(--subtle);
+            font-size: 13px;
+            line-height: 1.45;
+        }
+        .diff-view {
+            /* Article view: diff is content, not a boxed widget */
+            border: none;
+            border-radius: 0;
+            background: transparent;
+            padding: 10px 0 0;
+            min-height: 0;
+            max-height: none;
+            overflow-y: visible;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 13px;
+            line-height: 1.55;
+            color: #1f2a3b;
+            box-shadow: none;
+            margin: 0;
+        }
+        .diff-view > div { white-space: pre; }
+        body.diff-page button { font-weight: 400; }
+        body.diff-page .topbar-brand { font-weight: 400; }
         .modal-mask {
             display: none;
             position: fixed;
