@@ -2,8 +2,8 @@
   "__meta": {
     "app": "KACF",
     "language_code": "zh-CN",
-    "pack_version": "00002",
-    "inputer_version": "00002"
+    "pack_version": "00003",
+    "inputer_version": "00003"
   },
   "app_title": "KACF - Kevin AutoCoding Framework",
   "app_header": "KACF - Kevin AutoCoding Framework",
@@ -346,6 +346,7 @@
   "th_actions": "操作",
   "admin_not_implemented": "管理员接口尚未实现。",
   "btn_account": "账户",
+  "btn_admin_panel": "Admin设置",
   "account_guest_name": "访客",
   "account_menu_greeting": "{name}，您好！",
   "account_menu_body": "欢迎使用KACF!本项目为开源项目，完全免费，开发者为初三学生一枚，如果觉得不错恳请到GitHub给个Star呀！另外，如果您愿意捐款，我将万分感激。详细事宜请点击此处。点我查看捐款致谢名单。",
@@ -356,6 +357,8 @@
   "account_menu_exit_guest": "退出访客模式",
   "account_menu_github": "GitHub：KACF",
   "account_menu_devhome": "开发者的主页",
+  "account_menu_donate": "捐款详细事宜",
+  "account_menu_thanks": "捐款致谢名单",
   "readonly_guest_mode": "访客模式：只读。所有后端通信功能已禁用。",
   "banner_guest_mode": "当前为访客模式：只读示例内容。可在右上角账户菜单中退出访客模式并登录/注册。",
   "guest_demo_goal": "访客模式示例：所有输入均只读。登录后可创建并运行项目。",

@@ -2,8 +2,8 @@
   "__meta": {
     "app": "KACF",
     "language_code": "en",
-    "pack_version": "00002",
-    "inputer_version": "00002"
+    "pack_version": "00003",
+    "inputer_version": "00003"
   },
   "app_title": "KACF - Kevin AutoCoding Framework",
   "app_header": "KACF - Kevin AutoCoding Framework",
@@ -346,6 +346,7 @@
   "th_actions": "Actions",
   "admin_not_implemented": "Admin APIs not implemented yet.",
   "btn_account": "Account",
+  "btn_admin_panel": "Admin Panel",
   "account_guest_name": "Guest",
   "account_menu_greeting": "{name}, hello!",
   "account_menu_body": "Welcome to KACF!\nThis project is open source and completely free. The developer is a middle-school student. If you like it, please star it on GitHub.\nIf you are willing to donate, I would be very grateful. See details via the donation link. See the donation thanks list.",
@@ -356,6 +357,8 @@
   "account_menu_exit_guest": "Exit guest mode",
   "account_menu_github": "GitHub: KACF",
   "account_menu_devhome": "Developer home",
+  "account_menu_donate": "Donation details",
+  "account_menu_thanks": "Donation thanks list",
   "readonly_guest_mode": "Guest mode: read-only. Backend actions are disabled.",
   "banner_guest_mode": "Guest mode is ON: read-only with sample content. Click \"Exit guest mode\" in the account menu to login/register.",
   "guest_demo_goal": "Guest mode demo: all inputs are read-only. Login to create and run projects.",
