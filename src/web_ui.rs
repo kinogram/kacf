@@ -1,4 +1,4 @@
-//! Minimal web UI mode for the KACF (Kevin AutoCoding Framework) agent.
+//! Minimal web UI mode for the KACF (Kinogram AutoCoding Framework) agent.
 //!
 //! This module exposes HTTP endpoints to control the agent loop and to
 //! retrieve events (logs, diffs, clarifications, completion). It is

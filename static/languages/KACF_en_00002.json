@@ -5,8 +5,8 @@
     "pack_version": "00002",
     "inputer_version": "00002"
   },
-  "app_title": "KACF - Kevin AutoCoding Framework",
-  "app_header": "KACF - Kevin AutoCoding Framework",
+  "app_title": "KACF - Kinogram AutoCoding Framework",
+  "app_header": "KACF - Kinogram AutoCoding Framework",
   "app_brand": "KACF",
   "hero_sub": "After you enter requirements, the system writes code, runs tests, and fixes issues automatically. Inputs, checkpoints, and templates are remembered to reduce setup friction.",
   "banner_backend_offline": "Backend offline: communication actions are hidden, and all input fields are read-only.",

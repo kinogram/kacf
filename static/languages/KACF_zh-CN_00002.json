@@ -5,8 +5,8 @@
     "pack_version": "00002",
     "inputer_version": "00002"
   },
-  "app_title": "KACF - Kevin AutoCoding Framework",
-  "app_header": "KACF - Kevin AutoCoding Framework",
+  "app_title": "KACF - Kinogram AutoCoding Framework",
+  "app_header": "KACF - Kinogram AutoCoding Framework",
   "app_brand": "KACF",
   "hero_sub": "输入需求后，系统会自动写代码、运行测试、修复问题。已支持自动记住输入、断点恢复、模板配置，降低上手门槛。",
   "banner_backend_offline": "后端离线：通信功能已隐藏，所有输入框已切换为只读。",

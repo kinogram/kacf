@@ -1,4 +1,4 @@
-# KACF (Kevin AutoCoding Framework)
+# KACF (Kinogram AutoCoding Framework)
 
 KACF 是一个以“项目”为中心的 AI 自编程框架。你给出目标后，系统会在工作区内循环执行：生成补丁、写文件、提交 git、运行评测、分析失败并继续迭代，直到收敛或被中断。
 
