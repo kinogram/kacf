@@ -1,220 +1,131 @@
 # KACF (Kinogram AutoCoding Framework)
 
-KACF 是一个以“项目”为中心的 AI 自编程框架。你给出目标后，系统会在工作区内循环执行：生成补丁、写文件、提交 git、运行评测、分析失败并继续迭代，直到收敛或被中断。
+KACF 是一个面向真实开发场景的 AI 自动编程框架：你只需要描述目标，系统就会自动完成“写代码 -> 跑测试 -> 分析失败 -> 修复 -> 再验证”的闭环迭代。
 
-当前仅提供 **Web UI 模式**。
+对新手用户，KACF 的目标是：
 
-## 核心能力
+- 真正零基础可上手：不要求你有编程经验。
+- 无需手写大量代码：通过自然语言目标驱动开发流程。
+- 持续自我迭代：系统在失败后自动修复并继续推进，直到收敛或你主动停止。
 
-- 自动生成/修改代码：模型按协议输出 `patch`，后端覆盖写入文件并提交 git。
-- 自动评测闭环：执行评测脚本，提取失败摘要，驱动下一轮修复。
-- 项目化管理：多项目保存/加载/删除，工作区统一在 `./autocoding_data/workspaces`。
-- 断点恢复：可从会话状态继续运行。
-- 实时日志与指标：SSE + fallback 轮询，提供 `/metrics` 发布门禁指标。
-- 语言包体系：前端文案走语言包，启动时强校验版本、键完整性与文件名规范。
-- 无人值守模式：
-  - 问题必须在首轮写代码前一次性提出；
-  - 之后禁止继续提问，必须持续自迭代；
-  - 失败后可按全局设置自动尝试断点恢复。
-- 运行停止计时（分钟）：手动点击“运行当前项目”后开始计时；到时后在轮次边界自动触发停止。
+当前项目为 **Web UI 模式**。
 
-## 运行要求
+## 为什么 KACF 强
 
-- Rust（建议 stable）
-- Linux/macOS（Windows 可运行，但请自行确认脚本与依赖）
-- 可用的模型 API Key（默认 DeepSeek 协议）
+- 自动编码闭环：模型输出补丁，系统自动应用并推进工程。
+- 自动评测闭环：固定评测脚本驱动迭代，避免“只生成不验证”。
+- 无人值守能力：支持自动迭代、自动恢复、轮次边界安全停止。
+- 项目化工作流：多项目保存/加载/删除，按项目独立管理数据。
+- 可观测性强：SSE 实时日志 + 指标 + 健康检查 + 调试日志接口。
+- 语言包体系完整：前端文案统一语言包管理，启动时严格校验。
+
+## 强大、完备的用户管理器（多用户版）
+
+KACF 多用户版（`multi-user` 分支）提供完整用户管理能力：
+
+- 三类角色：`Admin / User / Guest`
+- 访客模式：无需注册即可进入，但全局只读、后端操作禁用
+- 管理员面板：
+  - 用户创建/删除
+  - 封禁/解封
+  - 强提醒下发
+  - 直接重置用户密码（按需求明文管理）
+  - 审计日志查看
+- 账户中心：
+  - 修改昵称、密码、用户名、邮箱
+  - 登录方式切换（密码、邮箱验证码等）
+- 数据隔离：按用户独立 `ui_cache/projects/workspaces` 存储
+- 认证会话：基于 `kacf_session` Cookie 的会话管理
+
+> 如果你要部署给多人使用，请使用 `multi-user` 分支。
+
+## 分支说明
+
+- `personal`：单用户版，轻量、专注个人使用。
+- `multi-user`：多用户版，包含完整账户体系与管理员能力。
 
 ## 快速开始
 
-1. 构建：
+### 1. 环境要求
+
+- Rust（建议 stable）
+- Linux/macOS（Windows 可运行，但请自行验证依赖）
+- 可用的模型 API Key
+
+### 2. 构建与启动
 
 ```bash
 cargo build --release
-```
-
-2. 启动：
-
-```bash
 cargo run --release
 ```
 
-3. 浏览器打开：
+默认访问：`http://localhost:8080`
 
-```text
-http://localhost:8080
-```
+### 3. 基本使用流程
 
-## Web UI 使用要点
+1. 打开 Web UI，填写目标需求（Goal）
+2. 点击“运行当前项目”
+3. 观察系统自动进行：编码、评测、失败修复、持续迭代
+4. 需要时可启用无人值守、自动恢复、停止计时
 
-### 项目区
+## 关键能力细节
 
-- `新建项目 / 保存当前项目 / 载入当前项目 / 删除当前项目`
-- `无人值守模式（自动迭代）` 开关位于侧边栏“项目”标题上方。
+### 自我迭代与无人值守
 
-### 配置区（项目级）
+- 首轮可澄清，后续以补丁迭代为主
+- 失败后按全局设置自动恢复并继续推进
+- 到达“运行停止时间”后在轮次边界安全停止
 
-- 目标需求（Goal）
-- Git 推送配置（remote/remote_url/branch）
-- 评测命令固定为 `bash scripts/run_tests.sh`：评测脚本由模型在工作区内维护
-- 自动回滚策略与发布门禁阈值为内置固定值（不再提供 UI 配置项）
+### 项目与工作区管理
 
-### 全局设置（跨项目）
+- 交互以“项目”为中心：保存/加载/删除/切换
+- 每项目独立 workspace，避免相互污染
+- 刷新页面后状态与配置可恢复
 
-仅共享这 4 项：
+### 可观测性与稳定性
 
-- `api_key`
-- `base_url`
-- `model`
-- `language`
+- 日志流 + SSE 断线回退轮询
+- 运行态指标（含 readiness/gate）
+- 前端离线锁与只读保护，避免误操作
+- UI 缓冲与裁剪策略，降低长会话卡顿风险
 
-另外有独立的全局选项（不属于 shared_config）：
-
-- `中断自动恢复次数上限`
-- `运行停止时间（分钟）`
-
-> 当“运行停止时间”设为 `0` 时表示禁用。启动时会弹出费用风险提示。
-
-## 无人值守行为说明
-
-开启无人值守后：
-
-- 后端会在系统提示词中加入强约束：
-  - 首轮前可一次性澄清；
-  - 后续禁止 `kind=clarify`，必须持续 `kind=patch` 自迭代。
-- 若模型仍返回 `clarify`，后端会自动重定向为“基于合理默认假设继续 patch”，不会卡住等待用户输入。
-- 会话失败时，前端按“中断自动恢复次数上限”自动调用断点恢复。
-
-## 运行停止计时说明
-
-- 仅在用户手动点击“运行当前项目”后开始计时。
-- 自动恢复不重置该计时。
-- 到达设定分钟后：
-  - 若正在一轮执行中，不立即中断；
-  - 等到下一次轮次边界时自动发送停止请求（等效模拟点击停止）。
-
-## 语言包与版本规范（强约束）
-
-语言包目录：`static/languages`
-
-文件命名：
-
-```text
-KACF_<language_code>_<pack_version>.json
-```
-
-每个语言包必须包含 `__meta`：
-
-- `app`（固定 `KACF`）
-- `language_code`（与文件名一致）
-- `pack_version`（与文件名一致）
-- `inputer_version`（必须等于软件内 `LANGUAGE_INPUTER_VERSION`）
-
-当前语言输入器版本常量：
-
-- `src/web_ui_languages.rs` 中 `LANGUAGE_INPUTER_VERSION = "00002"`
-
-启动时会校验：
-
-- 版本一致性
-- 文件名与元信息一致性
-- 键完整性（以 `en` 包为基准）
-
-任一失败会直接报错并阻止启动。
-
-## 项目结构（简）
+## 目录结构（简）
 
 ```text
 .
 ├── src/
-│   ├── main.rs
-│   ├── protocol.rs
-│   ├── protocol_*.rs
-│   ├── web_ui.rs
-│   ├── web_ui_*.rs
-│   └── bin/input_cli.rs
 ├── static/
 │   ├── index.html
 │   ├── app.css
 │   ├── js/
-│   │   ├── app_state.js
-│   │   ├── app_ui_cache.js
-│   │   ├── app_log_pipeline.js
-│   │   ├── app_runtime_state.js
-│   │   ├── app_projects.js
-│   │   ├── app_runtime_sync.js
-│   │   └── app_runtime_actions.js
 │   └── languages/
 ├── scripts/
-│   ├── release_check.sh
-│   ├── metrics_gate.sh
-│   └── smoke_web.sh
 └── autocoding_data/
 ```
 
-## 前端模块依赖（Web UI）
-
-后端路由 `/assets/app.js` 会按固定顺序拼接以下文件：
-
-1. `static/js/app_state.js`
-2. `static/js/app_ui_cache.js`
-3. `static/js/app_log_pipeline.js`
-4. `static/js/app_runtime_state.js`
-5. `static/js/app_projects.js`
-6. `static/js/app_runtime_sync.js`
-7. `static/js/app_runtime_actions.js`
-
-依赖约束：
-
-- `app_runtime_actions.js` 通过 `window.KACF.runtimeSync` 调用同步层能力（如 `refreshUiState/startEventStream`）。
-- `app_runtime_sync.js` 负责注册 `window.KACF.runtimeSync`。
-- 其余模块分别注册：
-  - `window.KACF.state`
-  - `window.KACF.uiCache`
-  - `window.KACF.logPipeline`
-  - `window.KACF.runtimeState`
-  - `window.KACF.projects`
-- `app_runtime_sync.js` 与 `app_runtime_actions.js` 启动时都会执行依赖断言，若任一命名空间或关键方法缺失会立即报错。
-- 禁止回退到隐式全局 fallback 调用，以避免模块耦合失控。
-
-## 常用脚本
-
-发布检查：
+## 常用命令
 
 ```bash
+# 运行测试
+bash scripts/run_tests.sh
+
+# 发布检查
 bash scripts/release_check.sh
-```
 
-发布门禁（基于 `/metrics`）：
-
-```bash
+# 指标门禁
 bash scripts/metrics_gate.sh
 ```
 
-## 常用环境变量
-
-- `AUTOCODING_PORT`：Web 服务端口（默认 `8080`）
-- `AUTOCODING_API_TIMEOUT_SECS`：模型 API 超时秒数（默认 `90`）
-- `AUTOCODING_EVAL_TIMEOUT_SECS`：评测命令超时秒数（默认 `120`）
-- `AUTOCODING_HISTORY_MAX_MESSAGES`：会话历史最大消息数（默认 `40`）
-- `AUTOCODING_HISTORY_MAX_CHARS`：会话历史最大字符数（默认 `70000`）
-
-自动回滚相关：
-
-- `AUTOCODING_AUTO_REVERT_ON_REPEAT`
-- `AUTOCODING_AUTO_REVERT_REPEAT_COUNT`
-- `AUTOCODING_AUTO_REVERT_MIN_SEVERITY`
-- `AUTOCODING_AUTO_REVERT_ON_WORSE`
-- `AUTOCODING_AUTO_REVERT_MIN_WORSE_DELTA`
-- `AUTOCODING_AUTO_REVERT_COOLDOWN_ITERS`
-- `AUTOCODING_AUTO_REVERT_SIGNATURE_ALLOW`
-- `AUTOCODING_AUTO_REVERT_SIGNATURE_DENY`
-
-## 说明
-
-- `codex_mem` 为本地记忆文件，已加入 `.gitignore`，不会进入仓库。
-- API Key 采用明文配置（当前实现不做掩码/加密）。
-- “会话重试次数/间隔”选项与功能已移除。
-
 ## 许可证
 
-MIT
+本项目使用仓库中的自定义许可证：
+
+- `LICENSE`（KACF Personal & Non-Commercial License 1.1，中英双语）
+
+简述：
+
+- 允许免费个人/非商业使用与非商业二次开发
+- 允许非商业再分发，但必须保留协议并标注来源
+- 任何商业用途或商业二次开发必须先取得作者书面同意
+
+商业授权联系：`gregsons334@gmail.com`
