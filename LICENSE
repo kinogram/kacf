@@ -1,0 +1,118 @@
+KACF Personal & Non-Commercial License 1.1
+KACF 个人与非商业许可协议 1.1
+
+Copyright (c) 2026 Kevin Chen (陈凯文)
+All rights reserved / 保留所有权利
+
+IMPORTANT NOTICE / 重要提示
+EN: This is a source-available license, not an OSI-approved open source license.
+CN: 本协议属于“源码可见许可”，并非 OSI 认可的开源许可证。
+
+1. DEFINITIONS / 定义
+1.1 “Software” / “软件”:
+EN: The KACF project, including source code, binaries, documentation, configuration, assets, and any files distributed under this License.
+CN: 指 KACF 项目及其源代码、二进制、文档、配置、资源文件，以及以本协议发布的任何文件。
+
+1.2 “Licensor” / “许可方”:
+EN: Kevin Chen (陈凯文).
+CN: Kevin Chen（陈凯文）。
+
+1.3 “You” / “你”:
+EN: Any individual or legal entity using rights under this License.
+CN: 依据本协议行使权利的任何自然人或组织。
+
+1.4 “Derivative Work” / “衍生作品”:
+EN: Any modification, adaptation, translation, extension, integration, or other work based on the Software.
+CN: 对软件进行修改、改编、翻译、扩展、集成或基于软件形成的任何作品。
+
+1.5 “Attribution” / “来源标注”:
+EN: Clear and reasonably prominent notice including:
+(a) project name “KACF”,
+(b) original author “Kevin Chen (陈凯文)”,
+(c) source repository URL.
+CN: 清晰且合理显著的来源说明，至少包含：
+(a) 项目名“KACF”，
+(b) 原作者“Kevin Chen（陈凯文）”，
+(c) 原仓库 URL。
+
+1.6 “Commercial Purpose” / “商业目的”:
+EN: Any use intended for, connected with, or resulting in direct or indirect commercial advantage, monetary compensation, business benefit, promotion, customer acquisition, brand marketing, cost saving in for-profit operations, or monetizable output.
+Includes (without limitation): paid products/services, SaaS/API service, client delivery, outsourcing, paid support/training/consulting, ad/sponsorship monetization, paid hosting, bundling into commercial offerings, and sale or licensing of Derivative Works.
+CN: 任何以获取直接或间接商业利益、金钱回报、业务利益、推广获客、品牌营销、营利性运营降本或可变现产出为目的、相关或产生该结果的使用。
+包括但不限于：收费产品/服务、SaaS/API 服务、客户交付、外包服务、收费支持/培训/咨询、广告或赞助变现、收费托管、商业打包分发、衍生作品销售或商业许可。
+
+1.7 “Non-Commercial Purpose” / “非商业目的”:
+EN: Use that is neither Commercial Purpose nor preparatory to Commercial Purpose.
+CN: 不属于商业目的，且不作为商业目的前置准备的使用。
+
+2. LICENSE GRANT / 授权
+EN: Subject to full compliance with this License, Licensor grants You a worldwide, non-exclusive, non-transferable, revocable copyright license to use, copy, modify, and redistribute the Software and Derivative Works solely for Non-Commercial Purpose, free of charge.
+CN: 在你完全遵守本协议前提下，许可方授予你全球范围内、非独占、不可转让、可撤销的版权许可，你可仅为非商业目的、免费地使用、复制、修改及再分发本软件和衍生作品。
+
+3. MANDATORY CONDITIONS / 强制条件
+3.1 Attribution required / 必须标注来源:
+EN: Any public use, publication, distribution, or sharing of Software or Derivative Works must include Attribution.
+CN: 对软件或衍生作品的任何公开使用、发布、分发、共享，必须包含来源标注。
+
+3.2 Keep notices / 保留声明:
+EN: You must keep this License text and all existing copyright/license notices.
+CN: 必须保留本协议全文及现有版权/许可声明。
+
+3.3 Mark modifications / 标记修改:
+EN: If modified, You must clearly state “Modified from KACF” and include modification date.
+CN: 若有修改，必须明确标注“Modified from KACF（基于KACF修改）”并注明修改日期。
+
+3.4 Same-license redistribution / 同协议再分发:
+EN: Redistribution of Software or Derivative Works is allowed only under this same License, without weakening any restriction.
+CN: 软件或衍生作品仅可在本协议下再分发，不得弱化任何限制。
+
+3.5 No sublicensing / 不得再许可:
+EN: You may not grant sublicenses inconsistent with this License.
+CN: 你不得授予与本协议冲突的再许可。
+
+4. COMMERCIAL USE REQUIRES PRIOR WRITTEN CONSENT / 商业使用须事先书面同意
+EN: Any Commercial Purpose use is strictly prohibited unless You obtain prior Written Consent from Licensor.
+No implied license is granted by silence, delay, prior tolerance, or failure to enforce.
+CN: 任何商业目的使用均严格禁止，除非你事先取得许可方书面同意。
+许可方的沉默、延迟维权、曾经容忍或未追责，均不构成任何默示授权。
+
+5. TRADEMARKS / 商标与标识
+EN: No trademark, trade name, logo, or branding right is granted, except factual Attribution.
+CN: 不授予任何商标、商号、标识或品牌使用权；仅可用于事实性来源标注。
+
+6. THIRD-PARTY COMPONENTS / 第三方组件
+EN: This License applies only to rights Licensor can grant. Third-party components remain under their own licenses.
+CN: 本协议仅覆盖许可方可授予之权利。第三方组件仍受其各自许可约束。
+
+7. TERMINATION / 终止
+EN: Any breach automatically terminates all rights immediately.
+Upon termination, You must immediately stop use, distribution, and public availability of Software and Derivative Works.
+CN: 任何违约行为将导致本协议授予权利立即自动终止。
+终止后，你必须立即停止对软件及衍生作品的使用、分发和公开提供。
+
+8. REMEDIES / 救济
+EN: You acknowledge breach may cause irreparable harm; Licensor may seek injunctive and other lawful relief.
+CN: 你确认违约可能造成难以弥补损害；许可方有权申请禁令及其他法定救济。
+
+9. DISCLAIMER / 免责声明
+EN: THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTIES OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+CN: 软件按“现状”提供，不作任何明示或默示担保，包括适销性、特定用途适用性及不侵权担保。
+
+10. LIMITATION OF LIABILITY / 责任限制
+EN: To the maximum extent permitted by law, Licensor is not liable for any direct, indirect, incidental, special, exemplary, or consequential damages.
+CN: 在法律允许的最大范围内，许可方不对任何直接、间接、附带、特殊、惩罚性或后果性损害承担责任。
+
+11. GOVERNING LAW & JURISDICTION / 法律适用与管辖
+EN: This License is governed by laws of Mainland China. Disputes shall be submitted to the competent People's Court at Licensor's domicile, unless mandatory law provides otherwise.
+CN: 本协议适用中国大陆法律。争议提交许可方住所地有管辖权的人民法院；法律强制规定另有要求的，从其规定。
+
+12. LANGUAGE / 语言
+EN: This License is provided in English and Chinese. In case of conflict, the Chinese version prevails.
+CN: 本协议提供中英文版本；如有冲突，以中文版本为准。
+
+13. ENTIRE AGREEMENT; SEVERABILITY; NO WAIVER / 完整协议；可分割性；不弃权
+EN: This License is the entire agreement for Software licensing. If any clause is unenforceable, remaining clauses remain effective. Failure to enforce any right is not a waiver.
+CN: 本协议构成软件许可完整约定。任一条款不可执行不影响其他条款效力。许可方未行使权利不构成弃权。
+
+14. CONTACT FOR COMMERCIAL LICENSE / 商业授权联系
+EN/CN: gregsons334@gmail.com
