@@ -11,6 +11,10 @@ pub(crate) struct StartPayload {
     pub(crate) unattended_mode: bool,
     pub(crate) workspace: String,
     pub(crate) goal: String,
+    #[serde(default)]
+    pub(crate) git_user_name: String,
+    #[serde(default)]
+    pub(crate) git_user_email: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,6 +31,10 @@ pub(crate) struct DraftPayload {
     pub(crate) remote: String,
     pub(crate) remote_url: String,
     pub(crate) branch: String,
+    #[serde(default)]
+    pub(crate) git_user_name: String,
+    #[serde(default)]
+    pub(crate) git_user_email: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -52,6 +60,8 @@ impl DraftPayload {
             unattended_mode: self.unattended_mode,
             workspace: self.workspace,
             goal: self.goal,
+            git_user_name: self.git_user_name,
+            git_user_email: self.git_user_email,
         }
     }
 }

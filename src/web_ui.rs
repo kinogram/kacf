@@ -265,6 +265,8 @@ pub(crate) fn start_from_payload(
         resume_from_checkpoint,
         workspace: workspace_full.clone(),
         goal: payload.goal.clone(),
+        git_user_name: payload.git_user_name,
+        git_user_email: payload.git_user_email,
     };
     if let Err(e) = save_project_config(
         &payload.workspace,

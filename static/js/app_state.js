@@ -106,7 +106,7 @@ const PROJECT_CONTROL_IDS = [
 const CONFIG_EDIT_IDS = [
     'api_key', 'model', 'base_url', 'workspace',
     'unattended_mode',
-    'goal', 'remote', 'remote_url', 'branch',
+    'goal', 'remote', 'remote_url', 'branch', 'git_user_name', 'git_user_email',
     'open_global_config_btn', 'language_select',
 ];
 
@@ -686,6 +686,8 @@ function defaultFormData() {
         remote: 'origin',
         remote_url: '',
         branch: 'main',
+        git_user_name: '',
+        git_user_email: '',
     };
 }
 

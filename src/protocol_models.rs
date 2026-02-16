@@ -15,6 +15,8 @@ pub enum AgentRequest {
         resume_from_checkpoint: bool,
         workspace: PathBuf,
         goal: String,
+        git_user_name: String,
+        git_user_email: String,
     },
     Clarify {
         answers: Vec<ClarifyAnswer>,
@@ -75,6 +77,8 @@ pub(crate) struct SessionCfg {
     pub(crate) workspace: PathBuf,
     pub(crate) goal: String,
     pub(crate) eval_cmd: String,
+    pub(crate) git_user_name: String,
+    pub(crate) git_user_email: String,
 }
 
 #[derive(Serialize, Deserialize)]

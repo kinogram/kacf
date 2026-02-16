@@ -12,7 +12,7 @@ use std::process::{Command, Stdio};
 /// author/committer environment variables to avoid git complaining about
 /// missing identity when committing. If git is not available or any
 /// command fails, an error is returned.
-pub fn init_repo_if_needed(workspace: &Path) -> Result<()> {
+pub fn init_repo_if_needed(workspace: &Path, git_user_name: &str, git_user_email: &str) -> Result<()> {
     // Ensure the workspace directory exists on disk before running git.
     if !workspace.exists() {
         fs::create_dir_all(workspace)
@@ -43,13 +43,14 @@ pub fn init_repo_if_needed(workspace: &Path) -> Result<()> {
     }
     // Perform the initial commit. We set author/committer env vars so git
     // doesn't complain about missing user.name/email.
+    let (author_name, author_email) = resolve_git_identity(git_user_name, git_user_email);
     let status = Command::new("git")
         .args(["commit", "-m", "Initial commit"])
         .current_dir(workspace)
-        .env("GIT_AUTHOR_NAME", "KACF")
-        .env("GIT_AUTHOR_EMAIL", "kacf@example.com")
-        .env("GIT_COMMITTER_NAME", "KACF")
-        .env("GIT_COMMITTER_EMAIL", "kacf@example.com")
+        .env("GIT_AUTHOR_NAME", &author_name)
+        .env("GIT_AUTHOR_EMAIL", &author_email)
+        .env("GIT_COMMITTER_NAME", &author_name)
+        .env("GIT_COMMITTER_EMAIL", &author_email)
         .status()
         .with_context(|| "failed to run git commit during initialization")?;
     // It's okay if commit fails (e.g. nothing to commit) – the next commit
@@ -64,7 +65,7 @@ pub fn init_repo_if_needed(workspace: &Path) -> Result<()> {
 /// are no changes to commit, the commit command may fail; this function
 /// ignores such failures and simply returns Ok(()). Environment variables
 /// are set to provide author and committer identities.
-pub fn commit_all(workspace: &Path, message: &str) -> Result<()> {
+pub fn commit_all(workspace: &Path, message: &str, git_user_name: &str, git_user_email: &str) -> Result<()> {
     // Stage all changes.
     let status = Command::new("git")
         .args(["add", "-A"])
@@ -75,13 +76,14 @@ pub fn commit_all(workspace: &Path, message: &str) -> Result<()> {
         return Err(anyhow!("git add failed"));
     }
     // Commit the changes with provided message. Use env vars for identity.
+    let (author_name, author_email) = resolve_git_identity(git_user_name, git_user_email);
     let commit_status = Command::new("git")
         .args(["commit", "-m", message])
         .current_dir(workspace)
-        .env("GIT_AUTHOR_NAME", "KACF")
-        .env("GIT_AUTHOR_EMAIL", "kacf@example.com")
-        .env("GIT_COMMITTER_NAME", "KACF")
-        .env("GIT_COMMITTER_EMAIL", "kacf@example.com")
+        .env("GIT_AUTHOR_NAME", &author_name)
+        .env("GIT_AUTHOR_EMAIL", &author_email)
+        .env("GIT_COMMITTER_NAME", &author_name)
+        .env("GIT_COMMITTER_EMAIL", &author_email)
         .status()
         .with_context(|| "failed to run git commit in commit_all")?;
     // If there's nothing to commit, git exits with non-zero. We don't treat
@@ -225,4 +227,12 @@ fn run_git_apply(workspace: &Path, diff: &str, args: &[&str]) -> Result<()> {
         stderr.trim(),
         stdout.trim()
     ))
+}
+
+fn resolve_git_identity(git_user_name: &str, git_user_email: &str) -> (String, String) {
+    let name = git_user_name.trim();
+    let email = git_user_email.trim();
+    let final_name = if name.is_empty() { "KACF" } else { name };
+    let final_email = if email.is_empty() { "kacf@noreply.local" } else { email };
+    (final_name.to_string(), final_email.to_string())
 }
