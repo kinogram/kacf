@@ -232,7 +232,5 @@ fn run_git_apply(workspace: &Path, diff: &str, args: &[&str]) -> Result<()> {
 fn resolve_git_identity(git_user_name: &str, git_user_email: &str) -> (String, String) {
     let name = git_user_name.trim();
     let email = git_user_email.trim();
-    let final_name = if name.is_empty() { "KACF" } else { name };
-    let final_email = if email.is_empty() { "kacf@noreply.local" } else { email };
-    (final_name.to_string(), final_email.to_string())
+    (name.to_string(), email.to_string())
 }

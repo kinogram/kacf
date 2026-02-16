@@ -324,6 +324,9 @@ pub(crate) fn start_from_payload(
     if payload.api_key.trim().is_empty() {
         return Err("api_key is empty".to_string());
     }
+    if payload.git_user_name.trim().is_empty() || payload.git_user_email.trim().is_empty() {
+        return Err("git user identity is empty".to_string());
+    }
     {
         let runtime = lock_recover(&data.runtime, "runtime");
         if runtime.running {
