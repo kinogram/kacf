@@ -19,14 +19,4 @@ bash scripts/smoke_web.sh
 echo "[release-check] 6/7 metrics release gate"
 bash scripts/metrics_gate.sh
 
-echo "[release-check] 7/7 optional input automation feature"
-if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists xdo; then
-  echo "[release-check] xdo found, validating input-automation feature"
-  cargo check --features input-automation --bin input_cli
-  cargo test --features input-automation --bin input_cli
-else
-  echo "[release-check] xdo not found, skip input-automation feature checks"
-  echo "[release-check] install libxdo-dev (or equivalent) to enable full-feature validation"
-fi
-
 echo "[release-check] done"

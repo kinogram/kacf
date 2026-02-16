@@ -4,10 +4,6 @@ version = "0.4.4"
 edition = "2021"
 default-run = "kacf"
 
-[features]
-default = []
-input-automation = ["dep:enigo"]
-
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -21,11 +17,5 @@ walkdir = "2.5"
 wait-timeout = "0.2"
 actix-web = { version = "4", features = ["macros"] }
 clap = { version = "4.3", features = ["derive"] }
-enigo = { version = "0.1.1", optional = true }
 async-stream = "0.3"
 rand = "0.8"
-
-[[bin]]
-name = "input_cli"
-path = "src/bin/input_cli.rs"
-required-features = ["input-automation"]
