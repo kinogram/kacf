@@ -200,6 +200,10 @@ async function startSession() {
         setStatus(txt('status_start_api_key_empty', ''), 'status-danger');
         return;
     }
+    if (!body.git_user_name || !body.git_user_email) {
+        setStatus(txt('status_start_git_identity_empty', ''), 'status-danger');
+        return;
+    }
     if (stopAfterMinutesSetting() === 0) {
         const proceed = window.confirm(txt('warn_stop_timer_disabled', ''));
         if (!proceed) return;
