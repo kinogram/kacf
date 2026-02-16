@@ -71,12 +71,14 @@ function getFormData() {
         remote: document.getElementById('remote').value.trim(),
         remote_url: document.getElementById('remote_url').value.trim(),
         branch: document.getElementById('branch').value.trim(),
+        git_user_name: document.getElementById('git_user_name').value.trim(),
+        git_user_email: document.getElementById('git_user_email').value.trim(),
     };
 }
 
 function applyFormData(d) {
     if (!d) return;
-    const fields = ['api_key', 'base_url', 'model', 'workspace', 'goal', 'remote', 'remote_url', 'branch'];
+    const fields = ['api_key', 'base_url', 'model', 'workspace', 'goal', 'remote', 'remote_url', 'branch', 'git_user_name', 'git_user_email'];
     fields.forEach(k => {
         if (typeof d[k] === 'string' && document.getElementById(k)) {
             document.getElementById(k).value = d[k];
@@ -127,6 +129,8 @@ function applyStaticCopyToDom() {
         ['label_remote', 'label_remote'],
         ['label_remote_url', 'label_remote_url'],
         ['label_branch', 'label_branch'],
+        ['label_git_user_name', 'label_git_user_name'],
+        ['label_git_user_email', 'label_git_user_email'],
         ['hint_run_new_round', 'hint_run_new_round'],
         ['section_status_title', 'section_status_title'],
         ['unattended_state_text', 'unattended_state_default'],
@@ -201,6 +205,8 @@ function applyStaticCopyToDom() {
         ['global_log_max_chars', 'ph_global_log_max_chars'],
         ['global_diff_max_chars', 'ph_global_diff_max_chars'],
         ['goal', 'ph_goal'],
+        ['git_user_name', 'ph_git_user_name'],
+        ['git_user_email', 'ph_git_user_email'],
         ['api_key', 'ph_api_key'],
         ['project_search', 'project_search_placeholder']
     ];

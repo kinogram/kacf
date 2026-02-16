@@ -423,7 +423,7 @@ function escapeHtml(text) {
 }
 
 function bindAutoSave() {
-    const ids = ['unattended_mode', 'goal', 'remote', 'remote_url', 'branch'];
+    const ids = ['unattended_mode', 'goal', 'remote', 'remote_url', 'branch', 'git_user_name', 'git_user_email'];
     ids.forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;

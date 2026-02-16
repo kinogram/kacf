@@ -46,6 +46,8 @@ pub async fn agent_loop(
                 resume_from_checkpoint,
                 workspace,
                 goal,
+                git_user_name,
+                git_user_email,
             }) => {
                 stop_flag = false;
                 let session_cfg = SessionCfg {
@@ -58,6 +60,8 @@ pub async fn agent_loop(
                     workspace,
                     goal,
                     eval_cmd: FIXED_EVAL_CMD.to_string(),
+                    git_user_name,
+                    git_user_email,
                 };
                 cfg = Some(session_cfg.clone());
                 clarify_answers.clear();
@@ -137,7 +141,7 @@ async fn run_session(
     protocol_auto_revert::set_current_auto_revert_profile(FIXED_AUTO_REVERT_PROFILE);
     workspace::ensure_dir(&cfg.workspace)?;
     // Ensure a git repository is initialized so we can commit diffs.
-    git_utils::init_repo_if_needed(&cfg.workspace)?;
+    git_utils::init_repo_if_needed(&cfg.workspace, &cfg.git_user_name, &cfg.git_user_email)?;
     let _ = tx_evt.send(AgentEvent::Log(format!(
         "[Agent] workspace = {}",
         cfg.workspace.display()
@@ -390,7 +394,12 @@ async fn run_session(
                 }
                 // Commit the patch so we can generate diffs and revert easily.
                 let commit_message = summary.to_string();
-                if let Err(e) = git_utils::commit_all(&cfg.workspace, &commit_message) {
+                if let Err(e) = git_utils::commit_all(
+                    &cfg.workspace,
+                    &commit_message,
+                    &cfg.git_user_name,
+                    &cfg.git_user_email,
+                ) {
                     let _ = tx_evt.send(AgentEvent::Log(format!("[Agent] commit failed: {e}")));
                 }
                 // Generate diff for the last commit and send to UI. Even if diff
