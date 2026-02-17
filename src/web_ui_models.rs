@@ -559,6 +559,17 @@ pub(crate) struct VmExecProfilesResponse {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VmExecProfileDetailQuery {
+    pub(crate) profile: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmExecProfileDetailResponse {
+    pub(crate) profile: String,
+    pub(crate) commands: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub(crate) struct VmExecProfilePreviewQuery {
     pub(crate) profile: String,
     #[serde(default)]
@@ -571,6 +582,18 @@ pub(crate) struct VmExecProfilePreviewQuery {
 pub(crate) struct VmExecProfilePreviewResponse {
     pub(crate) profile: String,
     pub(crate) tasks: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VmExecCustomProfileSavePayload {
+    pub(crate) name: String,
+    #[serde(default)]
+    pub(crate) commands: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VmExecCustomProfileDeletePayload {
+    pub(crate) name: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

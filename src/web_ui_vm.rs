@@ -1,10 +1,11 @@
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::ErrorKind;
-use std::sync::{Arc, Mutex};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::net::TcpListener;
+use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use wait_timeout::ChildExt;
@@ -14,13 +15,14 @@ use crate::web_ui::AppState;
 use crate::web_ui_authz;
 use crate::web_ui_models::{
     VmActionPayload, VmActionResponse, VmBootstrapPayload, VmCapability, VmClonePayload,
-    VmDeletePayload, VmExecCancelPayload, VmExecCancelResponse, VmExecPayload, VmExecResponse,
-    VmExecBatchTaskPayload, VmExecEnqueueBatchPayload, VmExecEnqueuePayload,
-    VmExecEnqueueProfilePayload, VmExecProfilePreviewQuery, VmExecProfilePreviewResponse,
-    VmExecProfilesResponse, VmExecQueueItem, VmInstance, VmLogQuery, VmLogsResponse,
-    VmProvisionPayload, VmQueueCancelPayload, VmQueueQuery, VmQueueResponse, VmQueueStatsResponse,
-    VmReadyQuery, VmReadyResponse, VmSnapshotEntry, VmSnapshotListQuery, VmSnapshotListResponse,
-    VmSnapshotPayload, VmStateStore, VmStatusResponse,
+    VmDeletePayload, VmExecBatchTaskPayload, VmExecCancelPayload, VmExecCancelResponse,
+    VmExecCustomProfileDeletePayload, VmExecCustomProfileSavePayload, VmExecEnqueueBatchPayload,
+    VmExecEnqueuePayload, VmExecEnqueueProfilePayload, VmExecPayload, VmExecProfileDetailQuery,
+    VmExecProfileDetailResponse, VmExecProfilePreviewQuery, VmExecProfilePreviewResponse,
+    VmExecProfilesResponse, VmExecQueueItem, VmExecResponse, VmInstance, VmLogQuery,
+    VmLogsResponse, VmProvisionPayload, VmQueueCancelPayload, VmQueueQuery, VmQueueResponse,
+    VmQueueStatsResponse, VmReadyQuery, VmReadyResponse, VmSnapshotEntry, VmSnapshotListQuery,
+    VmSnapshotListResponse, VmSnapshotPayload, VmStateStore, VmStatusResponse,
 };
 
 const VM_DIR: &str = "vm";
@@ -28,6 +30,7 @@ const VM_DISK_DIR: &str = "disks";
 const VM_RUNTIME_DIR: &str = "runtime";
 const VM_LOG_DIR: &str = "logs";
 const VM_STATE_FILE: &str = "vm_state.json";
+const VM_PROFILES_FILE: &str = "vm_exec_profiles.json";
 
 fn now_unix() -> u64 {
     SystemTime::now()
@@ -58,6 +61,10 @@ fn vm_runtime_dir(managed_root_dir: &str) -> PathBuf {
 
 fn vm_log_dir(managed_root_dir: &str) -> PathBuf {
     vm_root_path(managed_root_dir).join(VM_LOG_DIR)
+}
+
+fn vm_profiles_path(managed_root_dir: &str) -> PathBuf {
+    vm_root_path(managed_root_dir).join(VM_PROFILES_FILE)
 }
 
 fn vm_pid_path(managed_root_dir: &str, vm_name: &str) -> PathBuf {
@@ -222,6 +229,70 @@ fn vm_exec_profiles() -> &'static [&'static str] {
     ]
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+struct VmExecCustomProfilesStore {
+    #[serde(default)]
+    profiles: BTreeMap<String, Vec<String>>,
+}
+
+fn load_custom_profiles(managed_root_dir: &str) -> VmExecCustomProfilesStore {
+    let path = vm_profiles_path(managed_root_dir);
+    let text = match fs::read_to_string(path) {
+        Ok(v) => v,
+        Err(_) => return VmExecCustomProfilesStore::default(),
+    };
+    serde_json::from_str::<VmExecCustomProfilesStore>(&text).unwrap_or_default()
+}
+
+fn save_custom_profiles(
+    managed_root_dir: &str,
+    store: &VmExecCustomProfilesStore,
+) -> std::io::Result<()> {
+    let path = vm_profiles_path(managed_root_dir);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let text = serde_json::to_string_pretty(store)?;
+    let tmp = path.with_extension("tmp");
+    fs::write(&tmp, text)?;
+    fs::rename(tmp, path)?;
+    Ok(())
+}
+
+fn sanitize_custom_profile_name(raw: &str) -> Option<String> {
+    let s = raw.trim();
+    if s.len() < 8 || s.len() > 64 {
+        return None;
+    }
+    if !s.starts_with("custom-") {
+        return None;
+    }
+    if !s
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_'))
+    {
+        return None;
+    }
+    Some(s.to_string())
+}
+
+fn normalize_custom_commands(raw: &[String]) -> Vec<String> {
+    raw.iter()
+        .map(|x| x.trim().to_string())
+        .filter(|x| !x.is_empty() && x.len() <= 400)
+        .take(40)
+        .collect()
+}
+
+fn list_all_profiles(managed_root_dir: &str) -> Vec<String> {
+    let mut all: Vec<String> = vm_exec_profiles().iter().map(|x| (*x).to_string()).collect();
+    let store = load_custom_profiles(managed_root_dir);
+    all.extend(store.profiles.keys().cloned());
+    all.sort();
+    all.dedup();
+    all
+}
+
 #[derive(Clone, Debug, Default)]
 struct ProfileRuntimeOptions {
     workdir: Option<String>,
@@ -278,7 +349,7 @@ fn prepend_workdir(cmd: &str, workdir: Option<&str>) -> String {
     }
 }
 
-fn build_profile_batch_tasks(
+fn build_builtin_profile_batch_tasks(
     profile: &str,
     opts: &ProfileRuntimeOptions,
 ) -> Option<Vec<VmExecBatchTaskPayload>> {
@@ -394,6 +465,34 @@ fn build_profile_batch_tasks(
             },
         ]),
         _ => None,
+    }
+}
+
+fn build_profile_batch_tasks(
+    managed_root_dir: &str,
+    profile: &str,
+    opts: &ProfileRuntimeOptions,
+) -> Option<Vec<VmExecBatchTaskPayload>> {
+    if let Some(v) = build_builtin_profile_batch_tasks(profile, opts) {
+        return Some(v);
+    }
+    let store = load_custom_profiles(managed_root_dir);
+    let raw = store.profiles.get(profile)?;
+    let wd = opts.workdir.as_deref();
+    let out: Vec<VmExecBatchTaskPayload> = raw
+        .iter()
+        .map(|cmd| VmExecBatchTaskPayload {
+            command: prepend_workdir(cmd, wd),
+            timeout_sec: 0,
+            wait_ready_sec: 0,
+            priority: 0,
+            retry_max: 0,
+        })
+        .collect();
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
     }
 }
 
@@ -2025,12 +2124,101 @@ pub(crate) async fn list_vm_exec_profiles(
     req: HttpRequest,
     data: web::Data<AppState>,
 ) -> impl Responder {
-    let _ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
         Ok(v) => v,
         Err(resp) => return resp,
     };
     HttpResponse::Ok().json(VmExecProfilesResponse {
-        profiles: vm_exec_profiles().iter().map(|s| s.to_string()).collect(),
+        profiles: list_all_profiles(&ctx.managed_root_dir),
+    })
+}
+
+pub(crate) async fn get_vm_exec_profile_detail(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+    query: web::Query<VmExecProfileDetailQuery>,
+) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    let profile = query.profile.trim();
+    if profile.is_empty() {
+        return HttpResponse::BadRequest().body("profile is empty");
+    }
+    if let Some(builtin) = build_builtin_profile_batch_tasks(profile, &ProfileRuntimeOptions::default()) {
+        return HttpResponse::Ok().json(VmExecProfileDetailResponse {
+            profile: profile.to_string(),
+            commands: builtin.into_iter().map(|x| x.command).collect(),
+        });
+    }
+    let store = load_custom_profiles(&ctx.managed_root_dir);
+    let Some(commands) = store.profiles.get(profile) else {
+        return HttpResponse::NotFound().body("profile not found");
+    };
+    HttpResponse::Ok().json(VmExecProfileDetailResponse {
+        profile: profile.to_string(),
+        commands: commands.clone(),
+    })
+}
+
+pub(crate) async fn save_vm_exec_custom_profile(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+    body: web::Json<VmExecCustomProfileSavePayload>,
+) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if !ctx.can_write {
+        return HttpResponse::Forbidden().body("read-only session");
+    }
+    let Some(name) = sanitize_custom_profile_name(&body.name) else {
+        return HttpResponse::BadRequest()
+            .body("invalid profile name, use custom-<lowercase-and-dash>");
+    };
+    let commands = normalize_custom_commands(&body.commands);
+    if commands.is_empty() {
+        return HttpResponse::BadRequest().body("commands is empty");
+    }
+    let _guard = lock_recover(&data.projects_lock, "projects_lock");
+    let mut store = load_custom_profiles(&ctx.managed_root_dir);
+    store.profiles.insert(name.clone(), commands);
+    if let Err(e) = save_custom_profiles(&ctx.managed_root_dir, &store) {
+        return HttpResponse::InternalServerError().body(format!("save custom profiles failed: {e}"));
+    }
+    HttpResponse::Ok().json(VmExecProfilesResponse {
+        profiles: list_all_profiles(&ctx.managed_root_dir),
+    })
+}
+
+pub(crate) async fn delete_vm_exec_custom_profile(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+    body: web::Json<VmExecCustomProfileDeletePayload>,
+) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if !ctx.can_write {
+        return HttpResponse::Forbidden().body("read-only session");
+    }
+    let Some(name) = sanitize_custom_profile_name(&body.name) else {
+        return HttpResponse::BadRequest()
+            .body("invalid profile name, use custom-<lowercase-and-dash>");
+    };
+    let _guard = lock_recover(&data.projects_lock, "projects_lock");
+    let mut store = load_custom_profiles(&ctx.managed_root_dir);
+    if store.profiles.remove(&name).is_none() {
+        return HttpResponse::NotFound().body("custom profile not found");
+    }
+    if let Err(e) = save_custom_profiles(&ctx.managed_root_dir, &store) {
+        return HttpResponse::InternalServerError().body(format!("save custom profiles failed: {e}"));
+    }
+    HttpResponse::Ok().json(VmExecProfilesResponse {
+        profiles: list_all_profiles(&ctx.managed_root_dir),
     })
 }
 
@@ -2039,7 +2227,7 @@ pub(crate) async fn preview_vm_exec_profile(
     data: web::Data<AppState>,
     query: web::Query<VmExecProfilePreviewQuery>,
 ) -> impl Responder {
-    let _ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
         Ok(v) => v,
         Err(resp) => return resp,
     };
@@ -2051,7 +2239,7 @@ pub(crate) async fn preview_vm_exec_profile(
         Ok(v) => v,
         Err(e) => return HttpResponse::BadRequest().body(e),
     };
-    let Some(tasks) = build_profile_batch_tasks(profile, &opts) else {
+    let Some(tasks) = build_profile_batch_tasks(&ctx.managed_root_dir, profile, &opts) else {
         return HttpResponse::BadRequest().body("unknown profile");
     };
     HttpResponse::Ok().json(VmExecProfilePreviewResponse {
@@ -2084,7 +2272,7 @@ pub(crate) async fn enqueue_vm_exec_profile(
         Ok(v) => v,
         Err(e) => return HttpResponse::BadRequest().body(e),
     };
-    let Some(tasks) = build_profile_batch_tasks(profile, &opts) else {
+    let Some(tasks) = build_profile_batch_tasks(&ctx.managed_root_dir, profile, &opts) else {
         return HttpResponse::BadRequest().body("unknown profile");
     };
     let default_timeout_sec = if body.timeout_sec == 0 {

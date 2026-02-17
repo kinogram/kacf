@@ -929,8 +929,20 @@ pub async fn run_web_server(
             .route("/vm/exec/queue/stats", web::get().to(web_ui_vm::vm_exec_queue_stats))
             .route("/vm/exec/profiles", web::get().to(web_ui_vm::list_vm_exec_profiles))
             .route(
+                "/vm/exec/profile/detail",
+                web::get().to(web_ui_vm::get_vm_exec_profile_detail),
+            )
+            .route(
                 "/vm/exec/profile/preview",
                 web::get().to(web_ui_vm::preview_vm_exec_profile),
+            )
+            .route(
+                "/vm/exec/profiles/save",
+                web::post().to(web_ui_vm::save_vm_exec_custom_profile),
+            )
+            .route(
+                "/vm/exec/profiles/delete",
+                web::post().to(web_ui_vm::delete_vm_exec_custom_profile),
             )
             .route("/vm/exec/enqueue", web::post().to(web_ui_vm::enqueue_vm_exec))
             .route(

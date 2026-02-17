@@ -118,10 +118,15 @@ function setVmMutatingDisabled(disabled) {
         'vm_exec_batch_enqueue_btn',
         'vm_exec_profile_enqueue_btn',
         'vm_exec_profile_preview_btn',
+        'vm_exec_custom_profile_load_btn',
+        'vm_exec_custom_profile_save_btn',
+        'vm_exec_custom_profile_delete_btn',
         'vm_exec_run_next_btn',
         'vm_exec_queue_refresh_btn',
         'vm_exec_queue_cancel_btn',
         'vm_exec_profile',
+        'vm_exec_custom_profile_name',
+        'vm_exec_custom_profile_commands',
     ].forEach((id) => {
         const node = el(id);
         if (node) node.disabled = !!disabled;
@@ -475,6 +480,10 @@ function vmExecProfileLabel(profile) {
     return txt(key, String(profile || ''));
 }
 
+function isCustomProfileName(name) {
+    return /^custom-[a-z0-9_-]{1,56}$/.test(String(name || '').trim());
+}
+
 function renderVmExecProfiles() {
     const select = el('vm_exec_profile');
     if (!select) return;
@@ -498,6 +507,8 @@ function renderVmExecProfiles() {
     });
     if (current && list.includes(current)) {
         select.value = current;
+    } else if (list.length) {
+        select.value = list[0];
     }
 }
 
@@ -511,6 +522,75 @@ async function refreshVmExecProfiles() {
         vmExecProfiles = [];
         renderVmExecProfiles();
         setVmExecProfilePreviewText(txt('vm_exec_profile_preview_empty', 'No preview available.'));
+    }
+}
+
+async function loadSelectedProfileToEditor() {
+    const profile = String(el('vm_exec_profile')?.value || '').trim();
+    if (!profile) {
+        setStatus(txt('status_vm_exec_profile_required', 'Please select an exec profile first.'), 'status-danger');
+        return;
+    }
+    try {
+        const data = await vmApi(`/vm/exec/profile/detail?profile=${encodeURIComponent(profile)}`, 'GET');
+        const commands = Array.isArray(data?.commands) ? data.commands : [];
+        const nameInput = el('vm_exec_custom_profile_name');
+        const cmdArea = el('vm_exec_custom_profile_commands');
+        if (nameInput) {
+            nameInput.value = isCustomProfileName(profile) ? profile : '';
+        }
+        if (cmdArea) {
+            cmdArea.value = commands.map((x) => String(x || '').trim()).filter(Boolean).join('\n');
+        }
+        setStatus(txt('status_vm_profile_loaded_to_editor', 'Profile commands loaded to editor.'), 'status-warn');
+    } catch (e) {
+        setStatus(fmt('status_vm_exec_profile_load_failed', 'Load profile detail failed: {error}', { error: String(e) }), 'status-danger');
+    }
+}
+
+async function saveCustomProfile() {
+    const name = String(el('vm_exec_custom_profile_name')?.value || '').trim();
+    const raw = String(el('vm_exec_custom_profile_commands')?.value || '');
+    const commands = raw.split('\n').map((s) => s.trim()).filter(Boolean);
+    if (!isCustomProfileName(name)) {
+        setStatus(txt('status_vm_custom_profile_name_invalid', 'Custom profile name must start with custom- and use lowercase letters, digits, dash or underscore.'), 'status-danger');
+        return;
+    }
+    if (!commands.length) {
+        setStatus(txt('status_vm_custom_profile_commands_required', 'Please enter at least one command for custom profile.'), 'status-danger');
+        return;
+    }
+    try {
+        await vmApi('/vm/exec/profiles/save', 'POST', { name, commands });
+        await refreshVmExecProfiles();
+        const select = el('vm_exec_profile');
+        if (select) select.value = name;
+        await previewVmExecProfile();
+        setStatus(fmt('status_vm_custom_profile_saved', 'Custom profile saved: {name}', { name }), 'status-warn');
+    } catch (e) {
+        setStatus(fmt('status_vm_custom_profile_save_failed', 'Save custom profile failed: {error}', { error: String(e) }), 'status-danger');
+    }
+}
+
+async function deleteCustomProfile() {
+    const name = String(el('vm_exec_custom_profile_name')?.value || '').trim();
+    if (!isCustomProfileName(name)) {
+        setStatus(txt('status_vm_custom_profile_name_invalid', 'Custom profile name must start with custom- and use lowercase letters, digits, dash or underscore.'), 'status-danger');
+        return;
+    }
+    const confirmText = fmt('confirm_vm_custom_profile_delete', 'Delete custom profile "{name}"?', { name });
+    if (!window.confirm(confirmText)) return;
+    try {
+        await vmApi('/vm/exec/profiles/delete', 'POST', { name });
+        const nameInput = el('vm_exec_custom_profile_name');
+        const cmdArea = el('vm_exec_custom_profile_commands');
+        if (nameInput) nameInput.value = '';
+        if (cmdArea) cmdArea.value = '';
+        await refreshVmExecProfiles();
+        await previewVmExecProfile();
+        setStatus(fmt('status_vm_custom_profile_deleted', 'Custom profile deleted: {name}', { name }), 'status-warn');
+    } catch (e) {
+        setStatus(fmt('status_vm_custom_profile_delete_failed', 'Delete custom profile failed: {error}', { error: String(e) }), 'status-danger');
     }
 }
 
@@ -867,6 +947,9 @@ function bindVmEvents() {
     el('vm_exec_batch_enqueue_btn')?.addEventListener('click', enqueueVmExecBatch);
     el('vm_exec_profile_enqueue_btn')?.addEventListener('click', enqueueVmExecProfile);
     el('vm_exec_profile_preview_btn')?.addEventListener('click', previewVmExecProfile);
+    el('vm_exec_custom_profile_load_btn')?.addEventListener('click', loadSelectedProfileToEditor);
+    el('vm_exec_custom_profile_save_btn')?.addEventListener('click', saveCustomProfile);
+    el('vm_exec_custom_profile_delete_btn')?.addEventListener('click', deleteCustomProfile);
     el('vm_exec_run_next_btn')?.addEventListener('click', runNextVmExec);
     el('vm_exec_queue_refresh_btn')?.addEventListener('click', refreshVmExecQueue);
     el('vm_exec_queue_cancel_btn')?.addEventListener('click', cancelVmQueueTask);
