@@ -18,7 +18,7 @@ use crate::web_ui_models::{
     VmActionPayload, VmActionResponse, VmBootstrapPayload, VmCapability, VmClonePayload,
     VmDeletePayload, VmExecBatchTaskPayload, VmExecCancelPayload, VmExecCancelResponse,
     VmExecCustomProfileDeletePayload, VmExecCustomProfileSavePayload, VmExecEnqueueBatchPayload,
-    VmExecEnqueuePayload, VmExecEnqueueProfilePayload, VmExecPayload, VmExecProfileDetailQuery,
+    VmExecDispatchResponse, VmExecEnqueuePayload, VmExecEnqueueProfilePayload, VmExecPayload, VmExecProfileDetailQuery,
     VmExecProfileDetailResponse, VmExecProfilePreviewQuery, VmExecProfilePreviewResponse,
     VmExecProfilesResponse, VmExecQueueItem, VmExecResponse, VmInstance, VmLogQuery,
     VmLogsResponse, VmProvisionPayload, VmQueueCancelPayload, VmQueueQuery, VmQueueResponse,
@@ -1808,7 +1808,6 @@ fn run_next_vm_exec_core(
         name,
         &format!("queue run finished task_id={} exit={}", task_id, exec_resp.exit_code),
     );
-    wake_all_vm_exec_workers(managed_root_dir, projects_lock.clone(), running_limit);
     Ok(Some(exec_resp))
 }
 
@@ -1822,30 +1821,40 @@ fn spawn_vm_exec_worker(
         return;
     }
     thread::spawn(move || {
-        loop {
-            match run_next_vm_exec_core(&managed_root_dir, &name, &projects_lock, running_limit) {
-                Ok(Some(_)) => continue,
-                Ok(None) => break,
-                Err(e) => {
-                    append_vm_log(&managed_root_dir, &name, &format!("queue worker stopped: {e}"));
-                    break;
-                }
+        let mut ran_one = false;
+        match run_next_vm_exec_core(&managed_root_dir, &name, &projects_lock, running_limit) {
+            Ok(Some(_)) => ran_one = true,
+            Ok(None) => {}
+            Err(e) => {
+                append_vm_log(&managed_root_dir, &name, &format!("queue worker stopped: {e}"));
             }
         }
         release_worker_lock(&managed_root_dir, &name);
+        if ran_one {
+            let _ = dispatch_vm_exec_workers(&managed_root_dir, projects_lock.clone(), running_limit);
+        }
     });
 }
 
-fn wake_all_vm_exec_workers(
+fn dispatch_vm_exec_workers(
     managed_root_dir: &str,
     projects_lock: Arc<Mutex<()>>,
     running_limit: usize,
-) {
+) -> usize {
     let vm_names: Vec<String> = {
         let _guard = lock_recover(&projects_lock, "projects_lock");
         let state = load_vm_state(managed_root_dir);
-        state.vms.keys().cloned().collect()
+        let running_total = count_running_exec_tasks_all_vms(managed_root_dir, &state);
+        if running_total >= running_limit {
+            return 0;
+        }
+        let slots = running_limit.saturating_sub(running_total);
+        if slots == 0 {
+            return 0;
+        }
+        select_dispatch_vm_candidates(managed_root_dir, &state, slots, now_unix())
     };
+    let mut started = 0usize;
     for vm_name in vm_names {
         spawn_vm_exec_worker(
             managed_root_dir.to_string(),
@@ -1853,7 +1862,42 @@ fn wake_all_vm_exec_workers(
             projects_lock.clone(),
             running_limit,
         );
+        started += 1;
     }
+    started
+}
+
+fn select_dispatch_vm_candidates(
+    managed_root_dir: &str,
+    state: &VmStateStore,
+    slots: usize,
+    now: u64,
+) -> Vec<String> {
+    let mut candidates: Vec<(i32, u64, String)> = Vec::new();
+    for vm_name in state.vms.keys() {
+        let items = load_exec_queue(managed_root_dir, vm_name);
+        if items.iter().any(|x| x.status == "running") {
+            continue;
+        }
+        let mut best_priority = -101;
+        let mut oldest_created = u64::MAX;
+        for item in &items {
+            if item.status != "pending" || now < item.next_run_after_unix {
+                continue;
+            }
+            best_priority = best_priority.max(item.priority);
+            oldest_created = oldest_created.min(item.created_at_unix);
+        }
+        if best_priority >= -100 {
+            candidates.push((best_priority, oldest_created, vm_name.clone()));
+        }
+    }
+    candidates.sort_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then_with(|| a.1.cmp(&b.1))
+            .then_with(|| a.2.cmp(&b.2))
+    });
+    candidates.into_iter().take(slots).map(|x| x.2).collect()
 }
 
 fn load_vm_state(managed_root_dir: &str) -> VmStateStore {
@@ -3222,14 +3266,10 @@ pub(crate) async fn enqueue_vm_exec(
     if let Err(e) = save_exec_queue(&ctx.managed_root_dir, &name, &items) {
         return HttpResponse::InternalServerError().body(format!("save queue failed: {e}"));
     }
+    drop(_guard);
     append_vm_log(&ctx.managed_root_dir, &name, "exec task enqueued");
     let running_limit = vm_exec_running_limit_by_role(&ctx.role);
-    spawn_vm_exec_worker(
-        ctx.managed_root_dir.clone(),
-        name.clone(),
-        data.projects_lock.clone(),
-        running_limit,
-    );
+    let _ = dispatch_vm_exec_workers(&ctx.managed_root_dir, data.projects_lock.clone(), running_limit);
     HttpResponse::Ok().json(VmQueueResponse { name, items })
 }
 
@@ -3302,18 +3342,14 @@ pub(crate) async fn enqueue_vm_exec_batch(
     if let Err(e) = save_exec_queue(&ctx.managed_root_dir, &name, &items) {
         return HttpResponse::InternalServerError().body(format!("save queue failed: {e}"));
     }
+    drop(_guard);
     append_vm_log(
         &ctx.managed_root_dir,
         &name,
         &format!("exec batch enqueued tasks={added}"),
     );
     let running_limit = vm_exec_running_limit_by_role(&ctx.role);
-    spawn_vm_exec_worker(
-        ctx.managed_root_dir.clone(),
-        name.clone(),
-        data.projects_lock.clone(),
-        running_limit,
-    );
+    let _ = dispatch_vm_exec_workers(&ctx.managed_root_dir, data.projects_lock.clone(), running_limit);
     HttpResponse::Ok().json(VmQueueResponse { name, items })
 }
 
@@ -3522,18 +3558,14 @@ pub(crate) async fn enqueue_vm_exec_profile(
     if let Err(e) = save_exec_queue(&ctx.managed_root_dir, &name, &items) {
         return HttpResponse::InternalServerError().body(format!("save queue failed: {e}"));
     }
+    drop(_guard);
     append_vm_log(
         &ctx.managed_root_dir,
         &name,
         &format!("exec profile enqueued profile={profile} tasks={added}"),
     );
     let running_limit = vm_exec_running_limit_by_role(&ctx.role);
-    spawn_vm_exec_worker(
-        ctx.managed_root_dir.clone(),
-        name.clone(),
-        data.projects_lock.clone(),
-        running_limit,
-    );
+    let _ = dispatch_vm_exec_workers(&ctx.managed_root_dir, data.projects_lock.clone(), running_limit);
     HttpResponse::Ok().json(VmQueueResponse { name, items })
 }
 
@@ -3642,6 +3674,7 @@ pub(crate) async fn start_vm_self_debug_plan(
     if let Err(e) = save_exec_queue(&ctx.managed_root_dir, &name, &items) {
         return HttpResponse::InternalServerError().body(format!("save queue failed: {e}"));
     }
+    drop(_guard);
     append_vm_log(
         &ctx.managed_root_dir,
         &name,
@@ -3657,12 +3690,7 @@ pub(crate) async fn start_vm_self_debug_plan(
         ),
     );
     let running_limit = vm_exec_running_limit_by_role(&ctx.role);
-    spawn_vm_exec_worker(
-        ctx.managed_root_dir.clone(),
-        name.clone(),
-        data.projects_lock.clone(),
-        running_limit,
-    );
+    let _ = dispatch_vm_exec_workers(&ctx.managed_root_dir, data.projects_lock.clone(), running_limit);
     HttpResponse::Ok().json(VmSelfDebugPlanResponse {
         name,
         total_tasks: tasks.len(),
@@ -4133,14 +4161,10 @@ pub(crate) async fn resume_vm_self_debug_run(
     if let Err(e) = save_exec_queue(&ctx.managed_root_dir, &name, &items) {
         return HttpResponse::InternalServerError().body(format!("save queue failed: {e}"));
     }
+    drop(_guard);
     if matched > 0 {
         let running_limit = vm_exec_running_limit_by_role(&ctx.role);
-        spawn_vm_exec_worker(
-            ctx.managed_root_dir.clone(),
-            name.clone(),
-            data.projects_lock.clone(),
-            running_limit,
-        );
+        let _ = dispatch_vm_exec_workers(&ctx.managed_root_dir, data.projects_lock.clone(), running_limit);
     }
     append_vm_log(
         &ctx.managed_root_dir,
@@ -4229,10 +4253,40 @@ pub(crate) async fn run_next_vm_exec(
         &data.projects_lock,
         running_limit,
     ) {
-        Ok(Some(resp)) => HttpResponse::Ok().json(resp),
+        Ok(Some(resp)) => {
+            let _ =
+                dispatch_vm_exec_workers(&ctx.managed_root_dir, data.projects_lock.clone(), running_limit);
+            HttpResponse::Ok().json(resp)
+        }
         Ok(None) => HttpResponse::BadRequest().body("no runnable queued task"),
         Err(e) => HttpResponse::BadRequest().body(e),
     }
+}
+
+pub(crate) async fn dispatch_vm_exec(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if !ctx.can_write {
+        return HttpResponse::Forbidden().body("read-only session");
+    }
+    let running_limit = vm_exec_running_limit_by_role(&ctx.role);
+    let started_workers =
+        dispatch_vm_exec_workers(&ctx.managed_root_dir, data.projects_lock.clone(), running_limit);
+    let running_total_all_vms = {
+        let _guard = lock_recover(&data.projects_lock, "projects_lock");
+        let state = load_vm_state(&ctx.managed_root_dir);
+        count_running_exec_tasks_all_vms(&ctx.managed_root_dir, &state)
+    };
+    HttpResponse::Ok().json(VmExecDispatchResponse {
+        started_workers,
+        running_total_all_vms,
+        running_limit_all_vms: running_limit,
+    })
 }
 
 pub(crate) async fn check_vm_ready(
@@ -4489,14 +4543,10 @@ pub(crate) async fn start_vm(
     if let Err(e) = save_vm_state(&ctx.managed_root_dir, &state) {
         return HttpResponse::InternalServerError().body(format!("save vm state failed: {e}"));
     }
+    drop(_guard);
     if effective {
         let running_limit = vm_exec_running_limit_by_role(&ctx.role);
-        spawn_vm_exec_worker(
-            ctx.managed_root_dir.clone(),
-            name.clone(),
-            data.projects_lock.clone(),
-            running_limit,
-        );
+        let _ = dispatch_vm_exec_workers(&ctx.managed_root_dir, data.projects_lock.clone(), running_limit);
     }
     HttpResponse::Ok().json(VmActionResponse {
         ok: true,
@@ -4638,7 +4688,7 @@ mod tests {
         is_running_task_hard_timed_out, load_exec_queue, normalize_backend, now_unix,
         queue_has_active_duplicate, queue_item_from_values, recover_stale_running_tasks_in_queue,
         sanitize_self_debug_run_id, sanitize_vm_name, save_exec_queue, save_vm_state,
-        strategy_priority_boost_by_stats, queue_watchdog_recovery_stats,
+        select_dispatch_vm_candidates, strategy_priority_boost_by_stats, queue_watchdog_recovery_stats,
         trim_history_entries, vm_instance_limit_by_role, vm_queue_limit_by_role,
         vm_running_limit_by_role, vm_exec_running_limit_by_role,
         VmSelfDebugHistoryEntry,
@@ -4956,6 +5006,57 @@ mod tests {
         let (total, last) = queue_watchdog_recovery_stats(&[a, b, c]);
         assert_eq!(total, 2);
         assert_eq!(last, 140);
+    }
+
+    #[test]
+    fn dispatch_candidates_follow_priority_then_wait_time() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let managed_root = format!("autocoding_data/users/dispatch_test_{unique}");
+        let now = now_unix();
+        let mut state_store = crate::web_ui_models::VmStateStore::default();
+        for vm_name in ["vm-a", "vm-b", "vm-c"] {
+            state_store.vms.insert(
+                vm_name.to_string(),
+                crate::web_ui_models::VmInstance {
+                    name: vm_name.to_string(),
+                    backend: "qemu".to_string(),
+                    power_state: "running".to_string(),
+                    cpu: 2,
+                    memory_mb: 1024,
+                    disk_gb: 10,
+                    disk_path: format!("autocoding_data/{vm_name}.qcow2"),
+                    os_image: "linux".to_string(),
+                    created_at_unix: now,
+                    updated_at_unix: now,
+                    last_message: String::new(),
+                    process_id: Some(1),
+                    ssh_port: Some(2222),
+                    ssh_user: "root".to_string(),
+                },
+            );
+        }
+        save_vm_state(&managed_root, &state_store).expect("save vm state");
+
+        let mut a = queue_item_from_values("echo a", 30, 0, 10, 0);
+        a.status = "pending".to_string();
+        a.created_at_unix = now.saturating_sub(5);
+        save_exec_queue(&managed_root, "vm-a", &[a]).expect("save queue a");
+
+        let mut b = queue_item_from_values("echo b", 30, 0, 10, 0);
+        b.status = "pending".to_string();
+        b.created_at_unix = now.saturating_sub(20);
+        save_exec_queue(&managed_root, "vm-b", &[b]).expect("save queue b");
+
+        let mut c = queue_item_from_values("echo c", 30, 0, 50, 0);
+        c.status = "pending".to_string();
+        c.created_at_unix = now.saturating_sub(1);
+        save_exec_queue(&managed_root, "vm-c", &[c]).expect("save queue c");
+
+        let top2 = select_dispatch_vm_candidates(&managed_root, &state_store, 2, now);
+        assert_eq!(top2, vec!["vm-c".to_string(), "vm-b".to_string()]);
     }
 
     #[test]

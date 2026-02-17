@@ -523,6 +523,13 @@ pub(crate) struct VmQueueStatsResponse {
     pub(crate) watchdog_last_recovered_unix: u64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmExecDispatchResponse {
+    pub(crate) started_workers: usize,
+    pub(crate) running_total_all_vms: usize,
+    pub(crate) running_limit_all_vms: usize,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct VmExecEnqueuePayload {
     pub(crate) name: String,

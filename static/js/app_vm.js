@@ -579,7 +579,19 @@ async function enqueueVmExec() {
         setStatus(txt('status_vm_exec_enqueue_ok', 'VM command queued.'), 'status-warn');
         await refreshVmExecQueue();
     } catch (e) {
-        setStatus(fmt('status_vm_exec_queue_failed', 'VM exec queue operation failed: {error}', { error: String(e) }), 'status-danger');
+        const msg = String(e || '');
+        if (msg.includes('no runnable queued task')) {
+            try {
+                const d = await vmApi('/vm/exec/dispatch', 'POST');
+                setStatus(
+                    `Global dispatch triggered: started=${Number(d?.started_workers || 0)} running=${Number(d?.running_total_all_vms || 0)}/${Number(d?.running_limit_all_vms || 0)}`,
+                    'status-warn',
+                );
+                await refreshVmExecQueue();
+                return;
+            } catch (_e2) {}
+        }
+        setStatus(fmt('status_vm_exec_queue_failed', 'VM exec queue operation failed: {error}', { error: msg }), 'status-danger');
     }
 }
 
