@@ -28,6 +28,7 @@ let vmBound = false;
 let vmRefreshTimer = null;
 let vmLogRefreshTimer = null;
 let vmQueueRefreshTimer = null;
+let vmExecProfiles = [];
 
 function el(id) {
     return document.getElementById(id);
@@ -109,9 +110,11 @@ function setVmMutatingDisabled(disabled) {
         'vm_exec_cancel_btn',
         'vm_exec_enqueue_btn',
         'vm_exec_batch_enqueue_btn',
+        'vm_exec_profile_enqueue_btn',
         'vm_exec_run_next_btn',
         'vm_exec_queue_refresh_btn',
         'vm_exec_queue_cancel_btn',
+        'vm_exec_profile',
     ].forEach((id) => {
         const node = el(id);
         if (node) node.disabled = !!disabled;
@@ -198,6 +201,7 @@ async function refreshVmStatus() {
         renderCapabilities(data.capabilities || []);
         renderVmTargetList(data.vms || []);
         renderVmList(data.vms || []);
+        renderVmExecProfiles();
         setVmStatusLine(txt('status_vm_synced', 'VM status synchronized'));
         await refreshVmSnapshots();
         await refreshVmLogs();
@@ -445,6 +449,79 @@ async function enqueueVmExecBatch() {
             tasks,
         });
         setStatus(fmt('status_vm_exec_batch_ok', 'Queued {count} VM commands.', { count: tasks.length }), 'status-warn');
+        await refreshVmExecQueue();
+    } catch (e) {
+        setStatus(fmt('status_vm_exec_queue_failed', 'VM exec queue operation failed: {error}', { error: String(e) }), 'status-danger');
+    }
+}
+
+function vmExecProfileLabel(profile) {
+    const key = `vm_exec_profile_${String(profile || '').replace(/-/g, '_')}`;
+    return txt(key, String(profile || ''));
+}
+
+function renderVmExecProfiles() {
+    const select = el('vm_exec_profile');
+    if (!select) return;
+    const current = String(select.value || '').trim();
+    select.innerHTML = '';
+    const list = Array.isArray(vmExecProfiles) ? vmExecProfiles : [];
+    if (!list.length) {
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = txt('vm_exec_profile_empty', 'No profile available');
+        select.appendChild(opt);
+        return;
+    }
+    list.forEach((profile) => {
+        const p = String(profile || '').trim();
+        if (!p) return;
+        const opt = document.createElement('option');
+        opt.value = p;
+        opt.textContent = vmExecProfileLabel(p);
+        select.appendChild(opt);
+    });
+    if (current && list.includes(current)) {
+        select.value = current;
+    }
+}
+
+async function refreshVmExecProfiles() {
+    try {
+        const data = await vmApi('/vm/exec/profiles', 'GET');
+        vmExecProfiles = Array.isArray(data?.profiles) ? data.profiles.map((x) => String(x || '').trim()).filter(Boolean) : [];
+        renderVmExecProfiles();
+    } catch (_e) {
+        vmExecProfiles = [];
+        renderVmExecProfiles();
+    }
+}
+
+async function enqueueVmExecProfile() {
+    const name = selectedVmName();
+    const profile = String(el('vm_exec_profile')?.value || '').trim();
+    const timeoutSec = asBoundedInt(el('vm_exec_timeout_sec')?.value, 1, 3600, 60);
+    const waitReadySec = asBoundedInt(el('vm_exec_wait_ready_sec')?.value, 0, 600, 0);
+    const priority = asBoundedSignedInt(el('vm_exec_priority')?.value, -100, 100, 0);
+    const retryMax = asBoundedInt(el('vm_exec_retry_max')?.value, 0, 10, 0);
+    if (!name) {
+        setStatus(txt('status_vm_target_required', 'Please select a VM first'), 'status-danger');
+        return;
+    }
+    if (!profile) {
+        setStatus(txt('status_vm_exec_profile_required', 'Please select an exec profile first.'), 'status-danger');
+        return;
+    }
+    try {
+        await vmApi('/vm/exec/enqueue_profile', 'POST', {
+            name,
+            profile,
+            timeout_sec: timeoutSec,
+            wait_ready_sec: waitReadySec,
+            priority,
+            retry_max: retryMax,
+        });
+        setStatus(fmt('status_vm_exec_profile_ok', 'Profile queued: {profile}', { profile: vmExecProfileLabel(profile) }), 'status-warn');
         await refreshVmExecQueue();
     } catch (e) {
         setStatus(fmt('status_vm_exec_queue_failed', 'VM exec queue operation failed: {error}', { error: String(e) }), 'status-danger');
@@ -741,6 +818,7 @@ function bindVmEvents() {
     el('vm_exec_cancel_btn')?.addEventListener('click', cancelVmExec);
     el('vm_exec_enqueue_btn')?.addEventListener('click', enqueueVmExec);
     el('vm_exec_batch_enqueue_btn')?.addEventListener('click', enqueueVmExecBatch);
+    el('vm_exec_profile_enqueue_btn')?.addEventListener('click', enqueueVmExecProfile);
     el('vm_exec_run_next_btn')?.addEventListener('click', runNextVmExec);
     el('vm_exec_queue_refresh_btn')?.addEventListener('click', refreshVmExecQueue);
     el('vm_exec_queue_cancel_btn')?.addEventListener('click', cancelVmQueueTask);
@@ -773,6 +851,7 @@ async function init(opts) {
     if (!vmQueueRefreshTimer) {
         vmQueueRefreshTimer = setInterval(refreshVmExecQueue, 4000);
     }
+    await refreshVmExecProfiles();
     await refreshVmSnapshots();
     await refreshVmExecQueue();
 }

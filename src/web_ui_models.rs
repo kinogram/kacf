@@ -536,6 +536,25 @@ pub(crate) struct VmExecEnqueueBatchPayload {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VmExecEnqueueProfilePayload {
+    pub(crate) name: String,
+    pub(crate) profile: String,
+    #[serde(default)]
+    pub(crate) timeout_sec: u64,
+    #[serde(default)]
+    pub(crate) wait_ready_sec: u64,
+    #[serde(default)]
+    pub(crate) priority: i32,
+    #[serde(default)]
+    pub(crate) retry_max: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmExecProfilesResponse {
+    pub(crate) profiles: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub(crate) struct VmQueueCancelPayload {
     pub(crate) name: String,
     pub(crate) task_id: String,

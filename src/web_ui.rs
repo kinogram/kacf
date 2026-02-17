@@ -927,10 +927,15 @@ pub async fn run_web_server(
             .route("/vm/bootstrap", web::post().to(web_ui_vm::bootstrap_vm))
             .route("/vm/exec/queue", web::get().to(web_ui_vm::list_vm_exec_queue))
             .route("/vm/exec/queue/stats", web::get().to(web_ui_vm::vm_exec_queue_stats))
+            .route("/vm/exec/profiles", web::get().to(web_ui_vm::list_vm_exec_profiles))
             .route("/vm/exec/enqueue", web::post().to(web_ui_vm::enqueue_vm_exec))
             .route(
                 "/vm/exec/enqueue_batch",
                 web::post().to(web_ui_vm::enqueue_vm_exec_batch),
+            )
+            .route(
+                "/vm/exec/enqueue_profile",
+                web::post().to(web_ui_vm::enqueue_vm_exec_profile),
             )
             .route("/vm/exec/queue/cancel", web::post().to(web_ui_vm::cancel_vm_exec_task))
             .route("/vm/exec/queue/run_next", web::post().to(web_ui_vm::run_next_vm_exec))

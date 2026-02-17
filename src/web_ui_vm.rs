@@ -15,10 +15,11 @@ use crate::web_ui_authz;
 use crate::web_ui_models::{
     VmActionPayload, VmActionResponse, VmBootstrapPayload, VmCapability, VmClonePayload,
     VmDeletePayload, VmExecCancelPayload, VmExecCancelResponse, VmExecPayload, VmExecResponse,
-    VmExecBatchTaskPayload, VmExecEnqueueBatchPayload, VmExecEnqueuePayload, VmExecQueueItem,
-    VmInstance, VmLogQuery, VmLogsResponse, VmProvisionPayload, VmQueueCancelPayload, VmQueueQuery,
-    VmQueueResponse, VmQueueStatsResponse, VmReadyQuery, VmReadyResponse, VmSnapshotEntry,
-    VmSnapshotListQuery, VmSnapshotListResponse, VmSnapshotPayload, VmStateStore, VmStatusResponse,
+    VmExecBatchTaskPayload, VmExecEnqueueBatchPayload, VmExecEnqueuePayload,
+    VmExecEnqueueProfilePayload, VmExecProfilesResponse, VmExecQueueItem, VmInstance, VmLogQuery,
+    VmLogsResponse, VmProvisionPayload, VmQueueCancelPayload, VmQueueQuery, VmQueueResponse,
+    VmQueueStatsResponse, VmReadyQuery, VmReadyResponse, VmSnapshotEntry, VmSnapshotListQuery,
+    VmSnapshotListResponse, VmSnapshotPayload, VmStateStore, VmStatusResponse,
 };
 
 const VM_DIR: &str = "vm";
@@ -210,6 +211,117 @@ fn normalize_batch_task(
         priority,
         retry_max,
     ))
+}
+
+fn vm_exec_profiles() -> &'static [&'static str] {
+    &[
+        "rust-self-debug-basic",
+        "python-self-debug-basic",
+        "node-self-debug-basic",
+    ]
+}
+
+fn build_profile_batch_tasks(profile: &str) -> Option<Vec<VmExecBatchTaskPayload>> {
+    match profile.trim() {
+        "rust-self-debug-basic" => Some(vec![
+            VmExecBatchTaskPayload {
+                command: "pwd".to_string(),
+                timeout_sec: 0,
+                wait_ready_sec: 0,
+                priority: 0,
+                retry_max: 0,
+            },
+            VmExecBatchTaskPayload {
+                command: "git status --short".to_string(),
+                timeout_sec: 0,
+                wait_ready_sec: 0,
+                priority: 0,
+                retry_max: 0,
+            },
+            VmExecBatchTaskPayload {
+                command: "bash scripts/run_tests.sh".to_string(),
+                timeout_sec: 0,
+                wait_ready_sec: 0,
+                priority: 0,
+                retry_max: 0,
+            },
+            VmExecBatchTaskPayload {
+                command: "cargo check".to_string(),
+                timeout_sec: 0,
+                wait_ready_sec: 0,
+                priority: 0,
+                retry_max: 0,
+            },
+            VmExecBatchTaskPayload {
+                command: "cargo test -q".to_string(),
+                timeout_sec: 0,
+                wait_ready_sec: 0,
+                priority: 0,
+                retry_max: 0,
+            },
+        ]),
+        "python-self-debug-basic" => Some(vec![
+            VmExecBatchTaskPayload {
+                command: "pwd".to_string(),
+                timeout_sec: 0,
+                wait_ready_sec: 0,
+                priority: 0,
+                retry_max: 0,
+            },
+            VmExecBatchTaskPayload {
+                command: "git status --short".to_string(),
+                timeout_sec: 0,
+                wait_ready_sec: 0,
+                priority: 0,
+                retry_max: 0,
+            },
+            VmExecBatchTaskPayload {
+                command: "python3 -m pip --version".to_string(),
+                timeout_sec: 0,
+                wait_ready_sec: 0,
+                priority: 0,
+                retry_max: 0,
+            },
+            VmExecBatchTaskPayload {
+                command: "python3 -m pytest -q".to_string(),
+                timeout_sec: 0,
+                wait_ready_sec: 0,
+                priority: 0,
+                retry_max: 0,
+            },
+        ]),
+        "node-self-debug-basic" => Some(vec![
+            VmExecBatchTaskPayload {
+                command: "pwd".to_string(),
+                timeout_sec: 0,
+                wait_ready_sec: 0,
+                priority: 0,
+                retry_max: 0,
+            },
+            VmExecBatchTaskPayload {
+                command: "git status --short".to_string(),
+                timeout_sec: 0,
+                wait_ready_sec: 0,
+                priority: 0,
+                retry_max: 0,
+            },
+            VmExecBatchTaskPayload {
+                command: "npm --version".to_string(),
+                timeout_sec: 0,
+                wait_ready_sec: 0,
+                priority: 0,
+                retry_max: 0,
+            },
+            VmExecBatchTaskPayload {
+                command: "npm test -- --watch=false".to_string(),
+                timeout_sec: 0,
+                wait_ready_sec: 0,
+                priority: 0,
+                retry_max: 0,
+            },
+        ]),
+        _ => None,
+    }
 }
 
 fn try_acquire_worker_lock(managed_root_dir: &str, vm_name: &str) -> bool {
@@ -1827,6 +1939,89 @@ pub(crate) async fn enqueue_vm_exec_batch(
         &ctx.managed_root_dir,
         &name,
         &format!("exec batch enqueued tasks={added}"),
+    );
+    spawn_vm_exec_worker(
+        ctx.managed_root_dir.clone(),
+        name.clone(),
+        data.projects_lock.clone(),
+    );
+    HttpResponse::Ok().json(VmQueueResponse { name, items })
+}
+
+pub(crate) async fn list_vm_exec_profiles(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+) -> impl Responder {
+    let _ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    HttpResponse::Ok().json(VmExecProfilesResponse {
+        profiles: vm_exec_profiles().iter().map(|s| s.to_string()).collect(),
+    })
+}
+
+pub(crate) async fn enqueue_vm_exec_profile(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+    body: web::Json<VmExecEnqueueProfilePayload>,
+) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if !ctx.can_write {
+        return HttpResponse::Forbidden().body("read-only session");
+    }
+    let name = match sanitize_vm_name(&body.name) {
+        Some(v) => v,
+        None => return HttpResponse::BadRequest().body("invalid vm name"),
+    };
+    let profile = body.profile.trim();
+    if profile.is_empty() {
+        return HttpResponse::BadRequest().body("profile is empty");
+    }
+    let Some(tasks) = build_profile_batch_tasks(profile) else {
+        return HttpResponse::BadRequest().body("unknown profile");
+    };
+    let default_timeout_sec = if body.timeout_sec == 0 {
+        30
+    } else {
+        body.timeout_sec.clamp(1, 3600)
+    };
+    let default_wait_ready_sec = body.wait_ready_sec.clamp(0, 600);
+    let default_priority = body.priority.clamp(-100, 100);
+    let default_retry_max = body.retry_max.clamp(0, 10);
+
+    let _guard = lock_recover(&data.projects_lock, "projects_lock");
+    let state = load_vm_state(&ctx.managed_root_dir);
+    if !state.vms.contains_key(&name) {
+        return HttpResponse::NotFound().body("vm not found");
+    }
+    let mut items = load_exec_queue(&ctx.managed_root_dir, &name);
+    let mut added = 0usize;
+    for task in &tasks {
+        if let Some(item) = normalize_batch_task(
+            task,
+            default_timeout_sec,
+            default_wait_ready_sec,
+            default_priority,
+            default_retry_max,
+        ) {
+            items.push(item);
+            added += 1;
+        }
+    }
+    if added == 0 {
+        return HttpResponse::BadRequest().body("profile has no runnable command");
+    }
+    if let Err(e) = save_exec_queue(&ctx.managed_root_dir, &name, &items) {
+        return HttpResponse::InternalServerError().body(format!("save queue failed: {e}"));
+    }
+    append_vm_log(
+        &ctx.managed_root_dir,
+        &name,
+        &format!("exec profile enqueued profile={profile} tasks={added}"),
     );
     spawn_vm_exec_worker(
         ctx.managed_root_dir.clone(),
