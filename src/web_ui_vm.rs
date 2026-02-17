@@ -10,6 +10,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use wait_timeout::ChildExt;
 
+use crate::auth::AccountRole;
 use crate::lock_utils::lock_recover;
 use crate::web_ui::AppState;
 use crate::web_ui_authz;
@@ -43,6 +44,10 @@ const VM_PROFILES_FILE: &str = "vm_exec_profiles.json";
 const VM_STRATEGY_RULES_FILE: &str = "vm_self_debug_strategy_rules.json";
 const VM_HISTORY_SUFFIX: &str = ".self_debug.history.json";
 const VM_HISTORY_MAX_ENTRIES: usize = 200;
+const VM_MAX_INSTANCES_USER: usize = 4;
+const VM_MAX_INSTANCES_ADMIN: usize = 16;
+const VM_QUEUE_MAX_ITEMS_USER: usize = 400;
+const VM_QUEUE_MAX_ITEMS_ADMIN: usize = 2000;
 
 fn now_unix() -> u64 {
     SystemTime::now()
@@ -109,6 +114,34 @@ fn vm_exec_worker_lock_path(managed_root_dir: &str, vm_name: &str) -> PathBuf {
 
 fn vm_self_debug_history_path(managed_root_dir: &str, vm_name: &str) -> PathBuf {
     vm_runtime_dir(managed_root_dir).join(format!("{vm_name}{VM_HISTORY_SUFFIX}"))
+}
+
+fn vm_instance_limit_by_role(role: &AccountRole) -> usize {
+    match role {
+        AccountRole::Admin => VM_MAX_INSTANCES_ADMIN,
+        AccountRole::User | AccountRole::Guest => VM_MAX_INSTANCES_USER,
+    }
+}
+
+fn vm_queue_limit_by_role(role: &AccountRole) -> usize {
+    match role {
+        AccountRole::Admin => VM_QUEUE_MAX_ITEMS_ADMIN,
+        AccountRole::User | AccountRole::Guest => VM_QUEUE_MAX_ITEMS_USER,
+    }
+}
+
+fn ensure_queue_capacity(existing: usize, adding: usize, limit: usize) -> Result<(), String> {
+    if adding == 0 {
+        return Ok(());
+    }
+    let next = existing.saturating_add(adding);
+    if next > limit {
+        return Err(format!(
+            "vm exec queue limit exceeded: current={} adding={} limit={}",
+            existing, adding, limit
+        ));
+    }
+    Ok(())
 }
 
 fn append_vm_log(managed_root_dir: &str, vm_name: &str, line: &str) {
@@ -2885,6 +2918,10 @@ pub(crate) async fn enqueue_vm_exec(
         return HttpResponse::NotFound().body("vm not found");
     }
     let mut items = load_exec_queue(&ctx.managed_root_dir, &name);
+    let queue_limit = vm_queue_limit_by_role(&ctx.role);
+    if let Err(e) = ensure_queue_capacity(items.len(), 1, queue_limit) {
+        return HttpResponse::TooManyRequests().body(e);
+    }
     items.push(queue_item_from_values(
         cmd,
         timeout_sec,
@@ -2938,7 +2975,7 @@ pub(crate) async fn enqueue_vm_exec_batch(
         return HttpResponse::NotFound().body("vm not found");
     }
     let mut items = load_exec_queue(&ctx.managed_root_dir, &name);
-    let mut added = 0usize;
+    let mut new_items: Vec<VmExecQueueItem> = Vec::new();
     for task in &body.tasks {
         if let Some(item) = normalize_batch_task(
             task,
@@ -2947,13 +2984,18 @@ pub(crate) async fn enqueue_vm_exec_batch(
             default_priority,
             default_retry_max,
         ) {
-            items.push(item);
-            added += 1;
+            new_items.push(item);
         }
     }
+    let added = new_items.len();
     if added == 0 {
         return HttpResponse::BadRequest().body("no valid command in tasks");
     }
+    let queue_limit = vm_queue_limit_by_role(&ctx.role);
+    if let Err(e) = ensure_queue_capacity(items.len(), added, queue_limit) {
+        return HttpResponse::TooManyRequests().body(e);
+    }
+    items.extend(new_items);
     if let Err(e) = save_exec_queue(&ctx.managed_root_dir, &name, &items) {
         return HttpResponse::InternalServerError().body(format!("save queue failed: {e}"));
     }
@@ -3140,7 +3182,7 @@ pub(crate) async fn enqueue_vm_exec_profile(
         return HttpResponse::NotFound().body("vm not found");
     }
     let mut items = load_exec_queue(&ctx.managed_root_dir, &name);
-    let mut added = 0usize;
+    let mut new_items: Vec<VmExecQueueItem> = Vec::new();
     for task in &tasks {
         if let Some(item) = normalize_batch_task(
             task,
@@ -3149,13 +3191,18 @@ pub(crate) async fn enqueue_vm_exec_profile(
             default_priority,
             default_retry_max,
         ) {
-            items.push(item);
-            added += 1;
+            new_items.push(item);
         }
     }
+    let added = new_items.len();
     if added == 0 {
         return HttpResponse::BadRequest().body("profile has no runnable command");
     }
+    let queue_limit = vm_queue_limit_by_role(&ctx.role);
+    if let Err(e) = ensure_queue_capacity(items.len(), added, queue_limit) {
+        return HttpResponse::TooManyRequests().body(e);
+    }
+    items.extend(new_items);
     if let Err(e) = save_exec_queue(&ctx.managed_root_dir, &name, &items) {
         return HttpResponse::InternalServerError().body(format!("save queue failed: {e}"));
     }
@@ -3250,7 +3297,7 @@ pub(crate) async fn start_vm_self_debug_plan(
         return HttpResponse::NotFound().body("vm not found");
     }
     let mut items = load_exec_queue(&ctx.managed_root_dir, &name);
-    let mut added = 0usize;
+    let mut new_items: Vec<VmExecQueueItem> = Vec::new();
     for task in &tasks {
         if let Some(mut item) = normalize_batch_task(
             task,
@@ -3262,13 +3309,18 @@ pub(crate) async fn start_vm_self_debug_plan(
             item.run_id = run_id.clone();
             item.run_kind = "self_debug".to_string();
             item.run_max_runtime_sec = run_max_runtime_sec;
-            items.push(item);
-            added += 1;
+            new_items.push(item);
         }
     }
+    let added = new_items.len();
     if added == 0 {
         return HttpResponse::BadRequest().body("self-debug plan has no runnable command");
     }
+    let queue_limit = vm_queue_limit_by_role(&ctx.role);
+    if let Err(e) = ensure_queue_capacity(items.len(), added, queue_limit) {
+        return HttpResponse::TooManyRequests().body(e);
+    }
+    items.extend(new_items);
     if let Err(e) = save_exec_queue(&ctx.managed_root_dir, &name, &items) {
         return HttpResponse::InternalServerError().body(format!("save queue failed: {e}"));
     }
@@ -3952,6 +4004,11 @@ pub(crate) async fn provision_vm(
     if state.vms.contains_key(&name) {
         return HttpResponse::Conflict().body("vm already exists");
     }
+    let vm_limit = vm_instance_limit_by_role(&ctx.role);
+    if state.vms.len() >= vm_limit {
+        return HttpResponse::TooManyRequests()
+            .body(format!("vm instance limit exceeded: limit={vm_limit}"));
+    }
 
     let cpu = default_cpu(body.cpu);
     let memory_mb = default_memory_mb(body.memory_mb);
@@ -4230,9 +4287,11 @@ mod tests {
 
     use super::{
         archive_completed_self_debug_runs, collect_self_debug_runs, default_cpu, default_disk_gb,
-        default_memory_mb, enforce_self_debug_run_timeout, normalize_backend, queue_item_from_values,
-        load_exec_queue, now_unix, sanitize_self_debug_run_id, sanitize_vm_name, save_exec_queue,
-        save_vm_state, strategy_priority_boost_by_stats, trim_history_entries, VmSelfDebugHistoryEntry,
+        default_memory_mb, enforce_self_debug_run_timeout, ensure_queue_capacity, normalize_backend,
+        queue_item_from_values, load_exec_queue, now_unix, sanitize_self_debug_run_id,
+        sanitize_vm_name, save_exec_queue, save_vm_state, strategy_priority_boost_by_stats,
+        trim_history_entries, vm_instance_limit_by_role, vm_queue_limit_by_role,
+        VmSelfDebugHistoryEntry,
     };
 
     #[test]
@@ -4473,6 +4532,20 @@ mod tests {
         assert_eq!(history[0].failed_steps, 1);
         assert!(history[0].context_text.contains("run_id=sd-fail"));
         assert!(history[0].context_text.contains("key_failure_lines"));
+    }
+
+    #[test]
+    fn role_limits_and_capacity_checks_work() {
+        assert!(
+            vm_instance_limit_by_role(&crate::auth::AccountRole::Admin)
+                > vm_instance_limit_by_role(&crate::auth::AccountRole::User)
+        );
+        assert!(
+            vm_queue_limit_by_role(&crate::auth::AccountRole::Admin)
+                > vm_queue_limit_by_role(&crate::auth::AccountRole::User)
+        );
+        assert!(ensure_queue_capacity(10, 5, 20).is_ok());
+        assert!(ensure_queue_capacity(20, 1, 20).is_err());
     }
 
     #[actix_web::test]
