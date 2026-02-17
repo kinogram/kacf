@@ -953,6 +953,14 @@ pub async fn run_web_server(
                 "/vm/exec/enqueue_profile",
                 web::post().to(web_ui_vm::enqueue_vm_exec_profile),
             )
+            .route(
+                "/vm/self_debug/plan",
+                web::post().to(web_ui_vm::preview_vm_self_debug_plan),
+            )
+            .route(
+                "/vm/self_debug/start",
+                web::post().to(web_ui_vm::start_vm_self_debug_plan),
+            )
             .route("/vm/exec/queue/cancel", web::post().to(web_ui_vm::cancel_vm_exec_task))
             .route("/vm/exec/queue/run_next", web::post().to(web_ui_vm::run_next_vm_exec))
             .route("/vm/ready", web::get().to(web_ui_vm::check_vm_ready))

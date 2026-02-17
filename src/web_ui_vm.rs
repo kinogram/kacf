@@ -21,8 +21,9 @@ use crate::web_ui_models::{
     VmExecProfileDetailResponse, VmExecProfilePreviewQuery, VmExecProfilePreviewResponse,
     VmExecProfilesResponse, VmExecQueueItem, VmExecResponse, VmInstance, VmLogQuery,
     VmLogsResponse, VmProvisionPayload, VmQueueCancelPayload, VmQueueQuery, VmQueueResponse,
-    VmQueueStatsResponse, VmReadyQuery, VmReadyResponse, VmSnapshotEntry, VmSnapshotListQuery,
-    VmSnapshotListResponse, VmSnapshotPayload, VmStateStore, VmStatusResponse,
+    VmQueueStatsResponse, VmReadyQuery, VmReadyResponse, VmSelfDebugPlanPayload,
+    VmSelfDebugPlanResponse, VmSnapshotEntry, VmSnapshotListQuery, VmSnapshotListResponse,
+    VmSnapshotPayload, VmStateStore, VmStatusResponse,
 };
 
 const VM_DIR: &str = "vm";
@@ -494,6 +495,70 @@ fn build_profile_batch_tasks(
     } else {
         Some(out)
     }
+}
+
+fn default_test_cmd_for_profile(profile: &str) -> &'static str {
+    match profile.trim() {
+        "python-self-debug-basic" => "python3 -m pytest -q",
+        "node-self-debug-basic" => "npm test -- --watch=false",
+        _ => "bash scripts/run_tests.sh",
+    }
+}
+
+fn build_self_debug_tasks(
+    body: &VmSelfDebugPlanPayload,
+) -> Result<Vec<VmExecBatchTaskPayload>, String> {
+    let profile = if body.profile.trim().is_empty() {
+        "rust-self-debug-basic".to_string()
+    } else {
+        body.profile.trim().to_string()
+    };
+    let cycles = if body.cycles == 0 {
+        3
+    } else {
+        body.cycles.clamp(1, 30)
+    };
+    let workdir = normalize_profile_workdir(&body.workdir);
+    if !body.workdir.trim().is_empty() && workdir.is_none() {
+        return Err("invalid workdir: only [a-zA-Z0-9_./-], must start with / or .".to_string());
+    }
+    let test_cmd = if body.test_cmd.trim().is_empty() {
+        default_test_cmd_for_profile(&profile).to_string()
+    } else {
+        body.test_cmd.trim().to_string()
+    };
+    let fix_cmd = body.fix_cmd.trim();
+    if fix_cmd.is_empty() {
+        return Err("fix_cmd is required for self-debug plan".to_string());
+    }
+    let verify_cmd = if body.verify_cmd.trim().is_empty() {
+        test_cmd.clone()
+    } else {
+        body.verify_cmd.trim().to_string()
+    };
+    let wd = workdir.as_deref();
+    let mut out = Vec::new();
+    for i in 1..=cycles {
+        let start_line = format!("echo '[self-debug] cycle {i}/{cycles} start'");
+        let end_line = format!("echo '[self-debug] cycle {i}/{cycles} end'");
+        let cmds = [
+            start_line.as_str(),
+            test_cmd.as_str(),
+            fix_cmd,
+            verify_cmd.as_str(),
+            end_line.as_str(),
+        ];
+        for cmd in cmds {
+            out.push(VmExecBatchTaskPayload {
+                command: prepend_workdir(cmd, wd),
+                timeout_sec: 0,
+                wait_ready_sec: 0,
+                priority: 0,
+                retry_max: 0,
+            });
+        }
+    }
+    Ok(out)
 }
 
 fn try_acquire_worker_lock(managed_root_dir: &str, vm_name: &str) -> bool {
@@ -2320,6 +2385,103 @@ pub(crate) async fn enqueue_vm_exec_profile(
         data.projects_lock.clone(),
     );
     HttpResponse::Ok().json(VmQueueResponse { name, items })
+}
+
+pub(crate) async fn preview_vm_self_debug_plan(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+    body: web::Json<VmSelfDebugPlanPayload>,
+) -> impl Responder {
+    let _ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    let name = match sanitize_vm_name(&body.name) {
+        Some(v) => v,
+        None => return HttpResponse::BadRequest().body("invalid vm name"),
+    };
+    let tasks = match build_self_debug_tasks(&body) {
+        Ok(v) => v,
+        Err(e) => return HttpResponse::BadRequest().body(e),
+    };
+    HttpResponse::Ok().json(VmSelfDebugPlanResponse {
+        name,
+        total_tasks: tasks.len(),
+        tasks: tasks.into_iter().map(|x| x.command).collect(),
+        message: "self-debug plan generated".to_string(),
+    })
+}
+
+pub(crate) async fn start_vm_self_debug_plan(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+    body: web::Json<VmSelfDebugPlanPayload>,
+) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if !ctx.can_write {
+        return HttpResponse::Forbidden().body("read-only session");
+    }
+    let name = match sanitize_vm_name(&body.name) {
+        Some(v) => v,
+        None => return HttpResponse::BadRequest().body("invalid vm name"),
+    };
+    let tasks = match build_self_debug_tasks(&body) {
+        Ok(v) => v,
+        Err(e) => return HttpResponse::BadRequest().body(e),
+    };
+    let default_timeout_sec = if body.timeout_sec == 0 {
+        120
+    } else {
+        body.timeout_sec.clamp(1, 3600)
+    };
+    let default_wait_ready_sec = body.wait_ready_sec.clamp(0, 600);
+    let default_priority = body.priority.clamp(-100, 100);
+    let default_retry_max = body.retry_max.clamp(0, 10);
+
+    let _guard = lock_recover(&data.projects_lock, "projects_lock");
+    let state = load_vm_state(&ctx.managed_root_dir);
+    if !state.vms.contains_key(&name) {
+        return HttpResponse::NotFound().body("vm not found");
+    }
+    let mut items = load_exec_queue(&ctx.managed_root_dir, &name);
+    let mut added = 0usize;
+    for task in &tasks {
+        if let Some(item) = normalize_batch_task(
+            task,
+            default_timeout_sec,
+            default_wait_ready_sec,
+            default_priority,
+            default_retry_max,
+        ) {
+            items.push(item);
+            added += 1;
+        }
+    }
+    if added == 0 {
+        return HttpResponse::BadRequest().body("self-debug plan has no runnable command");
+    }
+    if let Err(e) = save_exec_queue(&ctx.managed_root_dir, &name, &items) {
+        return HttpResponse::InternalServerError().body(format!("save queue failed: {e}"));
+    }
+    append_vm_log(
+        &ctx.managed_root_dir,
+        &name,
+        &format!("self-debug plan enqueued tasks={added}"),
+    );
+    spawn_vm_exec_worker(
+        ctx.managed_root_dir.clone(),
+        name.clone(),
+        data.projects_lock.clone(),
+    );
+    HttpResponse::Ok().json(VmSelfDebugPlanResponse {
+        name,
+        total_tasks: tasks.len(),
+        tasks: tasks.into_iter().map(|x| x.command).collect(),
+        message: "self-debug plan enqueued".to_string(),
+    })
 }
 
 pub(crate) async fn cancel_vm_exec_task(

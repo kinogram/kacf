@@ -315,6 +315,25 @@
                     <label for="vm_exec_custom_profile_commands" id="label_vm_exec_custom_profile_commands"></label>
                     <textarea id="vm_exec_custom_profile_commands" rows="4" placeholder=""></textarea>
                 </div>
+                <div class="row two" style="margin-top:10px;">
+                    <div>
+                        <label for="vm_self_debug_cycles" id="label_vm_self_debug_cycles"></label>
+                        <input id="vm_self_debug_cycles" type="text" value="3">
+                    </div>
+                    <div>
+                        <label for="vm_self_debug_fix_cmd" id="label_vm_self_debug_fix_cmd"></label>
+                        <input id="vm_self_debug_fix_cmd" type="text" placeholder="">
+                    </div>
+                </div>
+                <div style="margin-top:10px;">
+                    <label for="vm_self_debug_verify_cmd" id="label_vm_self_debug_verify_cmd"></label>
+                    <input id="vm_self_debug_verify_cmd" type="text" placeholder="">
+                </div>
+                <div class="buttons" style="margin-top:8px;">
+                    <button class="btn-ghost" id="vm_self_debug_preview_btn"></button>
+                    <button class="btn-ghost" id="vm_self_debug_start_btn"></button>
+                </div>
+                <pre id="vm_self_debug_plan" style="max-height:140px;overflow:auto;"></pre>
                 <div style="margin-top:10px;">
                     <label for="vm_exec_batch_commands" id="label_vm_exec_batch_commands"></label>
                     <textarea id="vm_exec_batch_commands" rows="4" placeholder=""></textarea>

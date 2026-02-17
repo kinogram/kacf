@@ -118,6 +118,8 @@ const BACKEND_COMM_BUTTON_IDS = [
     'vm_exec_custom_profile_load_btn',
     'vm_exec_custom_profile_save_btn',
     'vm_exec_custom_profile_delete_btn',
+    'vm_self_debug_preview_btn',
+    'vm_self_debug_start_btn',
     'vm_exec_run_next_btn',
     'vm_exec_queue_refresh_btn',
     'vm_exec_queue_cancel_btn',

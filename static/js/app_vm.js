@@ -101,6 +101,12 @@ function setVmExecProfilePreviewText(text) {
     node.textContent = text || '';
 }
 
+function setVmSelfDebugPlanText(text) {
+    const node = el('vm_self_debug_plan');
+    if (!node) return;
+    node.textContent = text || '';
+}
+
 function setVmMutatingDisabled(disabled) {
     [
         'vm_provision_btn',
@@ -121,12 +127,17 @@ function setVmMutatingDisabled(disabled) {
         'vm_exec_custom_profile_load_btn',
         'vm_exec_custom_profile_save_btn',
         'vm_exec_custom_profile_delete_btn',
+        'vm_self_debug_preview_btn',
+        'vm_self_debug_start_btn',
         'vm_exec_run_next_btn',
         'vm_exec_queue_refresh_btn',
         'vm_exec_queue_cancel_btn',
         'vm_exec_profile',
         'vm_exec_custom_profile_name',
         'vm_exec_custom_profile_commands',
+        'vm_self_debug_cycles',
+        'vm_self_debug_fix_cmd',
+        'vm_self_debug_verify_cmd',
     ].forEach((id) => {
         const node = el(id);
         if (node) node.disabled = !!disabled;
@@ -262,6 +273,22 @@ function profileWorkdirInput() {
 
 function profileTestCmdInput() {
     return String(el('vm_exec_profile_test_cmd')?.value || '').trim();
+}
+
+function collectVmSelfDebugPayload() {
+    return {
+        name: selectedVmName(),
+        profile: String(el('vm_exec_profile')?.value || '').trim(),
+        cycles: asBoundedInt(el('vm_self_debug_cycles')?.value, 1, 30, 3),
+        workdir: profileWorkdirInput(),
+        test_cmd: profileTestCmdInput(),
+        fix_cmd: String(el('vm_self_debug_fix_cmd')?.value || '').trim(),
+        verify_cmd: String(el('vm_self_debug_verify_cmd')?.value || '').trim(),
+        timeout_sec: asBoundedInt(el('vm_exec_timeout_sec')?.value, 1, 3600, 120),
+        wait_ready_sec: asBoundedInt(el('vm_exec_wait_ready_sec')?.value, 0, 600, 0),
+        priority: asBoundedSignedInt(el('vm_exec_priority')?.value, -100, 100, 0),
+        retry_max: asBoundedInt(el('vm_exec_retry_max')?.value, 0, 10, 0),
+    };
 }
 
 async function createVmSnapshot() {
@@ -591,6 +618,50 @@ async function deleteCustomProfile() {
         setStatus(fmt('status_vm_custom_profile_deleted', 'Custom profile deleted: {name}', { name }), 'status-warn');
     } catch (e) {
         setStatus(fmt('status_vm_custom_profile_delete_failed', 'Delete custom profile failed: {error}', { error: String(e) }), 'status-danger');
+    }
+}
+
+async function previewVmSelfDebugPlan() {
+    const payload = collectVmSelfDebugPayload();
+    if (!payload.name) {
+        setStatus(txt('status_vm_target_required', 'Please select a VM first'), 'status-danger');
+        return;
+    }
+    if (!payload.fix_cmd) {
+        setStatus(txt('status_vm_self_debug_fix_required', 'Please enter fix command for self-debug plan.'), 'status-danger');
+        return;
+    }
+    try {
+        const data = await vmApi('/vm/self_debug/plan', 'POST', payload);
+        const list = Array.isArray(data?.tasks) ? data.tasks : [];
+        const lines = list.map((cmd, i) => `#${i + 1} ${String(cmd || '')}`);
+        setVmSelfDebugPlanText(lines.join('\n'));
+        setStatus(fmt('status_vm_self_debug_plan_ready', 'Self-debug plan ready ({count} tasks).', { count: list.length }), 'status-warn');
+    } catch (e) {
+        setStatus(fmt('status_vm_self_debug_plan_failed', 'Self-debug plan failed: {error}', { error: String(e) }), 'status-danger');
+        setVmSelfDebugPlanText(String(e));
+    }
+}
+
+async function startVmSelfDebugPlan() {
+    const payload = collectVmSelfDebugPayload();
+    if (!payload.name) {
+        setStatus(txt('status_vm_target_required', 'Please select a VM first'), 'status-danger');
+        return;
+    }
+    if (!payload.fix_cmd) {
+        setStatus(txt('status_vm_self_debug_fix_required', 'Please enter fix command for self-debug plan.'), 'status-danger');
+        return;
+    }
+    try {
+        const data = await vmApi('/vm/self_debug/start', 'POST', payload);
+        const list = Array.isArray(data?.tasks) ? data.tasks : [];
+        const lines = list.map((cmd, i) => `#${i + 1} ${String(cmd || '')}`);
+        setVmSelfDebugPlanText(lines.join('\n'));
+        setStatus(fmt('status_vm_self_debug_started', 'Self-debug plan queued ({count} tasks).', { count: list.length }), 'status-warn');
+        await refreshVmExecQueue();
+    } catch (e) {
+        setStatus(fmt('status_vm_self_debug_start_failed', 'Start self-debug plan failed: {error}', { error: String(e) }), 'status-danger');
     }
 }
 
@@ -950,6 +1021,8 @@ function bindVmEvents() {
     el('vm_exec_custom_profile_load_btn')?.addEventListener('click', loadSelectedProfileToEditor);
     el('vm_exec_custom_profile_save_btn')?.addEventListener('click', saveCustomProfile);
     el('vm_exec_custom_profile_delete_btn')?.addEventListener('click', deleteCustomProfile);
+    el('vm_self_debug_preview_btn')?.addEventListener('click', previewVmSelfDebugPlan);
+    el('vm_self_debug_start_btn')?.addEventListener('click', startVmSelfDebugPlan);
     el('vm_exec_run_next_btn')?.addEventListener('click', runNextVmExec);
     el('vm_exec_queue_refresh_btn')?.addEventListener('click', refreshVmExecQueue);
     el('vm_exec_queue_cancel_btn')?.addEventListener('click', cancelVmQueueTask);

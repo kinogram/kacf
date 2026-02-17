@@ -597,6 +597,39 @@ pub(crate) struct VmExecCustomProfileDeletePayload {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VmSelfDebugPlanPayload {
+    pub(crate) name: String,
+    #[serde(default)]
+    pub(crate) profile: String,
+    #[serde(default)]
+    pub(crate) cycles: u32,
+    #[serde(default)]
+    pub(crate) workdir: String,
+    #[serde(default)]
+    pub(crate) test_cmd: String,
+    #[serde(default)]
+    pub(crate) fix_cmd: String,
+    #[serde(default)]
+    pub(crate) verify_cmd: String,
+    #[serde(default)]
+    pub(crate) timeout_sec: u64,
+    #[serde(default)]
+    pub(crate) wait_ready_sec: u64,
+    #[serde(default)]
+    pub(crate) priority: i32,
+    #[serde(default)]
+    pub(crate) retry_max: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmSelfDebugPlanResponse {
+    pub(crate) name: String,
+    pub(crate) total_tasks: usize,
+    pub(crate) tasks: Vec<String>,
+    pub(crate) message: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub(crate) struct VmQueueCancelPayload {
     pub(crate) name: String,
     pub(crate) task_id: String,
