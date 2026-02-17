@@ -970,6 +970,10 @@ pub async fn run_web_server(
                 web::get().to(web_ui_vm::get_vm_self_debug_run_detail),
             )
             .route(
+                "/vm/self_debug/strategy_stats",
+                web::get().to(web_ui_vm::get_vm_self_debug_strategy_stats),
+            )
+            .route(
                 "/vm/self_debug/stop",
                 web::post().to(web_ui_vm::stop_vm_self_debug_run),
             )

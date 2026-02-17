@@ -119,6 +119,12 @@ function setVmSelfDebugRunDetailText(text) {
     node.textContent = text || '';
 }
 
+function setVmSelfDebugStrategyStatsText(text) {
+    const node = el('vm_self_debug_strategy_stats');
+    if (!node) return;
+    node.textContent = text || '';
+}
+
 function setVmSelfDebugTimelineText(text) {
     const node = el('vm_self_debug_timeline');
     if (!node) return;
@@ -204,6 +210,7 @@ function setVmMutatingDisabled(disabled) {
         'vm_self_debug_preview_btn',
         'vm_self_debug_start_btn',
         'vm_self_debug_runs_refresh_btn',
+        'vm_self_debug_stats_btn',
         'vm_self_debug_detail_btn',
         'vm_self_debug_stop_btn',
         'vm_exec_run_next_btn',
@@ -780,6 +787,34 @@ async function refreshVmSelfDebugRuns() {
     }
 }
 
+async function refreshVmSelfDebugStrategyStats() {
+    const name = selectedVmName();
+    if (!name) {
+        setVmSelfDebugStrategyStatsText('');
+        return;
+    }
+    try {
+        const data = await vmApi(`/vm/self_debug/strategy_stats?name=${encodeURIComponent(name)}`, 'GET');
+        const stats = Array.isArray(data?.stats) ? data.stats : [];
+        if (!stats.length) {
+            setVmSelfDebugStrategyStatsText(txt('vm_self_debug_strategy_stats_empty', 'No strategy stats yet.'));
+            return;
+        }
+        const lines = stats.map((s, i) => {
+            const cat = String(s?.category || '-');
+            const attempts = Number(s?.attempts || 0);
+            const ok = Number(s?.verified_success || 0);
+            const fail = Number(s?.verified_fail || 0);
+            const pending = Number(s?.pending || 0);
+            const rate = Number(s?.success_rate || 0).toFixed(1);
+            return `#${i + 1} cat=${cat} attempts=${attempts} ok=${ok} fail=${fail} pending=${pending} success=${rate}%`;
+        });
+        setVmSelfDebugStrategyStatsText(lines.join('\n'));
+    } catch (e) {
+        setVmSelfDebugStrategyStatsText(fmt('status_vm_self_debug_strategy_stats_failed', 'Load self-debug strategy stats failed: {error}', { error: String(e) }));
+    }
+}
+
 async function refreshVmSelfDebugRunDetail() {
     const name = selectedVmName();
     const runId = String(el('vm_self_debug_run_id')?.value || '').trim();
@@ -835,6 +870,7 @@ async function stopVmSelfDebugRun() {
         setStatus(txt('status_vm_self_debug_stop_ok', 'Self-debug stop requested.'), 'status-warn');
         await refreshVmExecQueue();
         await refreshVmSelfDebugRuns();
+        await refreshVmSelfDebugStrategyStats();
         await refreshVmSelfDebugRunDetail();
     } catch (e) {
         setStatus(fmt('status_vm_self_debug_stop_failed', 'Stop self-debug run failed: {error}', { error: String(e) }), 'status-danger');
@@ -1202,6 +1238,7 @@ function bindVmEvents() {
     el('vm_self_debug_preview_btn')?.addEventListener('click', previewVmSelfDebugPlan);
     el('vm_self_debug_start_btn')?.addEventListener('click', startVmSelfDebugPlan);
     el('vm_self_debug_runs_refresh_btn')?.addEventListener('click', refreshVmSelfDebugRuns);
+    el('vm_self_debug_stats_btn')?.addEventListener('click', refreshVmSelfDebugStrategyStats);
     el('vm_self_debug_detail_btn')?.addEventListener('click', refreshVmSelfDebugRunDetail);
     el('vm_self_debug_stop_btn')?.addEventListener('click', stopVmSelfDebugRun);
     el('vm_exec_run_next_btn')?.addEventListener('click', runNextVmExec);
@@ -1213,6 +1250,7 @@ function bindVmEvents() {
         await refreshVmExecQueue();
         await refreshVmLogs();
         await refreshVmSelfDebugRuns();
+        await refreshVmSelfDebugStrategyStats();
         await refreshVmSelfDebugRunDetail();
     });
     el('vm_exec_profile')?.addEventListener('change', previewVmExecProfile);
@@ -1246,6 +1284,7 @@ async function init(opts) {
     await refreshVmSnapshots();
     await refreshVmExecQueue();
     await refreshVmSelfDebugRuns();
+    await refreshVmSelfDebugStrategyStats();
     await refreshVmSelfDebugRunDetail();
 }
 

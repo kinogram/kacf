@@ -680,6 +680,22 @@ pub(crate) struct VmSelfDebugRunsResponse {
     pub(crate) runs: Vec<VmSelfDebugRunSummary>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmSelfDebugStrategyStat {
+    pub(crate) category: String,
+    pub(crate) attempts: usize,
+    pub(crate) verified_success: usize,
+    pub(crate) verified_fail: usize,
+    pub(crate) pending: usize,
+    pub(crate) success_rate: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmSelfDebugStrategyStatsResponse {
+    pub(crate) name: String,
+    pub(crate) stats: Vec<VmSelfDebugStrategyStat>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct VmSelfDebugRunDetailQuery {
     pub(crate) name: String,

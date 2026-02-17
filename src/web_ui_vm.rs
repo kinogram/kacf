@@ -24,8 +24,9 @@ use crate::web_ui_models::{
     VmQueueStatsResponse, VmReadyQuery, VmReadyResponse, VmSelfDebugPlanPayload,
     VmSelfDebugPlanResponse, VmSelfDebugRunDetailQuery, VmSelfDebugRunDetailResponse,
     VmSelfDebugRunSummary, VmSelfDebugRunTaskDetail, VmSelfDebugRunsQuery, VmSelfDebugRunsResponse,
-    VmSelfDebugStopPayload, VmSnapshotEntry, VmSnapshotListQuery, VmSnapshotListResponse,
-    VmSnapshotPayload, VmStateStore, VmStatusResponse,
+    VmSelfDebugStopPayload, VmSelfDebugStrategyStat, VmSelfDebugStrategyStatsResponse,
+    VmSnapshotEntry, VmSnapshotListQuery, VmSnapshotListResponse, VmSnapshotPayload, VmStateStore,
+    VmStatusResponse,
 };
 
 const VM_DIR: &str = "vm";
@@ -344,6 +345,58 @@ fn collect_self_debug_runs(items: &[VmExecQueueItem]) -> Vec<VmSelfDebugRunSumma
     }
     let mut out: Vec<VmSelfDebugRunSummary> = map.into_values().collect();
     out.sort_by(|a, b| b.updated_at_unix.cmp(&a.updated_at_unix).then_with(|| b.run_id.cmp(&a.run_id)));
+    out
+}
+
+fn collect_self_debug_strategy_stats(items: &[VmExecQueueItem]) -> Vec<VmSelfDebugStrategyStat> {
+    let mut trigger_category: BTreeMap<String, String> = BTreeMap::new();
+    for item in items {
+        if item.id.trim().is_empty() {
+            continue;
+        }
+        if !item.failure_category.trim().is_empty() {
+            trigger_category.insert(item.id.clone(), item.failure_category.clone());
+        }
+    }
+    let mut agg: BTreeMap<String, (usize, usize, usize, usize)> = BTreeMap::new();
+    for item in items {
+        if item.run_kind != "self_debug_verify_after_strategy" {
+            continue;
+        }
+        let trigger = item.trigger_task_id.trim();
+        let category = trigger_category
+            .get(trigger)
+            .cloned()
+            .unwrap_or_else(|| "unknown_failure".to_string());
+        let row = agg.entry(category).or_insert((0, 0, 0, 0));
+        row.0 += 1; // attempts
+        match item.status.as_str() {
+            "done" => row.1 += 1,
+            "failed" | "canceled" => row.2 += 1,
+            "pending" | "running" => row.3 += 1,
+            _ => {}
+        }
+    }
+    let mut out: Vec<VmSelfDebugStrategyStat> = agg
+        .into_iter()
+        .map(|(category, (attempts, ok, fail, pending))| {
+            let denom = ok + fail;
+            let rate = if denom == 0 {
+                0.0
+            } else {
+                (ok as f64) * 100.0 / (denom as f64)
+            };
+            VmSelfDebugStrategyStat {
+                category,
+                attempts,
+                verified_success: ok,
+                verified_fail: fail,
+                pending,
+                success_rate: rate,
+            }
+        })
+        .collect();
+    out.sort_by(|a, b| b.attempts.cmp(&a.attempts).then_with(|| a.category.cmp(&b.category)));
     out
 }
 
@@ -2868,6 +2921,25 @@ pub(crate) async fn get_vm_self_debug_run_detail(
         run_id: run_id.to_string(),
         tasks,
     })
+}
+
+pub(crate) async fn get_vm_self_debug_strategy_stats(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+    query: web::Query<VmSelfDebugRunsQuery>,
+) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    let name = match sanitize_vm_name(&query.name) {
+        Some(v) => v,
+        None => return HttpResponse::BadRequest().body("invalid vm name"),
+    };
+    let _guard = lock_recover(&data.projects_lock, "projects_lock");
+    let items = load_exec_queue(&ctx.managed_root_dir, &name);
+    let stats = collect_self_debug_strategy_stats(&items);
+    HttpResponse::Ok().json(VmSelfDebugStrategyStatsResponse { name, stats })
 }
 
 pub(crate) async fn stop_vm_self_debug_run(
