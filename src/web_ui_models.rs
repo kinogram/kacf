@@ -521,6 +521,10 @@ pub(crate) struct VmQueueStatsResponse {
     pub(crate) watchdog_recovered_total: usize,
     #[serde(default)]
     pub(crate) watchdog_last_recovered_unix: u64,
+    #[serde(default)]
+    pub(crate) oldest_pending_age_sec: u64,
+    #[serde(default)]
+    pub(crate) top_pending_effective_priority: i32,
 }
 
 #[derive(Debug, Clone, Serialize)]

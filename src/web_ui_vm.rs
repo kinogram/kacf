@@ -3215,6 +3215,19 @@ pub(crate) async fn vm_exec_queue_stats(
     let running_limit_all_vms = vm_exec_running_limit_by_role(&ctx.role);
     let (watchdog_recovered_total, watchdog_last_recovered_unix) =
         queue_watchdog_recovery_stats(&items);
+    let now = now_unix();
+    let oldest_pending_age_sec = items
+        .iter()
+        .filter(|x| x.status == "pending" && now >= x.next_run_after_unix)
+        .map(|x| now.saturating_sub(x.created_at_unix))
+        .max()
+        .unwrap_or(0);
+    let top_pending_effective_priority = items
+        .iter()
+        .filter(|x| x.status == "pending" && now >= x.next_run_after_unix)
+        .map(|x| effective_priority_with_aging(x, now))
+        .max()
+        .unwrap_or(-100);
     HttpResponse::Ok().json(VmQueueStatsResponse {
         name,
         total,
@@ -3229,6 +3242,8 @@ pub(crate) async fn vm_exec_queue_stats(
         running_limit_all_vms,
         watchdog_recovered_total,
         watchdog_last_recovered_unix,
+        oldest_pending_age_sec,
+        top_pending_effective_priority,
     })
 }
 

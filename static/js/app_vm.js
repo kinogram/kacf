@@ -1437,7 +1437,9 @@ async function refreshVmExecQueueStats() {
         const globalLimit = Number(s?.running_limit_all_vms || 0);
         const recoveredTotal = Number(s?.watchdog_recovered_total || 0);
         const recoveredLast = Number(s?.watchdog_last_recovered_unix || 0);
-        const extra = ` | GlobalRunning=${globalRunning}/${globalLimit} watchdogRecovered=${recoveredTotal} lastRecovered=${recoveredLast}`;
+        const oldestPendingAgeSec = Number(s?.oldest_pending_age_sec || 0);
+        const topPendingEffPriority = Number(s?.top_pending_effective_priority ?? -100);
+        const extra = ` | GlobalRunning=${globalRunning}/${globalLimit} watchdogRecovered=${recoveredTotal} lastRecovered=${recoveredLast} pendingOldest=${oldestPendingAgeSec}s pendingTopEffP=${topPendingEffPriority}`;
         setVmExecQueueStatsText(`${line}${extra}`);
     } catch (_e) {
         setVmExecQueueStatsText('');
