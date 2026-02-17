@@ -50,6 +50,8 @@ const VM_QUEUE_MAX_ITEMS_USER: usize = 400;
 const VM_QUEUE_MAX_ITEMS_ADMIN: usize = 2000;
 const VM_RUNNING_MAX_USER: usize = 2;
 const VM_RUNNING_MAX_ADMIN: usize = 8;
+const VM_EXEC_RUNNING_MAX_USER: usize = 4;
+const VM_EXEC_RUNNING_MAX_ADMIN: usize = 16;
 
 fn now_unix() -> u64 {
     SystemTime::now()
@@ -139,6 +141,13 @@ fn vm_running_limit_by_role(role: &AccountRole) -> usize {
     }
 }
 
+fn vm_exec_running_limit_by_role(role: &AccountRole) -> usize {
+    match role {
+        AccountRole::Admin => VM_EXEC_RUNNING_MAX_ADMIN,
+        AccountRole::User | AccountRole::Guest => VM_EXEC_RUNNING_MAX_USER,
+    }
+}
+
 fn ensure_queue_capacity(existing: usize, adding: usize, limit: usize) -> Result<(), String> {
     if adding == 0 {
         return Ok(());
@@ -211,6 +220,19 @@ fn save_exec_queue(
     fs::write(&tmp, text)?;
     fs::rename(tmp, path)?;
     Ok(())
+}
+
+fn count_running_exec_tasks_all_vms(managed_root_dir: &str, state: &VmStateStore) -> usize {
+    state
+        .vms
+        .keys()
+        .map(|vm_name| {
+            load_exec_queue(managed_root_dir, vm_name)
+                .iter()
+                .filter(|x| x.status == "running")
+                .count()
+        })
+        .sum()
 }
 
 fn queue_task_id() -> String {
@@ -1325,24 +1347,28 @@ fn run_next_vm_exec_core(
     managed_root_dir: &str,
     name: &str,
     projects_lock: &Arc<Mutex<()>>,
+    running_limit: usize,
 ) -> Result<Option<VmExecResponse>, String> {
     let (task_id, cmd, cmd_risk_level, cmd_risk_tags, timeout_sec, wait_ready_sec, ssh_user, ssh_port) = {
         let _guard = lock_recover(projects_lock, "projects_lock");
         let mut state = load_vm_state(managed_root_dir);
-        let Some(vm) = state.vms.get_mut(name) else {
-            return Err("vm not found".to_string());
+        let (ssh_user, ssh_port) = {
+            let Some(vm) = state.vms.get_mut(name) else {
+                return Err("vm not found".to_string());
+            };
+            reconcile_vm_power_state(managed_root_dir, vm);
+            if vm.backend != "qemu" {
+                return Err("vm exec queue only supports qemu backend".to_string());
+            }
+            if vm.power_state != "running" {
+                return Err("vm is not running".to_string());
+            }
+            let ssh_port = vm.ssh_port.unwrap_or(0);
+            if ssh_port == 0 {
+                return Err("vm ssh port is not set".to_string());
+            }
+            (normalize_ssh_user(&vm.ssh_user), ssh_port)
         };
-        reconcile_vm_power_state(managed_root_dir, vm);
-        if vm.backend != "qemu" {
-            return Err("vm exec queue only supports qemu backend".to_string());
-        }
-        if vm.power_state != "running" {
-            return Err("vm is not running".to_string());
-        }
-        let ssh_port = vm.ssh_port.unwrap_or(0);
-        if ssh_port == 0 {
-            return Err("vm ssh port is not set".to_string());
-        }
         let mut items = load_exec_queue(managed_root_dir, name);
         if items.iter().any(|x| x.status == "running") {
             return Ok(None);
@@ -1361,6 +1387,18 @@ fn run_next_vm_exec_core(
         let Some(idx) = pending_idx else {
             return Ok(None);
         };
+        let running_total = count_running_exec_tasks_all_vms(managed_root_dir, &state);
+        if running_total >= running_limit {
+            append_vm_log(
+                managed_root_dir,
+                name,
+                &format!(
+                    "exec concurrency limited: running_total={} limit={}",
+                    running_total, running_limit
+                ),
+            );
+            return Ok(None);
+        }
         items[idx].status = "running".to_string();
         items[idx].started_at_unix = now_unix();
         let task_id = items[idx].id.clone();
@@ -1382,7 +1420,7 @@ fn run_next_vm_exec_core(
             cmd_risk_tags,
             timeout_sec,
             wait_ready_sec,
-            normalize_ssh_user(&vm.ssh_user),
+            ssh_user,
             ssh_port,
         )
     };
@@ -1657,6 +1695,7 @@ fn run_next_vm_exec_core(
         name,
         &format!("queue run finished task_id={} exit={}", task_id, exec_resp.exit_code),
     );
+    wake_all_vm_exec_workers(managed_root_dir, projects_lock.clone(), running_limit);
     Ok(Some(exec_resp))
 }
 
@@ -1664,13 +1703,14 @@ fn spawn_vm_exec_worker(
     managed_root_dir: String,
     name: String,
     projects_lock: Arc<Mutex<()>>,
+    running_limit: usize,
 ) {
     if !try_acquire_worker_lock(&managed_root_dir, &name) {
         return;
     }
     thread::spawn(move || {
         loop {
-            match run_next_vm_exec_core(&managed_root_dir, &name, &projects_lock) {
+            match run_next_vm_exec_core(&managed_root_dir, &name, &projects_lock, running_limit) {
                 Ok(Some(_)) => continue,
                 Ok(None) => break,
                 Err(e) => {
@@ -1681,6 +1721,26 @@ fn spawn_vm_exec_worker(
         }
         release_worker_lock(&managed_root_dir, &name);
     });
+}
+
+fn wake_all_vm_exec_workers(
+    managed_root_dir: &str,
+    projects_lock: Arc<Mutex<()>>,
+    running_limit: usize,
+) {
+    let vm_names: Vec<String> = {
+        let _guard = lock_recover(&projects_lock, "projects_lock");
+        let state = load_vm_state(managed_root_dir);
+        state.vms.keys().cloned().collect()
+    };
+    for vm_name in vm_names {
+        spawn_vm_exec_worker(
+            managed_root_dir.to_string(),
+            vm_name,
+            projects_lock.clone(),
+            running_limit,
+        );
+    }
 }
 
 fn load_vm_state(managed_root_dir: &str) -> VmStateStore {
@@ -3041,10 +3101,12 @@ pub(crate) async fn enqueue_vm_exec(
         return HttpResponse::InternalServerError().body(format!("save queue failed: {e}"));
     }
     append_vm_log(&ctx.managed_root_dir, &name, "exec task enqueued");
+    let running_limit = vm_exec_running_limit_by_role(&ctx.role);
     spawn_vm_exec_worker(
         ctx.managed_root_dir.clone(),
         name.clone(),
         data.projects_lock.clone(),
+        running_limit,
     );
     HttpResponse::Ok().json(VmQueueResponse { name, items })
 }
@@ -3123,10 +3185,12 @@ pub(crate) async fn enqueue_vm_exec_batch(
         &name,
         &format!("exec batch enqueued tasks={added}"),
     );
+    let running_limit = vm_exec_running_limit_by_role(&ctx.role);
     spawn_vm_exec_worker(
         ctx.managed_root_dir.clone(),
         name.clone(),
         data.projects_lock.clone(),
+        running_limit,
     );
     HttpResponse::Ok().json(VmQueueResponse { name, items })
 }
@@ -3341,10 +3405,12 @@ pub(crate) async fn enqueue_vm_exec_profile(
         &name,
         &format!("exec profile enqueued profile={profile} tasks={added}"),
     );
+    let running_limit = vm_exec_running_limit_by_role(&ctx.role);
     spawn_vm_exec_worker(
         ctx.managed_root_dir.clone(),
         name.clone(),
         data.projects_lock.clone(),
+        running_limit,
     );
     HttpResponse::Ok().json(VmQueueResponse { name, items })
 }
@@ -3468,10 +3534,12 @@ pub(crate) async fn start_vm_self_debug_plan(
             }
         ),
     );
+    let running_limit = vm_exec_running_limit_by_role(&ctx.role);
     spawn_vm_exec_worker(
         ctx.managed_root_dir.clone(),
         name.clone(),
         data.projects_lock.clone(),
+        running_limit,
     );
     HttpResponse::Ok().json(VmSelfDebugPlanResponse {
         name,
@@ -3944,10 +4012,12 @@ pub(crate) async fn resume_vm_self_debug_run(
         return HttpResponse::InternalServerError().body(format!("save queue failed: {e}"));
     }
     if matched > 0 {
+        let running_limit = vm_exec_running_limit_by_role(&ctx.role);
         spawn_vm_exec_worker(
             ctx.managed_root_dir.clone(),
             name.clone(),
             data.projects_lock.clone(),
+            running_limit,
         );
     }
     append_vm_log(
@@ -4030,7 +4100,13 @@ pub(crate) async fn run_next_vm_exec(
         None => return HttpResponse::BadRequest().body("invalid vm name"),
     };
 
-    match run_next_vm_exec_core(&ctx.managed_root_dir, &name, &data.projects_lock) {
+    let running_limit = vm_exec_running_limit_by_role(&ctx.role);
+    match run_next_vm_exec_core(
+        &ctx.managed_root_dir,
+        &name,
+        &data.projects_lock,
+        running_limit,
+    ) {
         Ok(Some(resp)) => HttpResponse::Ok().json(resp),
         Ok(None) => HttpResponse::BadRequest().body("no runnable queued task"),
         Err(e) => HttpResponse::BadRequest().body(e),
@@ -4292,10 +4368,12 @@ pub(crate) async fn start_vm(
         return HttpResponse::InternalServerError().body(format!("save vm state failed: {e}"));
     }
     if effective {
+        let running_limit = vm_exec_running_limit_by_role(&ctx.role);
         spawn_vm_exec_worker(
             ctx.managed_root_dir.clone(),
             name.clone(),
             data.projects_lock.clone(),
+            running_limit,
         );
     }
     HttpResponse::Ok().json(VmActionResponse {
@@ -4438,7 +4516,7 @@ mod tests {
         load_exec_queue, normalize_backend, now_unix, queue_has_active_duplicate,
         queue_item_from_values, sanitize_self_debug_run_id, sanitize_vm_name, save_exec_queue, save_vm_state, strategy_priority_boost_by_stats,
         trim_history_entries, vm_instance_limit_by_role, vm_queue_limit_by_role,
-        vm_running_limit_by_role,
+        vm_running_limit_by_role, vm_exec_running_limit_by_role,
         VmSelfDebugHistoryEntry,
     };
 
@@ -4695,6 +4773,10 @@ mod tests {
         assert!(
             vm_running_limit_by_role(&crate::auth::AccountRole::Admin)
                 > vm_running_limit_by_role(&crate::auth::AccountRole::User)
+        );
+        assert!(
+            vm_exec_running_limit_by_role(&crate::auth::AccountRole::Admin)
+                > vm_exec_running_limit_by_role(&crate::auth::AccountRole::User)
         );
         assert!(ensure_queue_capacity(10, 5, 20).is_ok());
         assert!(ensure_queue_capacity(20, 1, 20).is_err());
