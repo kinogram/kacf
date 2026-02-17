@@ -4411,4 +4411,27 @@ mod tests {
         assert_eq!(entries[0].summary.run_id, "a");
         assert_eq!(entries[1].summary.run_id, "b");
     }
+
+    #[test]
+    fn archive_history_captures_context_snapshot() {
+        let mut failed = queue_item_from_values("bash scripts/run_tests.sh", 30, 0, 0, 0);
+        failed.run_id = "sd-fail".to_string();
+        failed.run_kind = "self_debug".to_string();
+        failed.status = "failed".to_string();
+        failed.failure_category = "test_failure".to_string();
+        failed.failure_key_lines = vec!["assertion failed: x != y".to_string()];
+        failed.output_preview = "stderr:\nassertion failed".to_string();
+        failed.message = "test failed".to_string();
+
+        let mut items = vec![failed];
+        let mut history = Vec::new();
+        let (runs, removed_tasks) = archive_completed_self_debug_runs(&mut items, &mut history, 300);
+        assert_eq!(runs, 1);
+        assert_eq!(removed_tasks, 1);
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].summary.run_id, "sd-fail");
+        assert_eq!(history[0].failed_steps, 1);
+        assert!(history[0].context_text.contains("run_id=sd-fail"));
+        assert!(history[0].context_text.contains("key_failure_lines"));
+    }
 }
