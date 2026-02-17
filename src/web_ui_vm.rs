@@ -18,7 +18,9 @@ use crate::web_ui_models::{
     VmActionPayload, VmActionResponse, VmBootstrapPayload, VmCapability, VmClonePayload,
     VmDeletePayload, VmExecBatchTaskPayload, VmExecCancelPayload, VmExecCancelResponse,
     VmExecCustomProfileDeletePayload, VmExecCustomProfileSavePayload, VmExecEnqueueBatchPayload,
-    VmExecDispatchResponse, VmExecEnqueuePayload, VmExecEnqueueProfilePayload, VmExecPayload, VmExecProfileDetailQuery,
+    VmExecDispatchResponse, VmExecDispatchTraceCandidate, VmExecDispatchTraceEntry,
+    VmExecDispatchTraceQuery, VmExecDispatchTraceResponse, VmExecEnqueuePayload,
+    VmExecEnqueueProfilePayload, VmExecPayload, VmExecProfileDetailQuery,
     VmExecProfileDetailResponse, VmExecProfilePreviewQuery, VmExecProfilePreviewResponse,
     VmExecProfilesResponse, VmExecQueueItem, VmExecResponse, VmInstance, VmLogQuery,
     VmLogsResponse, VmProvisionPayload, VmQueueCancelPayload, VmQueueQuery, VmQueueResponse,
@@ -44,6 +46,8 @@ const VM_PROFILES_FILE: &str = "vm_exec_profiles.json";
 const VM_STRATEGY_RULES_FILE: &str = "vm_self_debug_strategy_rules.json";
 const VM_HISTORY_SUFFIX: &str = ".self_debug.history.json";
 const VM_HISTORY_MAX_ENTRIES: usize = 200;
+const VM_DISPATCH_TRACE_FILE: &str = "vm_exec_dispatch.trace.json";
+const VM_DISPATCH_TRACE_MAX_ENTRIES: usize = 120;
 const VM_MAX_INSTANCES_USER: usize = 4;
 const VM_MAX_INSTANCES_ADMIN: usize = 16;
 const VM_QUEUE_MAX_ITEMS_USER: usize = 400;
@@ -93,6 +97,10 @@ fn vm_profiles_path(managed_root_dir: &str) -> PathBuf {
 
 fn vm_strategy_rules_path(managed_root_dir: &str) -> PathBuf {
     vm_root_path(managed_root_dir).join(VM_STRATEGY_RULES_FILE)
+}
+
+fn vm_dispatch_trace_path(managed_root_dir: &str) -> PathBuf {
+    vm_runtime_dir(managed_root_dir).join(VM_DISPATCH_TRACE_FILE)
 }
 
 fn vm_pid_path(managed_root_dir: &str, vm_name: &str) -> PathBuf {
@@ -223,6 +231,40 @@ fn save_exec_queue(
     fs::write(&tmp, text)?;
     fs::rename(tmp, path)?;
     Ok(())
+}
+
+fn load_dispatch_trace(managed_root_dir: &str) -> Vec<VmExecDispatchTraceEntry> {
+    let path = vm_dispatch_trace_path(managed_root_dir);
+    let text = match fs::read_to_string(path) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    serde_json::from_str::<Vec<VmExecDispatchTraceEntry>>(&text).unwrap_or_default()
+}
+
+fn save_dispatch_trace(
+    managed_root_dir: &str,
+    entries: &[VmExecDispatchTraceEntry],
+) -> std::io::Result<()> {
+    let path = vm_dispatch_trace_path(managed_root_dir);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let text = serde_json::to_string_pretty(entries)?;
+    let tmp = path.with_extension("tmp");
+    fs::write(&tmp, text)?;
+    fs::rename(tmp, path)?;
+    Ok(())
+}
+
+fn append_dispatch_trace_entry(managed_root_dir: &str, entry: VmExecDispatchTraceEntry) {
+    let mut entries = load_dispatch_trace(managed_root_dir);
+    entries.push(entry);
+    if entries.len() > VM_DISPATCH_TRACE_MAX_ENTRIES {
+        let drop_count = entries.len().saturating_sub(VM_DISPATCH_TRACE_MAX_ENTRIES);
+        entries.drain(0..drop_count);
+    }
+    let _ = save_dispatch_trace(managed_root_dir, &entries);
 }
 
 fn count_running_exec_tasks_all_vms(managed_root_dir: &str, state: &VmStateStore) -> usize {
@@ -1859,19 +1901,55 @@ fn dispatch_vm_exec_workers(
     projects_lock: Arc<Mutex<()>>,
     running_limit: usize,
 ) -> usize {
-    let vm_names: Vec<String> = {
+    let (vm_names, trace_entry): (Vec<String>, VmExecDispatchTraceEntry) = {
         let _guard = lock_recover(&projects_lock, "projects_lock");
         let state = load_vm_state(managed_root_dir);
         let running_total = count_running_exec_tasks_all_vms(managed_root_dir, &state);
         if running_total >= running_limit {
-            return 0;
+            (
+                Vec::new(),
+                VmExecDispatchTraceEntry {
+                    created_at_unix: now_unix(),
+                    running_total_before: running_total,
+                    running_limit,
+                    available_slots: 0,
+                    selected_vms: Vec::new(),
+                    candidates: Vec::new(),
+                },
+            )
+        } else {
+            let slots = running_limit.saturating_sub(running_total);
+            let now = now_unix();
+            let scores = select_dispatch_vm_candidates_with_score(managed_root_dir, &state, now);
+            let selected_vms: Vec<String> = scores
+                .iter()
+                .take(slots)
+                .map(|x| x.vm_name.clone())
+                .collect();
+            let candidates = scores
+                .iter()
+                .map(|x| VmExecDispatchTraceCandidate {
+                    vm_name: x.vm_name.clone(),
+                    base_priority: x.base_priority,
+                    effective_priority: x.effective_priority,
+                    oldest_pending_age_sec: x.oldest_pending_age_sec,
+                    selected: selected_vms.iter().any(|v| v == &x.vm_name),
+                })
+                .collect();
+            (
+                selected_vms.clone(),
+                VmExecDispatchTraceEntry {
+                    created_at_unix: now,
+                    running_total_before: running_total,
+                    running_limit,
+                    available_slots: slots,
+                    selected_vms,
+                    candidates,
+                },
+            )
         }
-        let slots = running_limit.saturating_sub(running_total);
-        if slots == 0 {
-            return 0;
-        }
-        select_dispatch_vm_candidates(managed_root_dir, &state, slots, now_unix())
     };
+    append_dispatch_trace_entry(managed_root_dir, trace_entry);
     let mut started = 0usize;
     for vm_name in vm_names {
         spawn_vm_exec_worker(
@@ -1885,37 +1963,60 @@ fn dispatch_vm_exec_workers(
     started
 }
 
-fn select_dispatch_vm_candidates(
+#[derive(Debug, Clone)]
+struct DispatchCandidateScore {
+    vm_name: String,
+    base_priority: i32,
+    effective_priority: i32,
+    oldest_pending_age_sec: u64,
+    oldest_created: u64,
+}
+
+fn select_dispatch_vm_candidates_with_score(
     managed_root_dir: &str,
     state: &VmStateStore,
-    slots: usize,
     now: u64,
-) -> Vec<String> {
-    let mut candidates: Vec<(i32, u64, String)> = Vec::new();
+) -> Vec<DispatchCandidateScore> {
+    let mut candidates: Vec<DispatchCandidateScore> = Vec::new();
     for vm_name in state.vms.keys() {
         let items = load_exec_queue(managed_root_dir, vm_name);
         if items.iter().any(|x| x.status == "running") {
             continue;
         }
-        let mut best_priority = -101;
+        let mut best_base_priority = -101;
+        let mut best_effective_priority = -101;
         let mut oldest_created = u64::MAX;
         for item in &items {
             if item.status != "pending" || now < item.next_run_after_unix {
                 continue;
             }
-            best_priority = best_priority.max(effective_priority_with_aging(item, now));
+            best_base_priority = best_base_priority.max(item.priority);
+            best_effective_priority =
+                best_effective_priority.max(effective_priority_with_aging(item, now));
             oldest_created = oldest_created.min(item.created_at_unix);
         }
-        if best_priority >= -100 {
-            candidates.push((best_priority, oldest_created, vm_name.clone()));
+        if best_effective_priority >= -100 {
+            let age = if oldest_created == u64::MAX {
+                0
+            } else {
+                now.saturating_sub(oldest_created)
+            };
+            candidates.push(DispatchCandidateScore {
+                vm_name: vm_name.clone(),
+                base_priority: best_base_priority,
+                effective_priority: best_effective_priority,
+                oldest_pending_age_sec: age,
+                oldest_created,
+            });
         }
     }
     candidates.sort_by(|a, b| {
-        b.0.cmp(&a.0)
-            .then_with(|| a.1.cmp(&b.1))
-            .then_with(|| a.2.cmp(&b.2))
+        b.effective_priority
+            .cmp(&a.effective_priority)
+            .then_with(|| a.oldest_created.cmp(&b.oldest_created))
+            .then_with(|| a.vm_name.cmp(&b.vm_name))
     });
-    candidates.into_iter().take(slots).map(|x| x.2).collect()
+    candidates
 }
 
 fn load_vm_state(managed_root_dir: &str) -> VmStateStore {
@@ -4322,6 +4423,22 @@ pub(crate) async fn dispatch_vm_exec(
     })
 }
 
+pub(crate) async fn get_vm_exec_dispatch_trace(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+    query: web::Query<VmExecDispatchTraceQuery>,
+) -> impl Responder {
+    let _ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    let limit = query.limit.unwrap_or(20).clamp(1, 100);
+    let mut entries = load_dispatch_trace(&_ctx.managed_root_dir);
+    entries.reverse();
+    entries.truncate(limit);
+    HttpResponse::Ok().json(VmExecDispatchTraceResponse { entries })
+}
+
 pub(crate) async fn check_vm_ready(
     req: HttpRequest,
     data: web::Data<AppState>,
@@ -4721,7 +4838,8 @@ mod tests {
         is_running_task_hard_timed_out, load_exec_queue, normalize_backend, now_unix,
         priority_aging_boost, queue_has_active_duplicate, queue_item_from_values,
         recover_stale_running_tasks_in_queue, sanitize_self_debug_run_id, sanitize_vm_name,
-        save_exec_queue, save_vm_state, select_dispatch_vm_candidates,
+        save_exec_queue, save_vm_state, select_dispatch_vm_candidates_with_score, load_dispatch_trace,
+        append_dispatch_trace_entry, VM_DISPATCH_TRACE_MAX_ENTRIES,
         strategy_priority_boost_by_stats, queue_watchdog_recovery_stats,
         trim_history_entries, vm_instance_limit_by_role, vm_queue_limit_by_role,
         vm_running_limit_by_role, vm_exec_running_limit_by_role,
@@ -5089,7 +5207,11 @@ mod tests {
         c.created_at_unix = now.saturating_sub(1);
         save_exec_queue(&managed_root, "vm-c", &[c]).expect("save queue c");
 
-        let top2 = select_dispatch_vm_candidates(&managed_root, &state_store, 2, now);
+        let top2: Vec<String> = select_dispatch_vm_candidates_with_score(&managed_root, &state_store, now)
+            .into_iter()
+            .take(2)
+            .map(|x| x.vm_name)
+            .collect();
         assert_eq!(top2, vec!["vm-c".to_string(), "vm-b".to_string()]);
     }
 
@@ -5143,8 +5265,37 @@ mod tests {
         low.created_at_unix = now.saturating_sub(16 * 60);
         save_exec_queue(&managed_root, "vm-old-low", &[low]).expect("save queue low");
 
-        let top = select_dispatch_vm_candidates(&managed_root, &state_store, 1, now);
+        let top: Vec<String> = select_dispatch_vm_candidates_with_score(&managed_root, &state_store, now)
+            .into_iter()
+            .take(1)
+            .map(|x| x.vm_name)
+            .collect();
         assert_eq!(top, vec!["vm-old-low".to_string()]);
+    }
+
+    #[test]
+    fn dispatch_trace_keeps_ring_buffer_size() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let managed_root = format!("autocoding_data/users/dispatch_trace_{unique}");
+        for i in 0..(VM_DISPATCH_TRACE_MAX_ENTRIES + 7) {
+            append_dispatch_trace_entry(
+                &managed_root,
+                crate::web_ui_models::VmExecDispatchTraceEntry {
+                    created_at_unix: i as u64,
+                    running_total_before: 0,
+                    running_limit: 4,
+                    available_slots: 4,
+                    selected_vms: Vec::new(),
+                    candidates: Vec::new(),
+                },
+            );
+        }
+        let entries = load_dispatch_trace(&managed_root);
+        assert_eq!(entries.len(), VM_DISPATCH_TRACE_MAX_ENTRIES);
+        assert_eq!(entries[0].created_at_unix, 7);
     }
 
     #[test]

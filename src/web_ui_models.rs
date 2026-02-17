@@ -534,6 +534,36 @@ pub(crate) struct VmExecDispatchResponse {
     pub(crate) running_limit_all_vms: usize,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct VmExecDispatchTraceCandidate {
+    pub(crate) vm_name: String,
+    pub(crate) base_priority: i32,
+    pub(crate) effective_priority: i32,
+    pub(crate) oldest_pending_age_sec: u64,
+    pub(crate) selected: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct VmExecDispatchTraceEntry {
+    pub(crate) created_at_unix: u64,
+    pub(crate) running_total_before: usize,
+    pub(crate) running_limit: usize,
+    pub(crate) available_slots: usize,
+    pub(crate) selected_vms: Vec<String>,
+    pub(crate) candidates: Vec<VmExecDispatchTraceCandidate>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VmExecDispatchTraceQuery {
+    #[serde(default)]
+    pub(crate) limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmExecDispatchTraceResponse {
+    pub(crate) entries: Vec<VmExecDispatchTraceEntry>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct VmExecEnqueuePayload {
     pub(crate) name: String,

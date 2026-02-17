@@ -95,6 +95,12 @@ function setVmExecQueueStatsText(text) {
     node.textContent = text || '';
 }
 
+function setVmExecDispatchTraceText(text) {
+    const node = el('vm_exec_dispatch_trace');
+    if (!node) return;
+    node.textContent = text || '';
+}
+
 function setVmExecProfilePreviewText(text) {
     const node = el('vm_exec_profile_preview');
     if (!node) return;
@@ -1385,6 +1391,7 @@ async function refreshVmExecQueue() {
     if (!name) {
         setVmExecQueueText(txt('vm_exec_queue_empty', 'No queued task.'));
         setVmExecQueueStatsText('');
+        setVmExecDispatchTraceText('');
         return;
     }
     try {
@@ -1409,9 +1416,11 @@ async function refreshVmExecQueue() {
             setVmExecQueueText(lines.join('\n'));
         }
         await refreshVmExecQueueStats();
+        await refreshVmExecDispatchTrace();
     } catch (e) {
         setVmExecQueueText(fmt('status_vm_exec_queue_failed', 'VM exec queue operation failed: {error}', { error: String(e) }));
         setVmExecQueueStatsText('');
+        setVmExecDispatchTraceText('');
     }
 }
 
@@ -1443,6 +1452,37 @@ async function refreshVmExecQueueStats() {
         setVmExecQueueStatsText(`${line}${extra}`);
     } catch (_e) {
         setVmExecQueueStatsText('');
+    }
+}
+
+async function refreshVmExecDispatchTrace() {
+    try {
+        const data = await vmApi('/vm/exec/dispatch/trace?limit=12', 'GET');
+        const entries = Array.isArray(data?.entries) ? data.entries : [];
+        if (!entries.length) {
+            setVmExecDispatchTraceText('DispatchTrace: empty');
+            return;
+        }
+        const lines = ['DispatchTrace (latest first):'];
+        entries.forEach((entry, idx) => {
+            const ts = Number(entry?.created_at_unix || 0);
+            const runningBefore = Number(entry?.running_total_before || 0);
+            const limit = Number(entry?.running_limit || 0);
+            const slots = Number(entry?.available_slots || 0);
+            const selected = Array.isArray(entry?.selected_vms) ? entry.selected_vms.join(',') : '';
+            lines.push(
+                `#${idx + 1} t=${ts} running=${runningBefore}/${limit} slots=${slots} selected=[${selected || '-'}]`,
+            );
+            const cands = Array.isArray(entry?.candidates) ? entry.candidates : [];
+            cands.slice(0, 5).forEach((c) => {
+                lines.push(
+                    `  - ${String(c?.vm_name || '-')} base=${Number(c?.base_priority || 0)} eff=${Number(c?.effective_priority || 0)} age=${Number(c?.oldest_pending_age_sec || 0)}s picked=${!!c?.selected}`,
+                );
+            });
+        });
+        setVmExecDispatchTraceText(lines.join('\n'));
+    } catch (_e) {
+        setVmExecDispatchTraceText('');
     }
 }
 
