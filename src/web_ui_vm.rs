@@ -487,6 +487,26 @@ fn collect_self_debug_strategy_stats(items: &[VmExecQueueItem]) -> Vec<VmSelfDeb
     out
 }
 
+fn strategy_priority_boost_by_stats(items: &[VmExecQueueItem], category: &str) -> i32 {
+    let stats = collect_self_debug_strategy_stats(items);
+    let Some(row) = stats.into_iter().find(|x| x.category == category) else {
+        return 0;
+    };
+    if row.attempts < 3 {
+        return 0;
+    }
+    let rate = row.success_rate;
+    if rate >= 80.0 {
+        3
+    } else if rate >= 60.0 {
+        2
+    } else if rate >= 40.0 {
+        1
+    } else {
+        0
+    }
+}
+
 fn normalize_batch_task(
     task: &VmExecBatchTaskPayload,
     default_timeout_sec: u64,
@@ -1127,6 +1147,11 @@ fn run_next_vm_exec_core(
         }
     });
     if let Some((run_id, category, priority, signature, trigger_task_id, failed_command)) = inject_strategy {
+        let dynamic_boost = strategy_priority_boost_by_stats(&items, &category);
+        let strategy_priority = priority
+            .saturating_add(1)
+            .saturating_add(dynamic_boost)
+            .clamp(-100, 100);
         if let Some(item) = items.iter_mut().find(|x| x.id == trigger_task_id) {
             item.message = format!("{} [strategy-injected]", item.message);
         }
@@ -1134,14 +1159,17 @@ fn run_next_vm_exec_core(
             &strategy_command_for_failure_category(managed_root_dir, &category),
             180,
             0,
-            priority.saturating_add(1).clamp(-100, 100),
+            strategy_priority,
             0,
         );
         strategy_item.run_id = run_id.clone();
         strategy_item.run_kind = "self_debug_strategy".to_string();
         strategy_item.strategy_signature = signature.clone();
         strategy_item.trigger_task_id = trigger_task_id.clone();
-        strategy_item.message = format!("auto strategy task injected for category={}", category);
+        strategy_item.message = format!(
+            "auto strategy task injected for category={} priority_boost={}",
+            category, dynamic_boost
+        );
         items.push(strategy_item);
 
         let verify_after_cmd = if failed_command.trim().is_empty() {
@@ -1153,7 +1181,7 @@ fn run_next_vm_exec_core(
             &verify_after_cmd,
             180,
             0,
-            priority.saturating_add(1).clamp(-100, 100),
+            strategy_priority,
             0,
         );
         verify_after_item.run_id = run_id.clone();
