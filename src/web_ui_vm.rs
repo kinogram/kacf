@@ -222,39 +222,111 @@ fn vm_exec_profiles() -> &'static [&'static str] {
     ]
 }
 
-fn build_profile_batch_tasks(profile: &str) -> Option<Vec<VmExecBatchTaskPayload>> {
+#[derive(Clone, Debug, Default)]
+struct ProfileRuntimeOptions {
+    workdir: Option<String>,
+    test_cmd: Option<String>,
+}
+
+fn normalize_profile_workdir(raw: &str) -> Option<String> {
+    let s = raw.trim();
+    if s.is_empty() {
+        return None;
+    }
+    if s.len() > 200 {
+        return None;
+    }
+    if !s
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '_' | '-'))
+    {
+        return None;
+    }
+    if !(s.starts_with('/') || s.starts_with('.')) {
+        return None;
+    }
+    Some(s.to_string())
+}
+
+fn normalize_profile_test_cmd(raw: &str) -> Option<String> {
+    let s = raw.trim();
+    if s.is_empty() {
+        return None;
+    }
+    if s.len() > 300 {
+        return None;
+    }
+    Some(s.to_string())
+}
+
+fn parse_profile_options(workdir: &str, test_cmd: &str) -> Result<ProfileRuntimeOptions, String> {
+    let wd_raw = workdir.trim();
+    let wd = normalize_profile_workdir(wd_raw);
+    if !wd_raw.is_empty() && wd.is_none() {
+        return Err("invalid workdir: only [a-zA-Z0-9_./-], must start with / or .".to_string());
+    }
+    Ok(ProfileRuntimeOptions {
+        workdir: wd,
+        test_cmd: normalize_profile_test_cmd(test_cmd),
+    })
+}
+
+fn prepend_workdir(cmd: &str, workdir: Option<&str>) -> String {
+    match workdir {
+        Some(w) if !w.is_empty() => format!("cd {} && {}", w, cmd),
+        _ => cmd.to_string(),
+    }
+}
+
+fn build_profile_batch_tasks(
+    profile: &str,
+    opts: &ProfileRuntimeOptions,
+) -> Option<Vec<VmExecBatchTaskPayload>> {
+    let test_cmd_rust = opts
+        .test_cmd
+        .clone()
+        .unwrap_or_else(|| "bash scripts/run_tests.sh".to_string());
+    let test_cmd_python = opts
+        .test_cmd
+        .clone()
+        .unwrap_or_else(|| "python3 -m pytest -q".to_string());
+    let test_cmd_node = opts
+        .test_cmd
+        .clone()
+        .unwrap_or_else(|| "npm test -- --watch=false".to_string());
+    let wd = opts.workdir.as_deref();
     match profile.trim() {
         "rust-self-debug-basic" => Some(vec![
             VmExecBatchTaskPayload {
-                command: "pwd".to_string(),
+                command: prepend_workdir("pwd", wd),
                 timeout_sec: 0,
                 wait_ready_sec: 0,
                 priority: 0,
                 retry_max: 0,
             },
             VmExecBatchTaskPayload {
-                command: "git status --short".to_string(),
+                command: prepend_workdir("git status --short", wd),
                 timeout_sec: 0,
                 wait_ready_sec: 0,
                 priority: 0,
                 retry_max: 0,
             },
             VmExecBatchTaskPayload {
-                command: "bash scripts/run_tests.sh".to_string(),
+                command: prepend_workdir(&test_cmd_rust, wd),
                 timeout_sec: 0,
                 wait_ready_sec: 0,
                 priority: 0,
                 retry_max: 0,
             },
             VmExecBatchTaskPayload {
-                command: "cargo check".to_string(),
+                command: prepend_workdir("cargo check", wd),
                 timeout_sec: 0,
                 wait_ready_sec: 0,
                 priority: 0,
                 retry_max: 0,
             },
             VmExecBatchTaskPayload {
-                command: "cargo test -q".to_string(),
+                command: prepend_workdir("cargo test -q", wd),
                 timeout_sec: 0,
                 wait_ready_sec: 0,
                 priority: 0,
@@ -263,28 +335,28 @@ fn build_profile_batch_tasks(profile: &str) -> Option<Vec<VmExecBatchTaskPayload
         ]),
         "python-self-debug-basic" => Some(vec![
             VmExecBatchTaskPayload {
-                command: "pwd".to_string(),
+                command: prepend_workdir("pwd", wd),
                 timeout_sec: 0,
                 wait_ready_sec: 0,
                 priority: 0,
                 retry_max: 0,
             },
             VmExecBatchTaskPayload {
-                command: "git status --short".to_string(),
+                command: prepend_workdir("git status --short", wd),
                 timeout_sec: 0,
                 wait_ready_sec: 0,
                 priority: 0,
                 retry_max: 0,
             },
             VmExecBatchTaskPayload {
-                command: "python3 -m pip --version".to_string(),
+                command: prepend_workdir("python3 -m pip --version", wd),
                 timeout_sec: 0,
                 wait_ready_sec: 0,
                 priority: 0,
                 retry_max: 0,
             },
             VmExecBatchTaskPayload {
-                command: "python3 -m pytest -q".to_string(),
+                command: prepend_workdir(&test_cmd_python, wd),
                 timeout_sec: 0,
                 wait_ready_sec: 0,
                 priority: 0,
@@ -293,28 +365,28 @@ fn build_profile_batch_tasks(profile: &str) -> Option<Vec<VmExecBatchTaskPayload
         ]),
         "node-self-debug-basic" => Some(vec![
             VmExecBatchTaskPayload {
-                command: "pwd".to_string(),
+                command: prepend_workdir("pwd", wd),
                 timeout_sec: 0,
                 wait_ready_sec: 0,
                 priority: 0,
                 retry_max: 0,
             },
             VmExecBatchTaskPayload {
-                command: "git status --short".to_string(),
+                command: prepend_workdir("git status --short", wd),
                 timeout_sec: 0,
                 wait_ready_sec: 0,
                 priority: 0,
                 retry_max: 0,
             },
             VmExecBatchTaskPayload {
-                command: "npm --version".to_string(),
+                command: prepend_workdir("npm --version", wd),
                 timeout_sec: 0,
                 wait_ready_sec: 0,
                 priority: 0,
                 retry_max: 0,
             },
             VmExecBatchTaskPayload {
-                command: "npm test -- --watch=false".to_string(),
+                command: prepend_workdir(&test_cmd_node, wd),
                 timeout_sec: 0,
                 wait_ready_sec: 0,
                 priority: 0,
@@ -1975,7 +2047,11 @@ pub(crate) async fn preview_vm_exec_profile(
     if profile.is_empty() {
         return HttpResponse::BadRequest().body("profile is empty");
     }
-    let Some(tasks) = build_profile_batch_tasks(profile) else {
+    let opts = match parse_profile_options(&query.workdir, &query.test_cmd) {
+        Ok(v) => v,
+        Err(e) => return HttpResponse::BadRequest().body(e),
+    };
+    let Some(tasks) = build_profile_batch_tasks(profile, &opts) else {
         return HttpResponse::BadRequest().body("unknown profile");
     };
     HttpResponse::Ok().json(VmExecProfilePreviewResponse {
@@ -2004,7 +2080,11 @@ pub(crate) async fn enqueue_vm_exec_profile(
     if profile.is_empty() {
         return HttpResponse::BadRequest().body("profile is empty");
     }
-    let Some(tasks) = build_profile_batch_tasks(profile) else {
+    let opts = match parse_profile_options(&body.workdir, &body.test_cmd) {
+        Ok(v) => v,
+        Err(e) => return HttpResponse::BadRequest().body(e),
+    };
+    let Some(tasks) = build_profile_batch_tasks(profile, &opts) else {
         return HttpResponse::BadRequest().body("unknown profile");
     };
     let default_timeout_sec = if body.timeout_sec == 0 {

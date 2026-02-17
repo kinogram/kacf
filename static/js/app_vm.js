@@ -251,6 +251,14 @@ function cloneNewNameInput() {
     return (el('vm_clone_new_name')?.value || '').trim();
 }
 
+function profileWorkdirInput() {
+    return String(el('vm_exec_profile_workdir')?.value || '').trim();
+}
+
+function profileTestCmdInput() {
+    return String(el('vm_exec_profile_test_cmd')?.value || '').trim();
+}
+
 async function createVmSnapshot() {
     const name = selectedVmName();
     const snapshot = snapshotNameInput();
@@ -508,12 +516,18 @@ async function refreshVmExecProfiles() {
 
 async function previewVmExecProfile() {
     const profile = String(el('vm_exec_profile')?.value || '').trim();
+    const workdir = profileWorkdirInput();
+    const testCmd = profileTestCmdInput();
     if (!profile) {
         setVmExecProfilePreviewText(txt('vm_exec_profile_preview_empty', 'No preview available.'));
         return;
     }
     try {
-        const data = await vmApi(`/vm/exec/profile/preview?profile=${encodeURIComponent(profile)}`, 'GET');
+        const q = new URLSearchParams();
+        q.set('profile', profile);
+        if (workdir) q.set('workdir', workdir);
+        if (testCmd) q.set('test_cmd', testCmd);
+        const data = await vmApi(`/vm/exec/profile/preview?${q.toString()}`, 'GET');
         const tasks = Array.isArray(data?.tasks) ? data.tasks : [];
         if (!tasks.length) {
             setVmExecProfilePreviewText(txt('vm_exec_profile_preview_empty', 'No preview available.'));
@@ -529,6 +543,8 @@ async function previewVmExecProfile() {
 async function enqueueVmExecProfile() {
     const name = selectedVmName();
     const profile = String(el('vm_exec_profile')?.value || '').trim();
+    const workdir = profileWorkdirInput();
+    const testCmd = profileTestCmdInput();
     const timeoutSec = asBoundedInt(el('vm_exec_timeout_sec')?.value, 1, 3600, 60);
     const waitReadySec = asBoundedInt(el('vm_exec_wait_ready_sec')?.value, 0, 600, 0);
     const priority = asBoundedSignedInt(el('vm_exec_priority')?.value, -100, 100, 0);
@@ -545,6 +561,8 @@ async function enqueueVmExecProfile() {
         await vmApi('/vm/exec/enqueue_profile', 'POST', {
             name,
             profile,
+            workdir,
+            test_cmd: testCmd,
             timeout_sec: timeoutSec,
             wait_ready_sec: waitReadySec,
             priority,
@@ -859,6 +877,8 @@ function bindVmEvents() {
         await refreshVmLogs();
     });
     el('vm_exec_profile')?.addEventListener('change', previewVmExecProfile);
+    el('vm_exec_profile_workdir')?.addEventListener('input', previewVmExecProfile);
+    el('vm_exec_profile_test_cmd')?.addEventListener('input', previewVmExecProfile);
     setInterval(setVmReadOnlyByContext, 1000);
 }
 

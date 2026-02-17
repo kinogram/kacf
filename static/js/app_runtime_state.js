@@ -154,6 +154,8 @@ function applyStaticCopyToDom() {
         ['label_vm_exec_priority', 'label_vm_exec_priority'],
         ['label_vm_exec_retry_max', 'label_vm_exec_retry_max'],
         ['label_vm_exec_profile', 'label_vm_exec_profile'],
+        ['label_vm_exec_profile_workdir', 'label_vm_exec_profile_workdir'],
+        ['label_vm_exec_profile_test_cmd', 'label_vm_exec_profile_test_cmd'],
         ['label_vm_exec_batch_commands', 'label_vm_exec_batch_commands'],
         ['label_vm_exec_cancel_task_id', 'label_vm_exec_cancel_task_id'],
         ['hint_log_exports', 'hint_log_exports'],
@@ -259,6 +261,8 @@ function applyStaticCopyToDom() {
         ['vm_exec_wait_ready_sec', 'ph_vm_exec_wait_ready_sec'],
         ['vm_exec_priority', 'ph_vm_exec_priority'],
         ['vm_exec_retry_max', 'ph_vm_exec_retry_max'],
+        ['vm_exec_profile_workdir', 'ph_vm_exec_profile_workdir'],
+        ['vm_exec_profile_test_cmd', 'ph_vm_exec_profile_test_cmd'],
         ['vm_exec_batch_commands', 'ph_vm_exec_batch_commands'],
         ['vm_exec_cancel_task_id', 'ph_vm_exec_cancel_task_id'],
     ];

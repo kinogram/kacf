@@ -540,6 +540,10 @@ pub(crate) struct VmExecEnqueueProfilePayload {
     pub(crate) name: String,
     pub(crate) profile: String,
     #[serde(default)]
+    pub(crate) workdir: String,
+    #[serde(default)]
+    pub(crate) test_cmd: String,
+    #[serde(default)]
     pub(crate) timeout_sec: u64,
     #[serde(default)]
     pub(crate) wait_ready_sec: u64,
@@ -557,6 +561,10 @@ pub(crate) struct VmExecProfilesResponse {
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct VmExecProfilePreviewQuery {
     pub(crate) profile: String,
+    #[serde(default)]
+    pub(crate) workdir: String,
+    #[serde(default)]
+    pub(crate) test_cmd: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
