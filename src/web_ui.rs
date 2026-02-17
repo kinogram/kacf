@@ -928,6 +928,10 @@ pub async fn run_web_server(
             .route("/vm/exec/queue", web::get().to(web_ui_vm::list_vm_exec_queue))
             .route("/vm/exec/queue/stats", web::get().to(web_ui_vm::vm_exec_queue_stats))
             .route("/vm/exec/profiles", web::get().to(web_ui_vm::list_vm_exec_profiles))
+            .route(
+                "/vm/exec/profile/preview",
+                web::get().to(web_ui_vm::preview_vm_exec_profile),
+            )
             .route("/vm/exec/enqueue", web::post().to(web_ui_vm::enqueue_vm_exec))
             .route(
                 "/vm/exec/enqueue_batch",

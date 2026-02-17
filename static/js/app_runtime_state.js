@@ -207,6 +207,7 @@ function applyStaticCopyToDom() {
         ['vm_exec_enqueue_btn', 'btn_vm_exec_enqueue'],
         ['vm_exec_batch_enqueue_btn', 'btn_vm_exec_batch_enqueue'],
         ['vm_exec_profile_enqueue_btn', 'btn_vm_exec_profile_enqueue'],
+        ['vm_exec_profile_preview_btn', 'btn_vm_exec_profile_preview'],
         ['vm_exec_run_next_btn', 'btn_vm_exec_run_next'],
         ['vm_exec_queue_refresh_btn', 'btn_vm_exec_queue_refresh'],
         ['vm_exec_queue_cancel_btn', 'btn_vm_exec_queue_cancel'],

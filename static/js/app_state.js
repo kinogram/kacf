@@ -114,6 +114,7 @@ const BACKEND_COMM_BUTTON_IDS = [
     'vm_exec_enqueue_btn',
     'vm_exec_batch_enqueue_btn',
     'vm_exec_profile_enqueue_btn',
+    'vm_exec_profile_preview_btn',
     'vm_exec_run_next_btn',
     'vm_exec_queue_refresh_btn',
     'vm_exec_queue_cancel_btn',

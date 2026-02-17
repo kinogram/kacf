@@ -16,10 +16,11 @@ use crate::web_ui_models::{
     VmActionPayload, VmActionResponse, VmBootstrapPayload, VmCapability, VmClonePayload,
     VmDeletePayload, VmExecCancelPayload, VmExecCancelResponse, VmExecPayload, VmExecResponse,
     VmExecBatchTaskPayload, VmExecEnqueueBatchPayload, VmExecEnqueuePayload,
-    VmExecEnqueueProfilePayload, VmExecProfilesResponse, VmExecQueueItem, VmInstance, VmLogQuery,
-    VmLogsResponse, VmProvisionPayload, VmQueueCancelPayload, VmQueueQuery, VmQueueResponse,
-    VmQueueStatsResponse, VmReadyQuery, VmReadyResponse, VmSnapshotEntry, VmSnapshotListQuery,
-    VmSnapshotListResponse, VmSnapshotPayload, VmStateStore, VmStatusResponse,
+    VmExecEnqueueProfilePayload, VmExecProfilePreviewQuery, VmExecProfilePreviewResponse,
+    VmExecProfilesResponse, VmExecQueueItem, VmInstance, VmLogQuery, VmLogsResponse,
+    VmProvisionPayload, VmQueueCancelPayload, VmQueueQuery, VmQueueResponse, VmQueueStatsResponse,
+    VmReadyQuery, VmReadyResponse, VmSnapshotEntry, VmSnapshotListQuery, VmSnapshotListResponse,
+    VmSnapshotPayload, VmStateStore, VmStatusResponse,
 };
 
 const VM_DIR: &str = "vm";
@@ -1958,6 +1959,28 @@ pub(crate) async fn list_vm_exec_profiles(
     };
     HttpResponse::Ok().json(VmExecProfilesResponse {
         profiles: vm_exec_profiles().iter().map(|s| s.to_string()).collect(),
+    })
+}
+
+pub(crate) async fn preview_vm_exec_profile(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+    query: web::Query<VmExecProfilePreviewQuery>,
+) -> impl Responder {
+    let _ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    let profile = query.profile.trim();
+    if profile.is_empty() {
+        return HttpResponse::BadRequest().body("profile is empty");
+    }
+    let Some(tasks) = build_profile_batch_tasks(profile) else {
+        return HttpResponse::BadRequest().body("unknown profile");
+    };
+    HttpResponse::Ok().json(VmExecProfilePreviewResponse {
+        profile: profile.to_string(),
+        tasks: tasks.into_iter().map(|x| x.command).collect(),
     })
 }
 

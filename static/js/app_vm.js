@@ -95,6 +95,12 @@ function setVmExecQueueStatsText(text) {
     node.textContent = text || '';
 }
 
+function setVmExecProfilePreviewText(text) {
+    const node = el('vm_exec_profile_preview');
+    if (!node) return;
+    node.textContent = text || '';
+}
+
 function setVmMutatingDisabled(disabled) {
     [
         'vm_provision_btn',
@@ -111,6 +117,7 @@ function setVmMutatingDisabled(disabled) {
         'vm_exec_enqueue_btn',
         'vm_exec_batch_enqueue_btn',
         'vm_exec_profile_enqueue_btn',
+        'vm_exec_profile_preview_btn',
         'vm_exec_run_next_btn',
         'vm_exec_queue_refresh_btn',
         'vm_exec_queue_cancel_btn',
@@ -491,9 +498,31 @@ async function refreshVmExecProfiles() {
         const data = await vmApi('/vm/exec/profiles', 'GET');
         vmExecProfiles = Array.isArray(data?.profiles) ? data.profiles.map((x) => String(x || '').trim()).filter(Boolean) : [];
         renderVmExecProfiles();
+        await previewVmExecProfile();
     } catch (_e) {
         vmExecProfiles = [];
         renderVmExecProfiles();
+        setVmExecProfilePreviewText(txt('vm_exec_profile_preview_empty', 'No preview available.'));
+    }
+}
+
+async function previewVmExecProfile() {
+    const profile = String(el('vm_exec_profile')?.value || '').trim();
+    if (!profile) {
+        setVmExecProfilePreviewText(txt('vm_exec_profile_preview_empty', 'No preview available.'));
+        return;
+    }
+    try {
+        const data = await vmApi(`/vm/exec/profile/preview?profile=${encodeURIComponent(profile)}`, 'GET');
+        const tasks = Array.isArray(data?.tasks) ? data.tasks : [];
+        if (!tasks.length) {
+            setVmExecProfilePreviewText(txt('vm_exec_profile_preview_empty', 'No preview available.'));
+            return;
+        }
+        const lines = tasks.map((cmd, i) => `#${i + 1} ${String(cmd || '')}`);
+        setVmExecProfilePreviewText(lines.join('\n'));
+    } catch (e) {
+        setVmExecProfilePreviewText(fmt('status_vm_exec_profile_preview_failed', 'Profile preview failed: {error}', { error: String(e) }));
     }
 }
 
@@ -819,6 +848,7 @@ function bindVmEvents() {
     el('vm_exec_enqueue_btn')?.addEventListener('click', enqueueVmExec);
     el('vm_exec_batch_enqueue_btn')?.addEventListener('click', enqueueVmExecBatch);
     el('vm_exec_profile_enqueue_btn')?.addEventListener('click', enqueueVmExecProfile);
+    el('vm_exec_profile_preview_btn')?.addEventListener('click', previewVmExecProfile);
     el('vm_exec_run_next_btn')?.addEventListener('click', runNextVmExec);
     el('vm_exec_queue_refresh_btn')?.addEventListener('click', refreshVmExecQueue);
     el('vm_exec_queue_cancel_btn')?.addEventListener('click', cancelVmQueueTask);
@@ -828,6 +858,7 @@ function bindVmEvents() {
         await refreshVmExecQueue();
         await refreshVmLogs();
     });
+    el('vm_exec_profile')?.addEventListener('change', previewVmExecProfile);
     setInterval(setVmReadOnlyByContext, 1000);
 }
 

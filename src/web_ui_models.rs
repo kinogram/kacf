@@ -555,6 +555,17 @@ pub(crate) struct VmExecProfilesResponse {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VmExecProfilePreviewQuery {
+    pub(crate) profile: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmExecProfilePreviewResponse {
+    pub(crate) profile: String,
+    pub(crate) tasks: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub(crate) struct VmQueueCancelPayload {
     pub(crate) name: String,
     pub(crate) task_id: String,
