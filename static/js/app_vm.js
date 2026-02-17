@@ -119,6 +119,68 @@ function setVmSelfDebugRunDetailText(text) {
     node.textContent = text || '';
 }
 
+function setVmSelfDebugTimelineText(text) {
+    const node = el('vm_self_debug_timeline');
+    if (!node) return;
+    node.textContent = text || '';
+}
+
+function buildSelfDebugTimelineText(tasks) {
+    const list = Array.isArray(tasks) ? tasks : [];
+    if (!list.length) {
+        return txt('vm_self_debug_timeline_empty', 'No self-debug timeline.');
+    }
+    const byTrigger = new Map();
+    const failures = [];
+    const others = [];
+    list.forEach((t) => {
+        const kind = String(t?.run_kind || '');
+        const id = String(t?.id || '');
+        if (kind === 'self_debug' && String(t?.status || '') === 'failed') {
+            failures.push(t);
+            return;
+        }
+        if (kind === 'self_debug_strategy' || kind === 'self_debug_verify_after_strategy') {
+            const trigger = String(t?.trigger_task_id || '');
+            if (!byTrigger.has(trigger)) byTrigger.set(trigger, []);
+            byTrigger.get(trigger).push(t);
+            return;
+        }
+        others.push(t);
+    });
+    const lines = [];
+    lines.push(txt('vm_self_debug_timeline_title', 'Self-Debug Timeline'));
+    if (failures.length) {
+        failures.forEach((f, i) => {
+            const fid = String(f?.id || '-');
+            const fcat = String(f?.failure_category || '-');
+            const fsig = String(f?.failure_signature || '-');
+            lines.push(`#${i + 1} [Failure] ${fid} cat=${fcat} sig=${fsig}`);
+            const branch = byTrigger.get(fid) || [];
+            const strategies = branch.filter((x) => String(x?.run_kind || '') === 'self_debug_strategy');
+            const verifiers = branch.filter((x) => String(x?.run_kind || '') === 'self_debug_verify_after_strategy');
+            if (!strategies.length && !verifiers.length) {
+                lines.push(`  -> ${txt('vm_self_debug_timeline_no_strategy', 'No strategy branch')}`);
+            }
+            strategies.forEach((s) => {
+                lines.push(`  -> [Strategy] ${String(s?.id || '-')} [${String(s?.status || '-')}]`);
+            });
+            verifiers.forEach((v) => {
+                lines.push(`  -> [VerifyAfter] ${String(v?.id || '-')} [${String(v?.status || '-')}]`);
+            });
+        });
+    } else {
+        lines.push(txt('vm_self_debug_timeline_no_failure', 'No failed self-debug step in this run.'));
+    }
+    if (others.length) {
+        lines.push(txt('vm_self_debug_timeline_other_title', 'Other Steps:'));
+        others.slice(0, 10).forEach((x) => {
+            lines.push(`  - ${String(x?.id || '-')} kind=${String(x?.run_kind || '-')} [${String(x?.status || '-')}]`);
+        });
+    }
+    return lines.join('\n');
+}
+
 function setVmMutatingDisabled(disabled) {
     [
         'vm_provision_btn',
@@ -722,6 +784,7 @@ async function refreshVmSelfDebugRunDetail() {
     const name = selectedVmName();
     const runId = String(el('vm_self_debug_run_id')?.value || '').trim();
     if (!name || !runId) {
+        setVmSelfDebugTimelineText('');
         setVmSelfDebugRunDetailText('');
         return;
     }
@@ -729,9 +792,11 @@ async function refreshVmSelfDebugRunDetail() {
         const data = await vmApi(`/vm/self_debug/run_detail?name=${encodeURIComponent(name)}&run_id=${encodeURIComponent(runId)}`, 'GET');
         const tasks = Array.isArray(data?.tasks) ? data.tasks : [];
         if (!tasks.length) {
+            setVmSelfDebugTimelineText(txt('vm_self_debug_timeline_empty', 'No self-debug timeline.'));
             setVmSelfDebugRunDetailText(txt('vm_self_debug_run_detail_empty', 'No run detail.'));
             return;
         }
+        setVmSelfDebugTimelineText(buildSelfDebugTimelineText(tasks));
         const lines = tasks.map((t, i) => {
             const id = String(t?.id || '-');
             const kind = String(t?.run_kind || '-');
@@ -749,6 +814,7 @@ async function refreshVmSelfDebugRunDetail() {
         });
         setVmSelfDebugRunDetailText(lines.join('\n\n'));
     } catch (e) {
+        setVmSelfDebugTimelineText(fmt('status_vm_self_debug_timeline_failed', 'Load self-debug timeline failed: {error}', { error: String(e) }));
         setVmSelfDebugRunDetailText(fmt('status_vm_self_debug_run_detail_failed', 'Load self-debug run detail failed: {error}', { error: String(e) }));
     }
 }
