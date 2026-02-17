@@ -276,6 +276,22 @@ fn recover_stale_running_tasks_in_queue(items: &mut [VmExecQueueItem], now: u64)
     recovered
 }
 
+fn queue_watchdog_recovery_stats(items: &[VmExecQueueItem]) -> (usize, u64) {
+    let mut total = 0usize;
+    let mut last = 0u64;
+    for item in items {
+        if !item
+            .message
+            .starts_with("watchdog hard-timeout recovered task")
+        {
+            continue;
+        }
+        total += 1;
+        last = last.max(item.finished_at_unix);
+    }
+    (total, last)
+}
+
 fn force_stop_vm_exec_process(managed_root_dir: &str, vm_name: &str) {
     let pid_path = vm_exec_pid_path(managed_root_dir, vm_name);
     let cancel_path = vm_exec_cancel_path(managed_root_dir, vm_name);
@@ -3109,6 +3125,7 @@ pub(crate) async fn vm_exec_queue_stats(
         None => return HttpResponse::BadRequest().body("invalid vm name"),
     };
     let _guard = lock_recover(&data.projects_lock, "projects_lock");
+    let state = load_vm_state(&ctx.managed_root_dir);
     let items = load_exec_queue(&ctx.managed_root_dir, &name);
     let total = items.len();
     let pending = items.iter().filter(|x| x.status == "pending").count();
@@ -3132,6 +3149,10 @@ pub(crate) async fn vm_exec_queue_stats(
     } else {
         durations.iter().sum::<f64>() / durations.len() as f64
     };
+    let running_total_all_vms = count_running_exec_tasks_all_vms(&ctx.managed_root_dir, &state);
+    let running_limit_all_vms = vm_exec_running_limit_by_role(&ctx.role);
+    let (watchdog_recovered_total, watchdog_last_recovered_unix) =
+        queue_watchdog_recovery_stats(&items);
     HttpResponse::Ok().json(VmQueueStatsResponse {
         name,
         total,
@@ -3142,6 +3163,10 @@ pub(crate) async fn vm_exec_queue_stats(
         canceled,
         done_success_rate,
         avg_duration_sec,
+        running_total_all_vms,
+        running_limit_all_vms,
+        watchdog_recovered_total,
+        watchdog_last_recovered_unix,
     })
 }
 
@@ -4612,7 +4637,8 @@ mod tests {
         default_memory_mb, enforce_self_debug_run_timeout, ensure_queue_capacity, is_queue_active_status,
         is_running_task_hard_timed_out, load_exec_queue, normalize_backend, now_unix,
         queue_has_active_duplicate, queue_item_from_values, recover_stale_running_tasks_in_queue,
-        sanitize_self_debug_run_id, sanitize_vm_name, save_exec_queue, save_vm_state, strategy_priority_boost_by_stats,
+        sanitize_self_debug_run_id, sanitize_vm_name, save_exec_queue, save_vm_state,
+        strategy_priority_boost_by_stats, queue_watchdog_recovery_stats,
         trim_history_entries, vm_instance_limit_by_role, vm_queue_limit_by_role,
         vm_running_limit_by_role, vm_exec_running_limit_by_role,
         VmSelfDebugHistoryEntry,
@@ -4914,6 +4940,22 @@ mod tests {
         assert_eq!(items[0].status, "failed");
         assert_eq!(items[0].exit_code, -1);
         assert_eq!(items[1].status, "running");
+    }
+
+    #[test]
+    fn queue_watchdog_stats_count_and_last_timestamp() {
+        let mut a = queue_item_from_values("sleep 1", 5, 0, 0, 0);
+        a.message = "watchdog hard-timeout recovered task (timeout=5s+15s)".to_string();
+        a.finished_at_unix = 120;
+        let mut b = queue_item_from_values("echo ok", 5, 0, 0, 0);
+        b.message = "done".to_string();
+        b.finished_at_unix = 121;
+        let mut c = queue_item_from_values("sleep 2", 5, 0, 0, 0);
+        c.message = "watchdog hard-timeout recovered task (timeout=5s+15s)".to_string();
+        c.finished_at_unix = 140;
+        let (total, last) = queue_watchdog_recovery_stats(&[a, b, c]);
+        assert_eq!(total, 2);
+        assert_eq!(last, 140);
     }
 
     #[test]

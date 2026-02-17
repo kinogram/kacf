@@ -513,6 +513,14 @@ pub(crate) struct VmQueueStatsResponse {
     pub(crate) canceled: usize,
     pub(crate) done_success_rate: f64,
     pub(crate) avg_duration_sec: f64,
+    #[serde(default)]
+    pub(crate) running_total_all_vms: usize,
+    #[serde(default)]
+    pub(crate) running_limit_all_vms: usize,
+    #[serde(default)]
+    pub(crate) watchdog_recovered_total: usize,
+    #[serde(default)]
+    pub(crate) watchdog_last_recovered_unix: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]

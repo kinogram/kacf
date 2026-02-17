@@ -1421,7 +1421,12 @@ async function refreshVmExecQueueStats() {
             ok_rate: Number(s?.done_success_rate || 0).toFixed(1),
             avg_sec: Number(s?.avg_duration_sec || 0).toFixed(1),
         });
-        setVmExecQueueStatsText(line);
+        const globalRunning = Number(s?.running_total_all_vms || 0);
+        const globalLimit = Number(s?.running_limit_all_vms || 0);
+        const recoveredTotal = Number(s?.watchdog_recovered_total || 0);
+        const recoveredLast = Number(s?.watchdog_last_recovered_unix || 0);
+        const extra = ` | GlobalRunning=${globalRunning}/${globalLimit} watchdogRecovered=${recoveredTotal} lastRecovered=${recoveredLast}`;
+        setVmExecQueueStatsText(`${line}${extra}`);
     } catch (_e) {
         setVmExecQueueStatsText('');
     }
