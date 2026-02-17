@@ -3836,7 +3836,11 @@ pub(crate) async fn delete_vm(
 
 #[cfg(test)]
 mod tests {
-    use super::{default_cpu, default_disk_gb, default_memory_mb, normalize_backend, sanitize_vm_name};
+    use super::{
+        collect_self_debug_runs, default_cpu, default_disk_gb, default_memory_mb, normalize_backend,
+        queue_item_from_values, sanitize_self_debug_run_id, sanitize_vm_name,
+        strategy_priority_boost_by_stats,
+    };
 
     #[test]
     fn sanitize_vm_name_accepts_safe_chars() {
@@ -3869,5 +3873,77 @@ mod tests {
         assert_eq!(normalize_backend("libvirt"), "libvirt");
         assert_eq!(normalize_backend("foobar"), "metadata-only");
         assert_eq!(normalize_backend(""), "metadata-only");
+    }
+
+    #[test]
+    fn sanitize_self_debug_run_id_checks_format() {
+        assert_eq!(
+            sanitize_self_debug_run_id("run_01-A"),
+            Some("run_01-A".to_string())
+        );
+        assert!(sanitize_self_debug_run_id("bad id").is_none());
+        assert!(sanitize_self_debug_run_id("").is_none());
+    }
+
+    #[test]
+    fn self_debug_run_summary_counts_paused() {
+        let mut a = queue_item_from_values("echo a", 10, 0, 0, 0);
+        a.run_id = "sd-1".to_string();
+        a.run_kind = "self_debug".to_string();
+        a.status = "paused".to_string();
+
+        let mut b = queue_item_from_values("echo b", 10, 0, 0, 0);
+        b.run_id = "sd-1".to_string();
+        b.run_kind = "self_debug".to_string();
+        b.status = "pending".to_string();
+
+        let runs = collect_self_debug_runs(&[a, b]);
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].run_id, "sd-1");
+        assert_eq!(runs[0].paused, 1);
+        assert_eq!(runs[0].pending, 1);
+    }
+
+    #[test]
+    fn strategy_priority_boost_uses_success_rate_with_min_attempts() {
+        let mut items = Vec::new();
+        for i in 0..5 {
+            let mut trigger = queue_item_from_values("bash scripts/run_tests.sh", 30, 0, 0, 0);
+            trigger.id = format!("t-{i}");
+            trigger.run_kind = "self_debug".to_string();
+            trigger.failure_category = "test_failure".to_string();
+            trigger.status = "failed".to_string();
+            items.push(trigger);
+
+            let mut verify =
+                queue_item_from_values("bash scripts/run_tests.sh", 30, 0, 0, 0);
+            verify.run_kind = "self_debug_verify_after_strategy".to_string();
+            verify.trigger_task_id = format!("t-{i}");
+            verify.status = if i == 4 {
+                "failed".to_string()
+            } else {
+                "done".to_string()
+            };
+            items.push(verify);
+        }
+        assert_eq!(strategy_priority_boost_by_stats(&items, "test_failure"), 3);
+
+        let mut small = Vec::new();
+        for i in 0..2 {
+            let mut trigger = queue_item_from_values("bash scripts/run_tests.sh", 30, 0, 0, 0);
+            trigger.id = format!("s-{i}");
+            trigger.run_kind = "self_debug".to_string();
+            trigger.failure_category = "build_error".to_string();
+            trigger.status = "failed".to_string();
+            small.push(trigger);
+
+            let mut verify =
+                queue_item_from_values("bash scripts/run_tests.sh", 30, 0, 0, 0);
+            verify.run_kind = "self_debug_verify_after_strategy".to_string();
+            verify.trigger_task_id = format!("s-{i}");
+            verify.status = "done".to_string();
+            small.push(verify);
+        }
+        assert_eq!(strategy_priority_boost_by_stats(&small, "build_error"), 0);
     }
 }
