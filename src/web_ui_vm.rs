@@ -407,6 +407,7 @@ fn collect_self_debug_runs(items: &[VmExecQueueItem]) -> Vec<VmSelfDebugRunSumma
             run_id: run_id.to_string(),
             total: 0,
             pending: 0,
+            paused: 0,
             running: 0,
             done: 0,
             failed: 0,
@@ -416,6 +417,7 @@ fn collect_self_debug_runs(items: &[VmExecQueueItem]) -> Vec<VmSelfDebugRunSumma
         entry.total += 1;
         match item.status.as_str() {
             "pending" => entry.pending += 1,
+            "paused" => entry.paused += 1,
             "running" => entry.running += 1,
             "done" => entry.done += 1,
             "failed" => entry.failed += 1,
@@ -3160,6 +3162,115 @@ pub(crate) async fn stop_vm_self_debug_run(
         &ctx.managed_root_dir,
         &name,
         &format!("self-debug run stop requested run_id={} matched={} running={}", run_id, matched, running),
+    );
+    let runs = collect_self_debug_runs(&items);
+    HttpResponse::Ok().json(VmSelfDebugRunsResponse { name, runs })
+}
+
+pub(crate) async fn pause_vm_self_debug_run(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+    body: web::Json<VmSelfDebugStopPayload>,
+) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if !ctx.can_write {
+        return HttpResponse::Forbidden().body("read-only session");
+    }
+    let name = match sanitize_vm_name(&body.name) {
+        Some(v) => v,
+        None => return HttpResponse::BadRequest().body("invalid vm name"),
+    };
+    let run_id = body.run_id.trim();
+    if run_id.is_empty() {
+        return HttpResponse::BadRequest().body("run_id is empty");
+    }
+    let _guard = lock_recover(&data.projects_lock, "projects_lock");
+    let mut items = load_exec_queue(&ctx.managed_root_dir, &name);
+    let mut matched = 0usize;
+    for item in items.iter_mut() {
+        if item.run_id != run_id {
+            continue;
+        }
+        if item.run_kind != "self_debug"
+            && item.run_kind != "self_debug_strategy"
+            && item.run_kind != "self_debug_verify_after_strategy"
+        {
+            continue;
+        }
+        if item.status == "pending" {
+            item.status = "paused".to_string();
+            item.message = "paused by run controller".to_string();
+            matched += 1;
+        }
+    }
+    if let Err(e) = save_exec_queue(&ctx.managed_root_dir, &name, &items) {
+        return HttpResponse::InternalServerError().body(format!("save queue failed: {e}"));
+    }
+    append_vm_log(
+        &ctx.managed_root_dir,
+        &name,
+        &format!("self-debug run pause requested run_id={} paused={}", run_id, matched),
+    );
+    let runs = collect_self_debug_runs(&items);
+    HttpResponse::Ok().json(VmSelfDebugRunsResponse { name, runs })
+}
+
+pub(crate) async fn resume_vm_self_debug_run(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+    body: web::Json<VmSelfDebugStopPayload>,
+) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if !ctx.can_write {
+        return HttpResponse::Forbidden().body("read-only session");
+    }
+    let name = match sanitize_vm_name(&body.name) {
+        Some(v) => v,
+        None => return HttpResponse::BadRequest().body("invalid vm name"),
+    };
+    let run_id = body.run_id.trim();
+    if run_id.is_empty() {
+        return HttpResponse::BadRequest().body("run_id is empty");
+    }
+    let _guard = lock_recover(&data.projects_lock, "projects_lock");
+    let mut items = load_exec_queue(&ctx.managed_root_dir, &name);
+    let mut matched = 0usize;
+    for item in items.iter_mut() {
+        if item.run_id != run_id {
+            continue;
+        }
+        if item.run_kind != "self_debug"
+            && item.run_kind != "self_debug_strategy"
+            && item.run_kind != "self_debug_verify_after_strategy"
+        {
+            continue;
+        }
+        if item.status == "paused" {
+            item.status = "pending".to_string();
+            item.message = "resumed by run controller".to_string();
+            matched += 1;
+        }
+    }
+    if let Err(e) = save_exec_queue(&ctx.managed_root_dir, &name, &items) {
+        return HttpResponse::InternalServerError().body(format!("save queue failed: {e}"));
+    }
+    if matched > 0 {
+        spawn_vm_exec_worker(
+            ctx.managed_root_dir.clone(),
+            name.clone(),
+            data.projects_lock.clone(),
+        );
+    }
+    append_vm_log(
+        &ctx.managed_root_dir,
+        &name,
+        &format!("self-debug run resume requested run_id={} resumed={}", run_id, matched),
     );
     let runs = collect_self_debug_runs(&items);
     HttpResponse::Ok().json(VmSelfDebugRunsResponse { name, runs })

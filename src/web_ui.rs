@@ -985,6 +985,14 @@ pub async fn run_web_server(
                 "/vm/self_debug/stop",
                 web::post().to(web_ui_vm::stop_vm_self_debug_run),
             )
+            .route(
+                "/vm/self_debug/pause",
+                web::post().to(web_ui_vm::pause_vm_self_debug_run),
+            )
+            .route(
+                "/vm/self_debug/resume",
+                web::post().to(web_ui_vm::resume_vm_self_debug_run),
+            )
             .route("/vm/exec/queue/cancel", web::post().to(web_ui_vm::cancel_vm_exec_task))
             .route("/vm/exec/queue/run_next", web::post().to(web_ui_vm::run_next_vm_exec))
             .route("/vm/ready", web::get().to(web_ui_vm::check_vm_ready))

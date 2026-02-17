@@ -212,6 +212,8 @@ function setVmMutatingDisabled(disabled) {
         'vm_self_debug_runs_refresh_btn',
         'vm_self_debug_stats_btn',
         'vm_self_debug_detail_btn',
+        'vm_self_debug_pause_btn',
+        'vm_self_debug_resume_btn',
         'vm_self_debug_stop_btn',
         'vm_self_debug_rules_load_btn',
         'vm_self_debug_rules_save_btn',
@@ -778,12 +780,13 @@ async function refreshVmSelfDebugRuns() {
             const id = String(r?.run_id || '-');
             const total = Number(r?.total || 0);
             const pending = Number(r?.pending || 0);
+            const paused = Number(r?.paused || 0);
             const running = Number(r?.running || 0);
             const done = Number(r?.done || 0);
             const failed = Number(r?.failed || 0);
             const canceled = Number(r?.canceled || 0);
             const at = Number(r?.updated_at_unix || 0);
-            return `#${i + 1} ${id} total=${total} p=${pending} r=${running} d=${done} f=${failed} c=${canceled} at=${at}`;
+            return `#${i + 1} ${id} total=${total} p=${pending} z=${paused} r=${running} d=${done} f=${failed} c=${canceled} at=${at}`;
         });
         setVmSelfDebugRunsText(lines.join('\n'));
     } catch (e) {
@@ -915,6 +918,50 @@ async function stopVmSelfDebugRun() {
         await refreshVmSelfDebugRunDetail();
     } catch (e) {
         setStatus(fmt('status_vm_self_debug_stop_failed', 'Stop self-debug run failed: {error}', { error: String(e) }), 'status-danger');
+    }
+}
+
+async function pauseVmSelfDebugRun() {
+    const name = selectedVmName();
+    const runId = String(el('vm_self_debug_run_id')?.value || '').trim();
+    if (!name) {
+        setStatus(txt('status_vm_target_required', 'Please select a VM first'), 'status-danger');
+        return;
+    }
+    if (!runId) {
+        setStatus(txt('status_vm_self_debug_run_id_required', 'Please enter self-debug run id first.'), 'status-danger');
+        return;
+    }
+    try {
+        await vmApi('/vm/self_debug/pause', 'POST', { name, run_id: runId });
+        setStatus(txt('status_vm_self_debug_pause_ok', 'Self-debug run paused.'), 'status-warn');
+        await refreshVmExecQueue();
+        await refreshVmSelfDebugRuns();
+        await refreshVmSelfDebugRunDetail();
+    } catch (e) {
+        setStatus(fmt('status_vm_self_debug_pause_failed', 'Pause self-debug run failed: {error}', { error: String(e) }), 'status-danger');
+    }
+}
+
+async function resumeVmSelfDebugRun() {
+    const name = selectedVmName();
+    const runId = String(el('vm_self_debug_run_id')?.value || '').trim();
+    if (!name) {
+        setStatus(txt('status_vm_target_required', 'Please select a VM first'), 'status-danger');
+        return;
+    }
+    if (!runId) {
+        setStatus(txt('status_vm_self_debug_run_id_required', 'Please enter self-debug run id first.'), 'status-danger');
+        return;
+    }
+    try {
+        await vmApi('/vm/self_debug/resume', 'POST', { name, run_id: runId });
+        setStatus(txt('status_vm_self_debug_resume_ok', 'Self-debug run resumed.'), 'status-warn');
+        await refreshVmExecQueue();
+        await refreshVmSelfDebugRuns();
+        await refreshVmSelfDebugRunDetail();
+    } catch (e) {
+        setStatus(fmt('status_vm_self_debug_resume_failed', 'Resume self-debug run failed: {error}', { error: String(e) }), 'status-danger');
     }
 }
 
@@ -1281,6 +1328,8 @@ function bindVmEvents() {
     el('vm_self_debug_runs_refresh_btn')?.addEventListener('click', refreshVmSelfDebugRuns);
     el('vm_self_debug_stats_btn')?.addEventListener('click', refreshVmSelfDebugStrategyStats);
     el('vm_self_debug_detail_btn')?.addEventListener('click', refreshVmSelfDebugRunDetail);
+    el('vm_self_debug_pause_btn')?.addEventListener('click', pauseVmSelfDebugRun);
+    el('vm_self_debug_resume_btn')?.addEventListener('click', resumeVmSelfDebugRun);
     el('vm_self_debug_stop_btn')?.addEventListener('click', stopVmSelfDebugRun);
     el('vm_self_debug_rules_load_btn')?.addEventListener('click', loadVmSelfDebugStrategyRules);
     el('vm_self_debug_rules_save_btn')?.addEventListener('click', saveVmSelfDebugStrategyRules);

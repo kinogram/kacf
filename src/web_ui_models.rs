@@ -669,6 +669,7 @@ pub(crate) struct VmSelfDebugRunSummary {
     pub(crate) run_id: String,
     pub(crate) total: usize,
     pub(crate) pending: usize,
+    pub(crate) paused: usize,
     pub(crate) running: usize,
     pub(crate) done: usize,
     pub(crate) failed: usize,
