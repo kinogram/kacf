@@ -22,7 +22,8 @@ use crate::web_ui_models::{
     VmExecProfilesResponse, VmExecQueueItem, VmExecResponse, VmInstance, VmLogQuery,
     VmLogsResponse, VmProvisionPayload, VmQueueCancelPayload, VmQueueQuery, VmQueueResponse,
     VmQueueStatsResponse, VmReadyQuery, VmReadyResponse, VmSelfDebugPlanPayload,
-    VmSelfDebugPlanResponse, VmSnapshotEntry, VmSnapshotListQuery, VmSnapshotListResponse,
+    VmSelfDebugPlanResponse, VmSelfDebugRunSummary, VmSelfDebugRunsQuery, VmSelfDebugRunsResponse,
+    VmSelfDebugStopPayload, VmSnapshotEntry, VmSnapshotListQuery, VmSnapshotListResponse,
     VmSnapshotPayload, VmStateStore, VmStatusResponse,
 };
 
@@ -151,6 +152,14 @@ fn queue_task_id() -> String {
     format!("q-{}-{}", now_unix(), ns)
 }
 
+fn self_debug_run_id() -> String {
+    let ns = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    format!("sd-{}-{}", now_unix(), ns)
+}
+
 fn retry_backoff_secs(retry_count: u32) -> u64 {
     let exp = retry_count.saturating_sub(1).min(6);
     let base = 5u64;
@@ -179,7 +188,48 @@ fn queue_item_from_values(
         finished_at_unix: 0,
         exit_code: 0,
         message: String::new(),
+        run_id: String::new(),
+        run_kind: String::new(),
     }
+}
+
+fn collect_self_debug_runs(items: &[VmExecQueueItem]) -> Vec<VmSelfDebugRunSummary> {
+    let mut map: BTreeMap<String, VmSelfDebugRunSummary> = BTreeMap::new();
+    for item in items {
+        let run_id = item.run_id.trim();
+        if run_id.is_empty() || item.run_kind != "self_debug" {
+            continue;
+        }
+        let entry = map.entry(run_id.to_string()).or_insert(VmSelfDebugRunSummary {
+            run_id: run_id.to_string(),
+            total: 0,
+            pending: 0,
+            running: 0,
+            done: 0,
+            failed: 0,
+            canceled: 0,
+            updated_at_unix: 0,
+        });
+        entry.total += 1;
+        match item.status.as_str() {
+            "pending" => entry.pending += 1,
+            "running" => entry.running += 1,
+            "done" => entry.done += 1,
+            "failed" => entry.failed += 1,
+            "canceled" => entry.canceled += 1,
+            _ => {}
+        }
+        let t = item
+            .finished_at_unix
+            .max(item.started_at_unix)
+            .max(item.created_at_unix);
+        if t > entry.updated_at_unix {
+            entry.updated_at_unix = t;
+        }
+    }
+    let mut out: Vec<VmSelfDebugRunSummary> = map.into_values().collect();
+    out.sort_by(|a, b| b.updated_at_unix.cmp(&a.updated_at_unix).then_with(|| b.run_id.cmp(&a.run_id)));
+    out
 }
 
 fn normalize_batch_task(
@@ -2409,6 +2459,7 @@ pub(crate) async fn preview_vm_self_debug_plan(
         total_tasks: tasks.len(),
         tasks: tasks.into_iter().map(|x| x.command).collect(),
         message: "self-debug plan generated".to_string(),
+        run_id: String::new(),
     })
 }
 
@@ -2432,6 +2483,7 @@ pub(crate) async fn start_vm_self_debug_plan(
         Ok(v) => v,
         Err(e) => return HttpResponse::BadRequest().body(e),
     };
+    let run_id = self_debug_run_id();
     let default_timeout_sec = if body.timeout_sec == 0 {
         120
     } else {
@@ -2449,13 +2501,15 @@ pub(crate) async fn start_vm_self_debug_plan(
     let mut items = load_exec_queue(&ctx.managed_root_dir, &name);
     let mut added = 0usize;
     for task in &tasks {
-        if let Some(item) = normalize_batch_task(
+        if let Some(mut item) = normalize_batch_task(
             task,
             default_timeout_sec,
             default_wait_ready_sec,
             default_priority,
             default_retry_max,
         ) {
+            item.run_id = run_id.clone();
+            item.run_kind = "self_debug".to_string();
             items.push(item);
             added += 1;
         }
@@ -2469,7 +2523,7 @@ pub(crate) async fn start_vm_self_debug_plan(
     append_vm_log(
         &ctx.managed_root_dir,
         &name,
-        &format!("self-debug plan enqueued tasks={added}"),
+        &format!("self-debug plan enqueued run_id={} tasks={added}", run_id),
     );
     spawn_vm_exec_worker(
         ctx.managed_root_dir.clone(),
@@ -2481,7 +2535,85 @@ pub(crate) async fn start_vm_self_debug_plan(
         total_tasks: tasks.len(),
         tasks: tasks.into_iter().map(|x| x.command).collect(),
         message: "self-debug plan enqueued".to_string(),
+        run_id,
     })
+}
+
+pub(crate) async fn list_vm_self_debug_runs(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+    query: web::Query<VmSelfDebugRunsQuery>,
+) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    let name = match sanitize_vm_name(&query.name) {
+        Some(v) => v,
+        None => return HttpResponse::BadRequest().body("invalid vm name"),
+    };
+    let _guard = lock_recover(&data.projects_lock, "projects_lock");
+    let items = load_exec_queue(&ctx.managed_root_dir, &name);
+    let runs = collect_self_debug_runs(&items);
+    HttpResponse::Ok().json(VmSelfDebugRunsResponse { name, runs })
+}
+
+pub(crate) async fn stop_vm_self_debug_run(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+    body: web::Json<VmSelfDebugStopPayload>,
+) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if !ctx.can_write {
+        return HttpResponse::Forbidden().body("read-only session");
+    }
+    let name = match sanitize_vm_name(&body.name) {
+        Some(v) => v,
+        None => return HttpResponse::BadRequest().body("invalid vm name"),
+    };
+    let run_id = body.run_id.trim();
+    if run_id.is_empty() {
+        return HttpResponse::BadRequest().body("run_id is empty");
+    }
+
+    let _guard = lock_recover(&data.projects_lock, "projects_lock");
+    let mut items = load_exec_queue(&ctx.managed_root_dir, &name);
+    let mut matched = 0usize;
+    let mut running = 0usize;
+    for item in items.iter_mut() {
+        if item.run_kind != "self_debug" || item.run_id != run_id {
+            continue;
+        }
+        matched += 1;
+        if item.status == "pending" {
+            item.status = "canceled".to_string();
+            item.finished_at_unix = now_unix();
+            item.exit_code = -2;
+            item.message = "canceled by self-debug run stop".to_string();
+        } else if item.status == "running" {
+            running += 1;
+        }
+    }
+    if matched == 0 {
+        return HttpResponse::NotFound().body("self-debug run not found");
+    }
+    if running > 0 {
+        let cancel_path = vm_exec_cancel_path(&ctx.managed_root_dir, &name);
+        let _ = fs::write(&cancel_path, b"1");
+    }
+    if let Err(e) = save_exec_queue(&ctx.managed_root_dir, &name, &items) {
+        return HttpResponse::InternalServerError().body(format!("save queue failed: {e}"));
+    }
+    append_vm_log(
+        &ctx.managed_root_dir,
+        &name,
+        &format!("self-debug run stop requested run_id={} matched={} running={}", run_id, matched, running),
+    );
+    let runs = collect_self_debug_runs(&items);
+    HttpResponse::Ok().json(VmSelfDebugRunsResponse { name, runs })
 }
 
 pub(crate) async fn cancel_vm_exec_task(

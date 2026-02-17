@@ -467,6 +467,10 @@ pub(crate) struct VmExecQueueItem {
     pub(crate) exit_code: i32,
     #[serde(default)]
     pub(crate) message: String,
+    #[serde(default)]
+    pub(crate) run_id: String,
+    #[serde(default)]
+    pub(crate) run_kind: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -627,6 +631,37 @@ pub(crate) struct VmSelfDebugPlanResponse {
     pub(crate) total_tasks: usize,
     pub(crate) tasks: Vec<String>,
     pub(crate) message: String,
+    #[serde(default)]
+    pub(crate) run_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VmSelfDebugRunsQuery {
+    pub(crate) name: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VmSelfDebugStopPayload {
+    pub(crate) name: String,
+    pub(crate) run_id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmSelfDebugRunSummary {
+    pub(crate) run_id: String,
+    pub(crate) total: usize,
+    pub(crate) pending: usize,
+    pub(crate) running: usize,
+    pub(crate) done: usize,
+    pub(crate) failed: usize,
+    pub(crate) canceled: usize,
+    pub(crate) updated_at_unix: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmSelfDebugRunsResponse {
+    pub(crate) name: String,
+    pub(crate) runs: Vec<VmSelfDebugRunSummary>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

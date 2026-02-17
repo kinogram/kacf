@@ -107,6 +107,12 @@ function setVmSelfDebugPlanText(text) {
     node.textContent = text || '';
 }
 
+function setVmSelfDebugRunsText(text) {
+    const node = el('vm_self_debug_runs');
+    if (!node) return;
+    node.textContent = text || '';
+}
+
 function setVmMutatingDisabled(disabled) {
     [
         'vm_provision_btn',
@@ -129,6 +135,8 @@ function setVmMutatingDisabled(disabled) {
         'vm_exec_custom_profile_delete_btn',
         'vm_self_debug_preview_btn',
         'vm_self_debug_start_btn',
+        'vm_self_debug_runs_refresh_btn',
+        'vm_self_debug_stop_btn',
         'vm_exec_run_next_btn',
         'vm_exec_queue_refresh_btn',
         'vm_exec_queue_cancel_btn',
@@ -138,6 +146,7 @@ function setVmMutatingDisabled(disabled) {
         'vm_self_debug_cycles',
         'vm_self_debug_fix_cmd',
         'vm_self_debug_verify_cmd',
+        'vm_self_debug_run_id',
     ].forEach((id) => {
         const node = el(id);
         if (node) node.disabled = !!disabled;
@@ -659,9 +668,63 @@ async function startVmSelfDebugPlan() {
         const lines = list.map((cmd, i) => `#${i + 1} ${String(cmd || '')}`);
         setVmSelfDebugPlanText(lines.join('\n'));
         setStatus(fmt('status_vm_self_debug_started', 'Self-debug plan queued ({count} tasks).', { count: list.length }), 'status-warn');
+        const runIdInput = el('vm_self_debug_run_id');
+        if (runIdInput && data?.run_id) runIdInput.value = String(data.run_id);
         await refreshVmExecQueue();
+        await refreshVmSelfDebugRuns();
     } catch (e) {
         setStatus(fmt('status_vm_self_debug_start_failed', 'Start self-debug plan failed: {error}', { error: String(e) }), 'status-danger');
+    }
+}
+
+async function refreshVmSelfDebugRuns() {
+    const name = selectedVmName();
+    if (!name) {
+        setVmSelfDebugRunsText('');
+        return;
+    }
+    try {
+        const data = await vmApi(`/vm/self_debug/runs?name=${encodeURIComponent(name)}`, 'GET');
+        const runs = Array.isArray(data?.runs) ? data.runs : [];
+        if (!runs.length) {
+            setVmSelfDebugRunsText(txt('vm_self_debug_runs_empty', 'No self-debug runs.'));
+            return;
+        }
+        const lines = runs.map((r, i) => {
+            const id = String(r?.run_id || '-');
+            const total = Number(r?.total || 0);
+            const pending = Number(r?.pending || 0);
+            const running = Number(r?.running || 0);
+            const done = Number(r?.done || 0);
+            const failed = Number(r?.failed || 0);
+            const canceled = Number(r?.canceled || 0);
+            const at = Number(r?.updated_at_unix || 0);
+            return `#${i + 1} ${id} total=${total} p=${pending} r=${running} d=${done} f=${failed} c=${canceled} at=${at}`;
+        });
+        setVmSelfDebugRunsText(lines.join('\n'));
+    } catch (e) {
+        setVmSelfDebugRunsText(fmt('status_vm_self_debug_runs_failed', 'Load self-debug runs failed: {error}', { error: String(e) }));
+    }
+}
+
+async function stopVmSelfDebugRun() {
+    const name = selectedVmName();
+    const runId = String(el('vm_self_debug_run_id')?.value || '').trim();
+    if (!name) {
+        setStatus(txt('status_vm_target_required', 'Please select a VM first'), 'status-danger');
+        return;
+    }
+    if (!runId) {
+        setStatus(txt('status_vm_self_debug_run_id_required', 'Please enter self-debug run id first.'), 'status-danger');
+        return;
+    }
+    try {
+        await vmApi('/vm/self_debug/stop', 'POST', { name, run_id: runId });
+        setStatus(txt('status_vm_self_debug_stop_ok', 'Self-debug stop requested.'), 'status-warn');
+        await refreshVmExecQueue();
+        await refreshVmSelfDebugRuns();
+    } catch (e) {
+        setStatus(fmt('status_vm_self_debug_stop_failed', 'Stop self-debug run failed: {error}', { error: String(e) }), 'status-danger');
     }
 }
 
@@ -880,8 +943,10 @@ async function refreshVmExecQueue() {
                 const rc = Number(x?.retry_count || 0);
                 const rm = Number(x?.retry_max || 0);
                 const nextRun = Number(x?.next_run_after_unix || 0);
+                const runId = String(x?.run_id || '');
                 const cmd = String(x?.command || '').slice(0, 120);
-                return `#${i + 1} ${id} [${st}] p=${p} retry=${rc}/${rm} next=${nextRun} exit=${ec} cmd=${cmd}`;
+                const runTag = runId ? ` run=${runId}` : '';
+                return `#${i + 1} ${id} [${st}] p=${p} retry=${rc}/${rm} next=${nextRun} exit=${ec}${runTag} cmd=${cmd}`;
             });
             setVmExecQueueText(lines.join('\n'));
         }
@@ -1023,6 +1088,8 @@ function bindVmEvents() {
     el('vm_exec_custom_profile_delete_btn')?.addEventListener('click', deleteCustomProfile);
     el('vm_self_debug_preview_btn')?.addEventListener('click', previewVmSelfDebugPlan);
     el('vm_self_debug_start_btn')?.addEventListener('click', startVmSelfDebugPlan);
+    el('vm_self_debug_runs_refresh_btn')?.addEventListener('click', refreshVmSelfDebugRuns);
+    el('vm_self_debug_stop_btn')?.addEventListener('click', stopVmSelfDebugRun);
     el('vm_exec_run_next_btn')?.addEventListener('click', runNextVmExec);
     el('vm_exec_queue_refresh_btn')?.addEventListener('click', refreshVmExecQueue);
     el('vm_exec_queue_cancel_btn')?.addEventListener('click', cancelVmQueueTask);
@@ -1031,6 +1098,7 @@ function bindVmEvents() {
         await refreshVmSnapshots();
         await refreshVmExecQueue();
         await refreshVmLogs();
+        await refreshVmSelfDebugRuns();
     });
     el('vm_exec_profile')?.addEventListener('change', previewVmExecProfile);
     el('vm_exec_profile_workdir')?.addEventListener('input', previewVmExecProfile);
@@ -1061,6 +1129,7 @@ async function init(opts) {
     await refreshVmExecProfiles();
     await refreshVmSnapshots();
     await refreshVmExecQueue();
+    await refreshVmSelfDebugRuns();
 }
 
 window.KACF = window.KACF || {};
