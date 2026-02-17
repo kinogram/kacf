@@ -479,6 +479,10 @@ pub(crate) struct VmExecQueueItem {
     pub(crate) run_id: String,
     #[serde(default)]
     pub(crate) run_kind: String,
+    #[serde(default)]
+    pub(crate) strategy_signature: String,
+    #[serde(default)]
+    pub(crate) trigger_task_id: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -694,6 +698,8 @@ pub(crate) struct VmSelfDebugRunTaskDetail {
     pub(crate) failure_category: String,
     pub(crate) failure_signature: String,
     pub(crate) failure_key_lines: Vec<String>,
+    pub(crate) strategy_signature: String,
+    pub(crate) trigger_task_id: String,
     pub(crate) created_at_unix: u64,
     pub(crate) started_at_unix: u64,
     pub(crate) finished_at_unix: u64,

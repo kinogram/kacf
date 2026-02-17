@@ -204,6 +204,8 @@ fn queue_item_from_values(
         failure_key_lines: Vec::new(),
         run_id: String::new(),
         run_kind: String::new(),
+        strategy_signature: String::new(),
+        trigger_task_id: String::new(),
     }
 }
 
@@ -292,12 +294,24 @@ fn strategy_command_for_failure_category(category: &str) -> &'static str {
     }
 }
 
+fn strategy_injected_count(items: &[VmExecQueueItem], run_id: &str, signature: &str) -> usize {
+    items.iter()
+        .filter(|x| {
+            x.run_id == run_id
+                && x.run_kind == "self_debug_strategy"
+                && x.strategy_signature == signature
+        })
+        .count()
+}
+
 fn collect_self_debug_runs(items: &[VmExecQueueItem]) -> Vec<VmSelfDebugRunSummary> {
     let mut map: BTreeMap<String, VmSelfDebugRunSummary> = BTreeMap::new();
     for item in items {
         let run_id = item.run_id.trim();
         if run_id.is_empty()
-            || (item.run_kind != "self_debug" && item.run_kind != "self_debug_strategy")
+            || (item.run_kind != "self_debug"
+                && item.run_kind != "self_debug_strategy"
+                && item.run_kind != "self_debug_verify_after_strategy")
         {
             continue;
         }
@@ -885,7 +899,7 @@ fn run_next_vm_exec_core(
     let mut items = load_exec_queue(managed_root_dir, name);
     let mut finished_run_id = String::new();
     let mut finished_run_kind = String::new();
-    let mut inject_strategy: Option<(String, String, i32)> = None;
+    let mut strategy_candidate: Option<(String, String, i32, String, String, String)> = None;
     if let Some(item) = items.iter_mut().find(|x| x.id == task_id) {
         item.finished_at_unix = now_unix();
         item.exit_code = exec_resp.exit_code;
@@ -929,12 +943,14 @@ fn run_next_vm_exec_core(
             && item.run_kind == "self_debug"
             && !item.run_id.trim().is_empty()
         {
-            inject_strategy = Some((
+            strategy_candidate = Some((
                 item.run_id.clone(),
                 item.failure_category.clone(),
                 item.priority,
+                item.failure_signature.clone(),
+                item.id.clone(),
+                item.command.clone(),
             ));
-            item.message = format!("{} [strategy-injected]", item.message);
         }
     }
     if exec_resp.exit_code == 10
@@ -961,7 +977,19 @@ fn run_next_vm_exec_core(
             &format!("self-debug early-stop gate triggered run_id={}", finished_run_id),
         );
     }
-    if let Some((run_id, category, priority)) = inject_strategy {
+    let inject_strategy = strategy_candidate.as_ref().and_then(|c| {
+        let current = strategy_injected_count(&items, &c.0, &c.3);
+        let max_inject = 2usize;
+        if current < max_inject {
+            Some(c.clone())
+        } else {
+            None
+        }
+    });
+    if let Some((run_id, category, priority, signature, trigger_task_id, failed_command)) = inject_strategy {
+        if let Some(item) = items.iter_mut().find(|x| x.id == trigger_task_id) {
+            item.message = format!("{} [strategy-injected]", item.message);
+        }
         let mut strategy_item = queue_item_from_values(
             strategy_command_for_failure_category(&category),
             180,
@@ -971,16 +999,41 @@ fn run_next_vm_exec_core(
         );
         strategy_item.run_id = run_id.clone();
         strategy_item.run_kind = "self_debug_strategy".to_string();
+        strategy_item.strategy_signature = signature.clone();
+        strategy_item.trigger_task_id = trigger_task_id.clone();
         strategy_item.message = format!("auto strategy task injected for category={}", category);
         items.push(strategy_item);
+
+        let verify_after_cmd = if failed_command.trim().is_empty() {
+            "bash scripts/run_tests.sh".to_string()
+        } else {
+            failed_command
+        };
+        let mut verify_after_item = queue_item_from_values(
+            &verify_after_cmd,
+            180,
+            0,
+            priority.saturating_add(1).clamp(-100, 100),
+            0,
+        );
+        verify_after_item.run_id = run_id.clone();
+        verify_after_item.run_kind = "self_debug_verify_after_strategy".to_string();
+        verify_after_item.strategy_signature = signature.clone();
+        verify_after_item.trigger_task_id = trigger_task_id.clone();
+        verify_after_item.message = "auto verify-after-strategy task injected".to_string();
+        items.push(verify_after_item);
         append_vm_log(
             managed_root_dir,
             name,
             &format!(
-                "self-debug strategy injected run_id={} category={}",
-                run_id, category
+                "self-debug strategy injected run_id={} category={} signature={}",
+                run_id, category, signature
             ),
         );
+    } else if let Some((_, _, _, _, trigger_task_id, _)) = strategy_candidate {
+        if let Some(item) = items.iter_mut().find(|x| x.id == trigger_task_id) {
+            item.message = format!("{} [strategy-skip-limit]", item.message);
+        }
     }
     let _ = save_exec_queue(managed_root_dir, name, &items);
     append_vm_log(
@@ -2784,7 +2837,9 @@ pub(crate) async fn get_vm_self_debug_run_detail(
     let tasks: Vec<VmSelfDebugRunTaskDetail> = items
         .into_iter()
         .filter(|x| {
-            (x.run_kind == "self_debug" || x.run_kind == "self_debug_strategy")
+            (x.run_kind == "self_debug"
+                || x.run_kind == "self_debug_strategy"
+                || x.run_kind == "self_debug_verify_after_strategy")
                 && x.run_id == run_id
         })
         .map(|x| VmSelfDebugRunTaskDetail {
@@ -2798,6 +2853,8 @@ pub(crate) async fn get_vm_self_debug_run_detail(
             failure_category: x.failure_category,
             failure_signature: x.failure_signature,
             failure_key_lines: x.failure_key_lines,
+            strategy_signature: x.strategy_signature,
+            trigger_task_id: x.trigger_task_id,
             created_at_unix: x.created_at_unix,
             started_at_unix: x.started_at_unix,
             finished_at_unix: x.finished_at_unix,
