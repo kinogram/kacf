@@ -53,6 +53,8 @@ const VM_RUNNING_MAX_ADMIN: usize = 8;
 const VM_EXEC_RUNNING_MAX_USER: usize = 4;
 const VM_EXEC_RUNNING_MAX_ADMIN: usize = 16;
 const VM_EXEC_HARD_TIMEOUT_GRACE_SEC: u64 = 15;
+const VM_PRIORITY_AGING_STEP_SEC: u64 = 60;
+const VM_PRIORITY_AGING_MAX_BOOST: i32 = 20;
 
 fn now_unix() -> u64 {
     SystemTime::now()
@@ -1091,6 +1093,21 @@ fn queue_has_active_duplicate(items: &[VmExecQueueItem], command: &str) -> bool 
         .any(|x| is_queue_active_status(&x.status) && x.command.trim() == target)
 }
 
+fn priority_aging_boost(created_at_unix: u64, now: u64) -> i32 {
+    if created_at_unix == 0 || now <= created_at_unix {
+        return 0;
+    }
+    let waited = now.saturating_sub(created_at_unix);
+    let steps = (waited / VM_PRIORITY_AGING_STEP_SEC) as i32;
+    steps.clamp(0, VM_PRIORITY_AGING_MAX_BOOST)
+}
+
+fn effective_priority_with_aging(item: &VmExecQueueItem, now: u64) -> i32 {
+    item.priority
+        .saturating_add(priority_aging_boost(item.created_at_unix, now))
+        .clamp(-100, 100)
+}
+
 fn sanitize_custom_profile_name(raw: &str) -> Option<String> {
     let s = raw.trim();
     if s.len() < 8 || s.len() > 64 {
@@ -1486,13 +1503,14 @@ fn run_next_vm_exec_core(
         if items.iter().any(|x| x.status == "running") {
             return Ok(None);
         }
+        let now = now_unix();
         let pending_idx = items
             .iter()
             .enumerate()
-            .filter(|(_, x)| x.status == "pending" && now_unix() >= x.next_run_after_unix)
+            .filter(|(_, x)| x.status == "pending" && now >= x.next_run_after_unix)
             .max_by(|(ia, a), (ib, b)| {
-                a.priority
-                    .cmp(&b.priority)
+                effective_priority_with_aging(a, now)
+                    .cmp(&effective_priority_with_aging(b, now))
                     .then_with(|| b.created_at_unix.cmp(&a.created_at_unix))
                     .then_with(|| ib.cmp(ia))
             })
@@ -1885,7 +1903,7 @@ fn select_dispatch_vm_candidates(
             if item.status != "pending" || now < item.next_run_after_unix {
                 continue;
             }
-            best_priority = best_priority.max(item.priority);
+            best_priority = best_priority.max(effective_priority_with_aging(item, now));
             oldest_created = oldest_created.min(item.created_at_unix);
         }
         if best_priority >= -100 {
@@ -4686,9 +4704,10 @@ mod tests {
         archive_completed_self_debug_runs, collect_self_debug_runs, default_cpu, default_disk_gb,
         default_memory_mb, enforce_self_debug_run_timeout, ensure_queue_capacity, is_queue_active_status,
         is_running_task_hard_timed_out, load_exec_queue, normalize_backend, now_unix,
-        queue_has_active_duplicate, queue_item_from_values, recover_stale_running_tasks_in_queue,
-        sanitize_self_debug_run_id, sanitize_vm_name, save_exec_queue, save_vm_state,
-        select_dispatch_vm_candidates, strategy_priority_boost_by_stats, queue_watchdog_recovery_stats,
+        priority_aging_boost, queue_has_active_duplicate, queue_item_from_values,
+        recover_stale_running_tasks_in_queue, sanitize_self_debug_run_id, sanitize_vm_name,
+        save_exec_queue, save_vm_state, select_dispatch_vm_candidates,
+        strategy_priority_boost_by_stats, queue_watchdog_recovery_stats,
         trim_history_entries, vm_instance_limit_by_role, vm_queue_limit_by_role,
         vm_running_limit_by_role, vm_exec_running_limit_by_role,
         VmSelfDebugHistoryEntry,
@@ -5057,6 +5076,60 @@ mod tests {
 
         let top2 = select_dispatch_vm_candidates(&managed_root, &state_store, 2, now);
         assert_eq!(top2, vec!["vm-c".to_string(), "vm-b".to_string()]);
+    }
+
+    #[test]
+    fn priority_aging_boost_is_bounded() {
+        assert_eq!(priority_aging_boost(100, 100), 0);
+        assert_eq!(priority_aging_boost(100, 159), 0);
+        assert_eq!(priority_aging_boost(100, 160), 1);
+        assert_eq!(priority_aging_boost(100, 100 + 3600), 20);
+    }
+
+    #[test]
+    fn dispatch_candidates_apply_aging_boost() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let managed_root = format!("autocoding_data/users/dispatch_aging_{unique}");
+        let now = now_unix();
+        let mut state_store = crate::web_ui_models::VmStateStore::default();
+        for vm_name in ["vm-new-high", "vm-old-low"] {
+            state_store.vms.insert(
+                vm_name.to_string(),
+                crate::web_ui_models::VmInstance {
+                    name: vm_name.to_string(),
+                    backend: "qemu".to_string(),
+                    power_state: "running".to_string(),
+                    cpu: 2,
+                    memory_mb: 1024,
+                    disk_gb: 10,
+                    disk_path: format!("autocoding_data/{vm_name}.qcow2"),
+                    os_image: "linux".to_string(),
+                    created_at_unix: now,
+                    updated_at_unix: now,
+                    last_message: String::new(),
+                    process_id: Some(1),
+                    ssh_port: Some(2222),
+                    ssh_user: "root".to_string(),
+                },
+            );
+        }
+        save_vm_state(&managed_root, &state_store).expect("save vm state");
+
+        let mut high = queue_item_from_values("echo high", 30, 0, 10, 0);
+        high.status = "pending".to_string();
+        high.created_at_unix = now.saturating_sub(30);
+        save_exec_queue(&managed_root, "vm-new-high", &[high]).expect("save queue high");
+
+        let mut low = queue_item_from_values("echo low", 30, 0, -5, 0);
+        low.status = "pending".to_string();
+        low.created_at_unix = now.saturating_sub(16 * 60);
+        save_exec_queue(&managed_root, "vm-old-low", &[low]).expect("save queue low");
+
+        let top = select_dispatch_vm_candidates(&managed_root, &state_store, 1, now);
+        assert_eq!(top, vec!["vm-old-low".to_string()]);
     }
 
     #[test]
