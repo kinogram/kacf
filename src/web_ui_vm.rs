@@ -48,6 +48,8 @@ const VM_MAX_INSTANCES_USER: usize = 4;
 const VM_MAX_INSTANCES_ADMIN: usize = 16;
 const VM_QUEUE_MAX_ITEMS_USER: usize = 400;
 const VM_QUEUE_MAX_ITEMS_ADMIN: usize = 2000;
+const VM_RUNNING_MAX_USER: usize = 2;
+const VM_RUNNING_MAX_ADMIN: usize = 8;
 
 fn now_unix() -> u64 {
     SystemTime::now()
@@ -127,6 +129,13 @@ fn vm_queue_limit_by_role(role: &AccountRole) -> usize {
     match role {
         AccountRole::Admin => VM_QUEUE_MAX_ITEMS_ADMIN,
         AccountRole::User | AccountRole::Guest => VM_QUEUE_MAX_ITEMS_USER,
+    }
+}
+
+fn vm_running_limit_by_role(role: &AccountRole) -> usize {
+    match role {
+        AccountRole::Admin => VM_RUNNING_MAX_ADMIN,
+        AccountRole::User | AccountRole::Guest => VM_RUNNING_MAX_USER,
     }
 }
 
@@ -4169,25 +4178,40 @@ pub(crate) async fn start_vm(
 
     let _guard = lock_recover(&data.projects_lock, "projects_lock");
     let mut state = load_vm_state(&ctx.managed_root_dir);
-    let Some(vm) = state.vms.get_mut(&name) else {
+    for vm in state.vms.values_mut() {
+        let _ = reconcile_vm_power_state(&ctx.managed_root_dir, vm);
+    }
+    let Some(current_vm) = state.vms.get(&name).cloned() else {
         return HttpResponse::NotFound().body("vm not found");
     };
-
-    reconcile_vm_power_state(&ctx.managed_root_dir, vm);
-    if vm.power_state == "running" {
-        let snapshot = vm.clone();
+    if current_vm.power_state == "running" {
         append_vm_log(
             &ctx.managed_root_dir,
-            &snapshot.name,
+            &current_vm.name,
             "start requested but vm already running",
         );
         return HttpResponse::Ok().json(VmActionResponse {
             ok: true,
             effective: true,
             message: "vm already running".to_string(),
-            vm: Some(snapshot),
+            vm: Some(current_vm),
         });
     }
+    let running_limit = vm_running_limit_by_role(&ctx.role);
+    let running_now = state
+        .vms
+        .values()
+        .filter(|x| x.power_state == "running")
+        .count();
+    if running_now >= running_limit {
+        return HttpResponse::TooManyRequests().body(format!(
+            "running vm limit exceeded: running={} limit={}",
+            running_now, running_limit
+        ));
+    }
+    let Some(vm) = state.vms.get_mut(&name) else {
+        return HttpResponse::NotFound().body("vm not found");
+    };
 
     let (effective, msg) = match vm.backend.as_str() {
         "qemu" => {
@@ -4375,6 +4399,7 @@ mod tests {
         queue_item_from_values, load_exec_queue, now_unix, sanitize_self_debug_run_id,
         sanitize_vm_name, save_exec_queue, save_vm_state, strategy_priority_boost_by_stats,
         trim_history_entries, vm_instance_limit_by_role, vm_queue_limit_by_role,
+        vm_running_limit_by_role,
         VmSelfDebugHistoryEntry,
     };
 
@@ -4627,6 +4652,10 @@ mod tests {
         assert!(
             vm_queue_limit_by_role(&crate::auth::AccountRole::Admin)
                 > vm_queue_limit_by_role(&crate::auth::AccountRole::User)
+        );
+        assert!(
+            vm_running_limit_by_role(&crate::auth::AccountRole::Admin)
+                > vm_running_limit_by_role(&crate::auth::AccountRole::User)
         );
         assert!(ensure_queue_capacity(10, 5, 20).is_ok());
         assert!(ensure_queue_capacity(20, 1, 20).is_err());
