@@ -489,10 +489,116 @@ fn trim_history_entries(entries: &mut Vec<VmSelfDebugHistoryEntry>, max_entries:
     entries.truncate(max_entries);
 }
 
+#[derive(Debug, Clone, Default)]
+struct SelfDebugContextData {
+    failed_steps: usize,
+    categories: Vec<String>,
+    key_lines: Vec<String>,
+    context_text: String,
+}
+
+fn build_self_debug_context_data(items: &[VmExecQueueItem], run_id: &str) -> Option<SelfDebugContextData> {
+    if run_id.trim().is_empty() {
+        return None;
+    }
+    let mut failed_steps: Vec<VmExecQueueItem> = items
+        .iter()
+        .filter(|x| {
+            is_self_debug_kind(&x.run_kind)
+                && x.run_id == run_id
+                && (x.status == "failed" || x.status == "canceled")
+        })
+        .cloned()
+        .collect();
+    if failed_steps.is_empty() {
+        return None;
+    }
+    failed_steps.sort_by(|a, b| {
+        a.created_at_unix
+            .cmp(&b.created_at_unix)
+            .then_with(|| a.id.cmp(&b.id))
+    });
+
+    let mut category_count: BTreeMap<String, usize> = BTreeMap::new();
+    let mut key_lines: Vec<String> = Vec::new();
+    for step in &failed_steps {
+        let category = if step.failure_category.trim().is_empty() {
+            "unknown_failure".to_string()
+        } else {
+            step.failure_category.trim().to_string()
+        };
+        *category_count.entry(category).or_insert(0) += 1;
+        for line in &step.failure_key_lines {
+            let t = line.trim();
+            if t.is_empty() {
+                continue;
+            }
+            if key_lines.iter().any(|x| x == t) {
+                continue;
+            }
+            key_lines.push(t.to_string());
+            if key_lines.len() >= 20 {
+                break;
+            }
+        }
+        if key_lines.len() >= 20 {
+            break;
+        }
+    }
+
+    let mut categories: Vec<String> = category_count
+        .into_iter()
+        .map(|(k, v)| format!("{k}:{v}"))
+        .collect();
+    categories.sort();
+
+    let mut lines = Vec::new();
+    lines.push(format!("run_id={}", run_id));
+    lines.push(format!("failed_steps={}", failed_steps.len()));
+    lines.push(format!("categories={}", categories.join(", ")));
+    lines.push(String::new());
+    lines.push("recent_failed_steps:".to_string());
+    for (idx, step) in failed_steps.iter().rev().take(8).enumerate() {
+        lines.push(format!(
+            "#{} kind={} status={} exit={} category={}",
+            idx + 1,
+            step.run_kind,
+            step.status,
+            step.exit_code,
+            if step.failure_category.trim().is_empty() {
+                "unknown_failure"
+            } else {
+                step.failure_category.as_str()
+            }
+        ));
+        lines.push(format!("cmd={}", step.command));
+        if !step.message.trim().is_empty() {
+            lines.push(format!("msg={}", step.message.trim()));
+        }
+        if !step.output_preview.trim().is_empty() {
+            lines.push(format!("out={}", tail_text(&step.output_preview, 500)));
+        }
+    }
+    if !key_lines.is_empty() {
+        lines.push(String::new());
+        lines.push("key_failure_lines:".to_string());
+        for line in &key_lines {
+            lines.push(format!("- {}", line));
+        }
+    }
+    Some(SelfDebugContextData {
+        failed_steps: failed_steps.len(),
+        categories,
+        key_lines,
+        context_text: lines.join("\n"),
+    })
+}
+
 fn upsert_history_entry(
     history: &mut Vec<VmSelfDebugHistoryEntry>,
     summary: VmSelfDebugRunSummary,
     archived_at_unix: u64,
+    ctx: SelfDebugContextData,
 ) {
     if let Some(existing) = history
         .iter_mut()
@@ -500,11 +606,19 @@ fn upsert_history_entry(
     {
         existing.summary = summary;
         existing.archived_at_unix = archived_at_unix;
+        existing.failed_steps = ctx.failed_steps;
+        existing.categories = ctx.categories;
+        existing.key_lines = ctx.key_lines;
+        existing.context_text = ctx.context_text;
         return;
     }
     history.push(VmSelfDebugHistoryEntry {
         summary,
         archived_at_unix,
+        failed_steps: ctx.failed_steps,
+        categories: ctx.categories,
+        key_lines: ctx.key_lines,
+        context_text: ctx.context_text,
     });
 }
 
@@ -527,7 +641,8 @@ fn archive_completed_self_debug_runs(
         .filter(|r| completed_run_ids.contains(&r.run_id))
         .collect();
     for summary in archived_runs {
-        upsert_history_entry(history, summary, now);
+        let ctx = build_self_debug_context_data(items, &summary.run_id).unwrap_or_default();
+        upsert_history_entry(history, summary, now, ctx);
     }
     let before = items.len();
     items.retain(|x| !(is_self_debug_kind(&x.run_kind) && completed_run_ids.contains(&x.run_id)));
@@ -3386,101 +3501,28 @@ pub(crate) async fn get_vm_self_debug_context(
     }
     let _guard = lock_recover(&data.projects_lock, "projects_lock");
     let items = load_exec_queue(&ctx.managed_root_dir, &name);
-    let mut failed_steps: Vec<VmExecQueueItem> = items
-        .into_iter()
-        .filter(|x| {
-            (x.run_kind == "self_debug"
-                || x.run_kind == "self_debug_strategy"
-                || x.run_kind == "self_debug_verify_after_strategy")
-                && x.run_id == run_id
-                && (x.status == "failed" || x.status == "canceled")
-        })
-        .collect();
-    if failed_steps.is_empty() {
-        return HttpResponse::NotFound().body("no failed steps for run_id");
+    if let Some(ctx_data) = build_self_debug_context_data(&items, run_id) {
+        return HttpResponse::Ok().json(VmSelfDebugContextResponse {
+            name,
+            run_id: run_id.to_string(),
+            failed_steps: ctx_data.failed_steps,
+            categories: ctx_data.categories,
+            key_lines: ctx_data.key_lines,
+            context_text: ctx_data.context_text,
+        });
     }
-    failed_steps.sort_by(|a, b| {
-        a.created_at_unix
-            .cmp(&b.created_at_unix)
-            .then_with(|| a.id.cmp(&b.id))
-    });
-
-    let mut category_count: BTreeMap<String, usize> = BTreeMap::new();
-    let mut key_lines: Vec<String> = Vec::new();
-    for step in &failed_steps {
-        let category = if step.failure_category.trim().is_empty() {
-            "unknown_failure".to_string()
-        } else {
-            step.failure_category.trim().to_string()
-        };
-        *category_count.entry(category).or_insert(0) += 1;
-        for line in &step.failure_key_lines {
-            let t = line.trim();
-            if t.is_empty() {
-                continue;
-            }
-            if key_lines.iter().any(|x| x == t) {
-                continue;
-            }
-            key_lines.push(t.to_string());
-            if key_lines.len() >= 20 {
-                break;
-            }
-        }
-        if key_lines.len() >= 20 {
-            break;
-        }
+    let history = load_self_debug_history(&ctx.managed_root_dir, &name);
+    if let Some(entry) = history.into_iter().find(|x| x.summary.run_id == run_id) {
+        return HttpResponse::Ok().json(VmSelfDebugContextResponse {
+            name,
+            run_id: run_id.to_string(),
+            failed_steps: entry.failed_steps,
+            categories: entry.categories,
+            key_lines: entry.key_lines,
+            context_text: entry.context_text,
+        });
     }
-
-    let mut categories: Vec<String> = category_count
-        .into_iter()
-        .map(|(k, v)| format!("{k}:{v}"))
-        .collect();
-    categories.sort();
-
-    let mut lines = Vec::new();
-    lines.push(format!("run_id={}", run_id));
-    lines.push(format!("failed_steps={}", failed_steps.len()));
-    lines.push(format!("categories={}", categories.join(", ")));
-    lines.push(String::new());
-    lines.push("recent_failed_steps:".to_string());
-    for (idx, step) in failed_steps.iter().rev().take(8).enumerate() {
-        lines.push(format!(
-            "#{} kind={} status={} exit={} category={}",
-            idx + 1,
-            step.run_kind,
-            step.status,
-            step.exit_code,
-            if step.failure_category.trim().is_empty() {
-                "unknown_failure"
-            } else {
-                step.failure_category.as_str()
-            }
-        ));
-        lines.push(format!("cmd={}", step.command));
-        if !step.message.trim().is_empty() {
-            lines.push(format!("msg={}", step.message.trim()));
-        }
-        if !step.output_preview.trim().is_empty() {
-            lines.push(format!("out={}", tail_text(&step.output_preview, 500)));
-        }
-    }
-    if !key_lines.is_empty() {
-        lines.push(String::new());
-        lines.push("key_failure_lines:".to_string());
-        for line in &key_lines {
-            lines.push(format!("- {}", line));
-        }
-    }
-    let context_text = lines.join("\n");
-    HttpResponse::Ok().json(VmSelfDebugContextResponse {
-        name,
-        run_id: run_id.to_string(),
-        failed_steps: failed_steps.len(),
-        categories,
-        key_lines,
-        context_text,
-    })
+    HttpResponse::NotFound().body("no failed steps for run_id")
 }
 
 pub(crate) async fn get_vm_self_debug_strategy_stats(
@@ -4322,6 +4364,10 @@ mod tests {
                     updated_at_unix: 1,
                 },
                 archived_at_unix: 3,
+                failed_steps: 0,
+                categories: Vec::new(),
+                key_lines: Vec::new(),
+                context_text: String::new(),
             },
             VmSelfDebugHistoryEntry {
                 summary: crate::web_ui_models::VmSelfDebugRunSummary {
@@ -4336,6 +4382,10 @@ mod tests {
                     updated_at_unix: 2,
                 },
                 archived_at_unix: 2,
+                failed_steps: 0,
+                categories: Vec::new(),
+                key_lines: Vec::new(),
+                context_text: String::new(),
             },
             VmSelfDebugHistoryEntry {
                 summary: crate::web_ui_models::VmSelfDebugRunSummary {
@@ -4350,6 +4400,10 @@ mod tests {
                     updated_at_unix: 3,
                 },
                 archived_at_unix: 1,
+                failed_steps: 0,
+                categories: Vec::new(),
+                key_lines: Vec::new(),
+                context_text: String::new(),
             },
         ];
         trim_history_entries(&mut entries, 2);

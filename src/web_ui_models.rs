@@ -693,6 +693,14 @@ pub(crate) struct VmSelfDebugRunsResponse {
 pub(crate) struct VmSelfDebugHistoryEntry {
     pub(crate) summary: VmSelfDebugRunSummary,
     pub(crate) archived_at_unix: u64,
+    #[serde(default)]
+    pub(crate) failed_steps: usize,
+    #[serde(default)]
+    pub(crate) categories: Vec<String>,
+    #[serde(default)]
+    pub(crate) key_lines: Vec<String>,
+    #[serde(default)]
+    pub(crate) context_text: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
