@@ -52,6 +52,7 @@ const VM_RUNNING_MAX_USER: usize = 2;
 const VM_RUNNING_MAX_ADMIN: usize = 8;
 const VM_EXEC_RUNNING_MAX_USER: usize = 4;
 const VM_EXEC_RUNNING_MAX_ADMIN: usize = 16;
+const VM_EXEC_HARD_TIMEOUT_GRACE_SEC: u64 = 15;
 
 fn now_unix() -> u64 {
     SystemTime::now()
@@ -233,6 +234,91 @@ fn count_running_exec_tasks_all_vms(managed_root_dir: &str, state: &VmStateStore
                 .count()
         })
         .sum()
+}
+
+fn effective_task_timeout_sec(item: &VmExecQueueItem) -> u64 {
+    if item.timeout_sec == 0 {
+        30
+    } else {
+        item.timeout_sec.clamp(1, 3600)
+    }
+}
+
+fn is_running_task_hard_timed_out(item: &VmExecQueueItem, now: u64) -> bool {
+    if item.status != "running" || item.started_at_unix == 0 {
+        return false;
+    }
+    let timeout = effective_task_timeout_sec(item);
+    let deadline = item
+        .started_at_unix
+        .saturating_add(timeout)
+        .saturating_add(VM_EXEC_HARD_TIMEOUT_GRACE_SEC);
+    now > deadline
+}
+
+fn recover_stale_running_tasks_in_queue(items: &mut [VmExecQueueItem], now: u64) -> usize {
+    let mut recovered = 0usize;
+    for item in items.iter_mut() {
+        if !is_running_task_hard_timed_out(item, now) {
+            continue;
+        }
+        let timeout = effective_task_timeout_sec(item);
+        item.status = "failed".to_string();
+        item.finished_at_unix = now;
+        item.exit_code = -1;
+        item.next_run_after_unix = 0;
+        item.message = format!(
+            "watchdog hard-timeout recovered task (timeout={}s+{}s)",
+            timeout, VM_EXEC_HARD_TIMEOUT_GRACE_SEC
+        );
+        recovered += 1;
+    }
+    recovered
+}
+
+fn force_stop_vm_exec_process(managed_root_dir: &str, vm_name: &str) {
+    let pid_path = vm_exec_pid_path(managed_root_dir, vm_name);
+    let cancel_path = vm_exec_cancel_path(managed_root_dir, vm_name);
+    let _ = fs::write(&cancel_path, "cancel");
+    if let Some(pid) = read_pid_file(&pid_path) {
+        let _ = stop_pid(pid);
+    }
+    let _ = fs::remove_file(pid_path);
+    let _ = fs::remove_file(cancel_path);
+}
+
+fn recover_stale_running_tasks_all_vms(
+    managed_root_dir: &str,
+    state: &VmStateStore,
+    now: u64,
+) -> usize {
+    let mut total = 0usize;
+    for vm_name in state.vms.keys() {
+        let mut items = load_exec_queue(managed_root_dir, vm_name);
+        let recovered = recover_stale_running_tasks_in_queue(&mut items, now);
+        if recovered == 0 {
+            continue;
+        }
+        force_stop_vm_exec_process(managed_root_dir, vm_name);
+        if let Err(e) = save_exec_queue(managed_root_dir, vm_name, &items) {
+            append_vm_log(
+                managed_root_dir,
+                vm_name,
+                &format!("exec watchdog save queue failed: {e}"),
+            );
+            continue;
+        }
+        append_vm_log(
+            managed_root_dir,
+            vm_name,
+            &format!(
+                "exec watchdog recovered stale running tasks={} grace_sec={}",
+                recovered, VM_EXEC_HARD_TIMEOUT_GRACE_SEC
+            ),
+        );
+        total += recovered;
+    }
+    total
 }
 
 fn queue_task_id() -> String {
@@ -1352,6 +1438,17 @@ fn run_next_vm_exec_core(
     let (task_id, cmd, cmd_risk_level, cmd_risk_tags, timeout_sec, wait_ready_sec, ssh_user, ssh_port) = {
         let _guard = lock_recover(projects_lock, "projects_lock");
         let mut state = load_vm_state(managed_root_dir);
+        if !state.vms.contains_key(name) {
+            return Err("vm not found".to_string());
+        }
+        let recovered = recover_stale_running_tasks_all_vms(managed_root_dir, &state, now_unix());
+        if recovered > 0 {
+            append_vm_log(
+                managed_root_dir,
+                name,
+                &format!("exec watchdog recovered total_stale_tasks={recovered}"),
+            );
+        }
         let (ssh_user, ssh_port) = {
             let Some(vm) = state.vms.get_mut(name) else {
                 return Err("vm not found".to_string());
@@ -4513,8 +4610,9 @@ mod tests {
     use super::{
         archive_completed_self_debug_runs, collect_self_debug_runs, default_cpu, default_disk_gb,
         default_memory_mb, enforce_self_debug_run_timeout, ensure_queue_capacity, is_queue_active_status,
-        load_exec_queue, normalize_backend, now_unix, queue_has_active_duplicate,
-        queue_item_from_values, sanitize_self_debug_run_id, sanitize_vm_name, save_exec_queue, save_vm_state, strategy_priority_boost_by_stats,
+        is_running_task_hard_timed_out, load_exec_queue, normalize_backend, now_unix,
+        queue_has_active_duplicate, queue_item_from_values, recover_stale_running_tasks_in_queue,
+        sanitize_self_debug_run_id, sanitize_vm_name, save_exec_queue, save_vm_state, strategy_priority_boost_by_stats,
         trim_history_entries, vm_instance_limit_by_role, vm_queue_limit_by_role,
         vm_running_limit_by_role, vm_exec_running_limit_by_role,
         VmSelfDebugHistoryEntry,
@@ -4796,6 +4894,26 @@ mod tests {
         let items = vec![done, pending];
         assert!(queue_has_active_duplicate(&items, "echo hi"));
         assert!(!queue_has_active_duplicate(&items, "echo bye"));
+    }
+
+    #[test]
+    fn stale_running_task_is_force_recovered() {
+        let mut running = queue_item_from_values("sleep 120", 10, 0, 0, 0);
+        running.status = "running".to_string();
+        running.started_at_unix = 100;
+
+        let mut fresh = queue_item_from_values("echo ok", 30, 0, 0, 0);
+        fresh.status = "running".to_string();
+        fresh.started_at_unix = 130;
+
+        let mut items = vec![running, fresh];
+        assert!(is_running_task_hard_timed_out(&items[0], 126));
+        assert!(!is_running_task_hard_timed_out(&items[1], 126));
+        let recovered = recover_stale_running_tasks_in_queue(&mut items, 126);
+        assert_eq!(recovered, 1);
+        assert_eq!(items[0].status, "failed");
+        assert_eq!(items[0].exit_code, -1);
+        assert_eq!(items[1].status, "running");
     }
 
     #[test]
