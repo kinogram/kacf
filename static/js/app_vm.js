@@ -219,6 +219,7 @@ function setVmMutatingDisabled(disabled) {
         'vm_self_debug_stats_btn',
         'vm_self_debug_detail_btn',
         'vm_self_debug_context_btn',
+        'vm_self_debug_apply_context_btn',
         'vm_self_debug_pause_btn',
         'vm_self_debug_resume_btn',
         'vm_self_debug_stop_btn',
@@ -948,6 +949,54 @@ async function refreshVmSelfDebugContext() {
     }
 }
 
+function quoteForEnvValue(raw) {
+    return String(raw || '')
+        .replace(/\\/g, '\\\\')
+        .replace(/"/g, '\\"')
+        .replace(/\$/g, '\\$')
+        .replace(/`/g, '\\`')
+        .replace(/\r?\n/g, ' | ');
+}
+
+function stripExistingContextPrefix(cmd) {
+    return String(cmd || '').replace(/^KACF_SELF_DEBUG_CONTEXT="(?:\\.|[^"])*"\s+/, '');
+}
+
+async function applyVmSelfDebugContextToFixCmd() {
+    const name = selectedVmName();
+    const runId = String(el('vm_self_debug_run_id')?.value || '').trim();
+    if (!name) {
+        setStatus(txt('status_vm_target_required', 'Please select a VM first'), 'status-danger');
+        return;
+    }
+    if (!runId) {
+        setStatus(txt('status_vm_self_debug_run_id_required', 'Please enter self-debug run id first.'), 'status-danger');
+        return;
+    }
+    const fixInput = el('vm_self_debug_fix_cmd');
+    if (!fixInput) return;
+    try {
+        const data = await vmApi(`/vm/self_debug/context?name=${encodeURIComponent(name)}&run_id=${encodeURIComponent(runId)}`, 'GET');
+        const contextText = String(data?.context_text || '').trim();
+        if (!contextText) {
+            setStatus(txt('status_vm_self_debug_context_empty', 'Self-debug context is empty.'), 'status-danger');
+            return;
+        }
+        const rawCurrent = String(fixInput.value || '').trim();
+        const baseCmd = stripExistingContextPrefix(rawCurrent);
+        if (!baseCmd) {
+            setStatus(txt('status_vm_self_debug_fix_required', 'Please enter fix command for self-debug plan.'), 'status-danger');
+            return;
+        }
+        const limited = quoteForEnvValue(contextText.slice(0, 1200));
+        fixInput.value = `KACF_SELF_DEBUG_CONTEXT="${limited}" ${baseCmd}`;
+        await refreshVmSelfDebugContext();
+        setStatus(txt('status_vm_self_debug_context_applied', 'Failure context applied to fix command.'), 'status-warn');
+    } catch (e) {
+        setStatus(fmt('status_vm_self_debug_context_apply_failed', 'Apply self-debug context failed: {error}', { error: String(e) }), 'status-danger');
+    }
+}
+
 async function pauseVmSelfDebugRun() {
     const name = selectedVmName();
     const runId = String(el('vm_self_debug_run_id')?.value || '').trim();
@@ -1358,6 +1407,7 @@ function bindVmEvents() {
     el('vm_self_debug_stats_btn')?.addEventListener('click', refreshVmSelfDebugStrategyStats);
     el('vm_self_debug_detail_btn')?.addEventListener('click', refreshVmSelfDebugRunDetail);
     el('vm_self_debug_context_btn')?.addEventListener('click', refreshVmSelfDebugContext);
+    el('vm_self_debug_apply_context_btn')?.addEventListener('click', applyVmSelfDebugContextToFixCmd);
     el('vm_self_debug_pause_btn')?.addEventListener('click', pauseVmSelfDebugRun);
     el('vm_self_debug_resume_btn')?.addEventListener('click', resumeVmSelfDebugRun);
     el('vm_self_debug_stop_btn')?.addEventListener('click', stopVmSelfDebugRun);

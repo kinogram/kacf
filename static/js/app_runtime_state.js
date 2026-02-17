@@ -230,6 +230,7 @@ function applyStaticCopyToDom() {
         ['vm_self_debug_stats_btn', 'btn_vm_self_debug_stats'],
         ['vm_self_debug_detail_btn', 'btn_vm_self_debug_detail'],
         ['vm_self_debug_context_btn', 'btn_vm_self_debug_context'],
+        ['vm_self_debug_apply_context_btn', 'btn_vm_self_debug_apply_context'],
         ['vm_self_debug_pause_btn', 'btn_vm_self_debug_pause'],
         ['vm_self_debug_resume_btn', 'btn_vm_self_debug_resume'],
         ['vm_self_debug_stop_btn', 'btn_vm_self_debug_stop'],

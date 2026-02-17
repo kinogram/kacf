@@ -124,6 +124,7 @@ const BACKEND_COMM_BUTTON_IDS = [
     'vm_self_debug_stats_btn',
     'vm_self_debug_detail_btn',
     'vm_self_debug_context_btn',
+    'vm_self_debug_apply_context_btn',
     'vm_self_debug_pause_btn',
     'vm_self_debug_resume_btn',
     'vm_self_debug_stop_btn',
