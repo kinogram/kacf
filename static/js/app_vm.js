@@ -101,6 +101,12 @@ function setVmExecDispatchTraceText(text) {
     node.textContent = text || '';
 }
 
+function setVmHealthReportText(text) {
+    const node = el('vm_health_report');
+    if (!node) return;
+    node.textContent = text || '';
+}
+
 function setVmExecProfilePreviewText(text) {
     const node = el('vm_exec_profile_preview');
     if (!node) return;
@@ -1392,6 +1398,7 @@ async function refreshVmExecQueue() {
         setVmExecQueueText(txt('vm_exec_queue_empty', 'No queued task.'));
         setVmExecQueueStatsText('');
         setVmExecDispatchTraceText('');
+        setVmHealthReportText('');
         return;
     }
     try {
@@ -1483,6 +1490,39 @@ async function refreshVmExecDispatchTrace() {
         setVmExecDispatchTraceText(lines.join('\n'));
     } catch (_e) {
         setVmExecDispatchTraceText('');
+    }
+}
+
+async function scanVmHealth() {
+    const selfHeal = !!el('vm_health_self_heal')?.checked;
+    if (selfHeal && isReadOnlyView()) {
+        setStatus('Read-only session cannot run self-heal.', 'status-danger');
+        return;
+    }
+    try {
+        const data = await vmApi('/vm/health/scan', 'POST', { self_heal: selfHeal });
+        const issues = Array.isArray(data?.issues) ? data.issues : [];
+        const actions = Array.isArray(data?.actions) ? data.actions : [];
+        const lines = [];
+        lines.push(`HealthScan scanned=${Number(data?.scanned || 0)} issues=${issues.length} actions=${actions.length}`);
+        if (issues.length) {
+            lines.push('Issues:');
+            issues.slice(0, 20).forEach((x) => {
+                lines.push(`  - [${String(x?.severity || 'warn')}] ${String(x?.vm_name || '-')} :: ${String(x?.message || '')}`);
+            });
+        }
+        if (actions.length) {
+            lines.push('Actions:');
+            actions.slice(0, 20).forEach((x) => {
+                lines.push(`  - ${String(x?.vm_name || '-')} :: ${String(x?.action || '')} :: ${String(x?.detail || '')}`);
+            });
+        }
+        setVmHealthReportText(lines.join('\n'));
+        setStatus(`Health scan done: issues=${issues.length} actions=${actions.length}`, issues.length ? 'status-warn' : 'status-ok');
+        await refreshVmExecQueue();
+        await refreshVmStatus();
+    } catch (e) {
+        setStatus(fmt('status_vm_exec_queue_failed', 'VM exec queue operation failed: {error}', { error: String(e) }), 'status-danger');
     }
 }
 
@@ -1610,6 +1650,7 @@ function bindVmEvents() {
     el('vm_exec_run_next_btn')?.addEventListener('click', runNextVmExec);
     el('vm_exec_queue_refresh_btn')?.addEventListener('click', refreshVmExecQueue);
     el('vm_exec_queue_cancel_btn')?.addEventListener('click', cancelVmQueueTask);
+    el('vm_health_scan_btn')?.addEventListener('click', scanVmHealth);
     el('vm_target_select')?.addEventListener('change', async () => {
         setVmReadOnlyByContext();
         await refreshVmSnapshots();
@@ -1660,6 +1701,7 @@ async function init(opts) {
     await loadVmSelfDebugStrategyRules();
     await refreshVmSelfDebugRunDetail();
     await refreshVmSelfDebugContext();
+    setVmHealthReportText('HealthScan: click "Health Scan" to run.');
 }
 
 window.KACF = window.KACF || {};

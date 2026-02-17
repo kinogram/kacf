@@ -565,6 +565,33 @@ pub(crate) struct VmExecDispatchTraceResponse {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VmHealthScanPayload {
+    #[serde(default)]
+    pub(crate) self_heal: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmHealthIssue {
+    pub(crate) vm_name: String,
+    pub(crate) severity: String,
+    pub(crate) message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmHealthAction {
+    pub(crate) vm_name: String,
+    pub(crate) action: String,
+    pub(crate) detail: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmHealthScanResponse {
+    pub(crate) scanned: usize,
+    pub(crate) issues: Vec<VmHealthIssue>,
+    pub(crate) actions: Vec<VmHealthAction>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub(crate) struct VmExecEnqueuePayload {
     pub(crate) name: String,
     pub(crate) command: String,

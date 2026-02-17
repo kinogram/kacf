@@ -23,7 +23,8 @@ use crate::web_ui_models::{
     VmExecEnqueueProfilePayload, VmExecPayload, VmExecProfileDetailQuery,
     VmExecProfileDetailResponse, VmExecProfilePreviewQuery, VmExecProfilePreviewResponse,
     VmExecProfilesResponse, VmExecQueueItem, VmExecResponse, VmInstance, VmLogQuery,
-    VmLogsResponse, VmProvisionPayload, VmQueueCancelPayload, VmQueueQuery, VmQueueResponse,
+    VmLogsResponse, VmHealthAction, VmHealthIssue, VmHealthScanPayload, VmHealthScanResponse,
+    VmProvisionPayload, VmQueueCancelPayload, VmQueueQuery, VmQueueResponse,
     VmQueueStatsResponse, VmReadyQuery, VmReadyResponse, VmSelfDebugPlanPayload,
     VmSelfDebugPlanResponse, VmSelfDebugRunDetailQuery, VmSelfDebugRunDetailResponse,
     VmSelfDebugContextResponse, VmSelfDebugHistoryArchivePayload,
@@ -2017,6 +2018,68 @@ fn select_dispatch_vm_candidates_with_score(
             .then_with(|| a.vm_name.cmp(&b.vm_name))
     });
     candidates
+}
+
+fn scan_vm_health_locked(
+    managed_root_dir: &str,
+    state: &mut VmStateStore,
+    self_heal: bool,
+) -> (Vec<VmHealthIssue>, Vec<VmHealthAction>) {
+    let mut issues: Vec<VmHealthIssue> = Vec::new();
+    let mut actions: Vec<VmHealthAction> = Vec::new();
+    let now = now_unix();
+    for vm in state.vms.values_mut() {
+        let vm_name = vm.name.clone();
+        let before_power = vm.power_state.clone();
+        let _ = reconcile_vm_power_state(managed_root_dir, vm);
+        if before_power != vm.power_state {
+            issues.push(VmHealthIssue {
+                vm_name: vm_name.clone(),
+                severity: "warn".to_string(),
+                message: format!(
+                    "power state reconciled: {} -> {}",
+                    before_power, vm.power_state
+                ),
+            });
+        }
+        if vm.backend == "qemu" && vm.power_state == "running" && vm.ssh_port.unwrap_or(0) == 0 {
+            issues.push(VmHealthIssue {
+                vm_name: vm_name.clone(),
+                severity: "error".to_string(),
+                message: "running qemu vm has empty ssh_port".to_string(),
+            });
+        }
+        let mut items = load_exec_queue(managed_root_dir, &vm_name);
+        let stale_count = items
+            .iter()
+            .filter(|x| is_running_task_hard_timed_out(x, now))
+            .count();
+        if stale_count > 0 {
+            issues.push(VmHealthIssue {
+                vm_name: vm_name.clone(),
+                severity: "error".to_string(),
+                message: format!("stale running exec tasks detected: {stale_count}"),
+            });
+            if self_heal {
+                let recovered = recover_stale_running_tasks_in_queue(&mut items, now);
+                if recovered > 0 {
+                    force_stop_vm_exec_process(managed_root_dir, &vm_name);
+                    let _ = save_exec_queue(managed_root_dir, &vm_name, &items);
+                    append_vm_log(
+                        managed_root_dir,
+                        &vm_name,
+                        &format!("health-scan self-heal recovered stale tasks={recovered}"),
+                    );
+                    actions.push(VmHealthAction {
+                        vm_name: vm_name.clone(),
+                        action: "recover_stale_exec_tasks".to_string(),
+                        detail: format!("recovered={recovered}"),
+                    });
+                }
+            }
+        }
+    }
+    (issues, actions)
 }
 
 fn load_vm_state(managed_root_dir: &str) -> VmStateStore {
@@ -4439,6 +4502,31 @@ pub(crate) async fn get_vm_exec_dispatch_trace(
     HttpResponse::Ok().json(VmExecDispatchTraceResponse { entries })
 }
 
+pub(crate) async fn scan_vm_health(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+    body: web::Json<VmHealthScanPayload>,
+) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    let self_heal = body.self_heal;
+    if self_heal && !ctx.can_write {
+        return HttpResponse::Forbidden().body("read-only session");
+    }
+    let _guard = lock_recover(&data.projects_lock, "projects_lock");
+    let mut state = load_vm_state(&ctx.managed_root_dir);
+    let scanned = state.vms.len();
+    let (issues, actions) = scan_vm_health_locked(&ctx.managed_root_dir, &mut state, self_heal);
+    let _ = save_vm_state(&ctx.managed_root_dir, &state);
+    HttpResponse::Ok().json(VmHealthScanResponse {
+        scanned,
+        issues,
+        actions,
+    })
+}
+
 pub(crate) async fn check_vm_ready(
     req: HttpRequest,
     data: web::Data<AppState>,
@@ -4838,8 +4926,8 @@ mod tests {
         is_running_task_hard_timed_out, load_exec_queue, normalize_backend, now_unix,
         priority_aging_boost, queue_has_active_duplicate, queue_item_from_values,
         recover_stale_running_tasks_in_queue, sanitize_self_debug_run_id, sanitize_vm_name,
-        save_exec_queue, save_vm_state, select_dispatch_vm_candidates_with_score, load_dispatch_trace,
-        append_dispatch_trace_entry, VM_DISPATCH_TRACE_MAX_ENTRIES,
+        save_exec_queue, save_vm_state, load_vm_state, select_dispatch_vm_candidates_with_score, load_dispatch_trace,
+        append_dispatch_trace_entry, scan_vm_health_locked, VM_DISPATCH_TRACE_MAX_ENTRIES,
         strategy_priority_boost_by_stats, queue_watchdog_recovery_stats,
         trim_history_entries, vm_instance_limit_by_role, vm_queue_limit_by_role,
         vm_running_limit_by_role, vm_exec_running_limit_by_role,
@@ -5296,6 +5384,50 @@ mod tests {
         let entries = load_dispatch_trace(&managed_root);
         assert_eq!(entries.len(), VM_DISPATCH_TRACE_MAX_ENTRIES);
         assert_eq!(entries[0].created_at_unix, 7);
+    }
+
+    #[test]
+    fn health_scan_self_heal_recovers_stale_running_tasks() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let managed_root = format!("autocoding_data/users/health_scan_{unique}");
+        let now = now_unix();
+        let vm_name = "vm-health".to_string();
+        let mut state = crate::web_ui_models::VmStateStore::default();
+        state.vms.insert(
+            vm_name.clone(),
+            crate::web_ui_models::VmInstance {
+                name: vm_name.clone(),
+                backend: "metadata-only".to_string(),
+                power_state: "stopped".to_string(),
+                cpu: 2,
+                memory_mb: 1024,
+                disk_gb: 10,
+                disk_path: "autocoding_data/dummy.qcow2".to_string(),
+                os_image: "linux".to_string(),
+                created_at_unix: now,
+                updated_at_unix: now,
+                last_message: String::new(),
+                process_id: None,
+                ssh_port: None,
+                ssh_user: "root".to_string(),
+            },
+        );
+        save_vm_state(&managed_root, &state).expect("save vm state");
+
+        let mut running = queue_item_from_values("sleep 120", 10, 0, 0, 0);
+        running.status = "running".to_string();
+        running.started_at_unix = now.saturating_sub(60);
+        save_exec_queue(&managed_root, &vm_name, &[running]).expect("save queue");
+
+        let mut loaded = load_vm_state(&managed_root);
+        let (issues, actions) = scan_vm_health_locked(&managed_root, &mut loaded, true);
+        assert!(!issues.is_empty());
+        assert!(!actions.is_empty());
+        let items = load_exec_queue(&managed_root, &vm_name);
+        assert_eq!(items[0].status, "failed");
     }
 
     #[test]

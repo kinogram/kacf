@@ -1017,6 +1017,7 @@ pub async fn run_web_server(
             .route("/vm/exec/queue/run_next", web::post().to(web_ui_vm::run_next_vm_exec))
             .route("/vm/exec/dispatch", web::post().to(web_ui_vm::dispatch_vm_exec))
             .route("/vm/exec/dispatch/trace", web::get().to(web_ui_vm::get_vm_exec_dispatch_trace))
+            .route("/vm/health/scan", web::post().to(web_ui_vm::scan_vm_health))
             .route("/vm/ready", web::get().to(web_ui_vm::check_vm_ready))
             .route("/vm/provision", web::post().to(web_ui_vm::provision_vm))
             .route("/vm/start", web::post().to(web_ui_vm::start_vm))

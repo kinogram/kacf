@@ -199,6 +199,7 @@
                     <button class="btn-ghost" id="vm_refresh_btn"></button>
                     <button class="btn-ghost" id="vm_ready_btn"></button>
                     <button class="btn-ghost" id="vm_bootstrap_btn"></button>
+                    <button class="btn-ghost" id="vm_health_scan_btn">Health Scan</button>
                 </div>
                 <div class="row two" style="margin-top:10px;">
                     <div>
@@ -400,6 +401,11 @@
                 <pre id="vm_exec_output" style="max-height:200px;overflow:auto;"></pre>
                 <div class="hint" id="vm_exec_queue_stats"></div>
                 <pre id="vm_exec_dispatch_trace" style="max-height:160px;overflow:auto;"></pre>
+                <div class="checkbox-row" style="margin-top:8px;">
+                    <input id="vm_health_self_heal" type="checkbox">
+                    <label for="vm_health_self_heal">Health scan with self-heal</label>
+                </div>
+                <pre id="vm_health_report" style="max-height:160px;overflow:auto;"></pre>
                 <pre id="vm_exec_queue" style="max-height:200px;overflow:auto;"></pre>
                 <pre id="vm_logs" style="max-height:220px;overflow:auto;"></pre>
             </section>
