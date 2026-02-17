@@ -742,6 +742,16 @@ pub(crate) struct VmSelfDebugRunDetailResponse {
     pub(crate) tasks: Vec<VmSelfDebugRunTaskDetail>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmSelfDebugContextResponse {
+    pub(crate) name: String,
+    pub(crate) run_id: String,
+    pub(crate) failed_steps: usize,
+    pub(crate) categories: Vec<String>,
+    pub(crate) key_lines: Vec<String>,
+    pub(crate) context_text: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct VmQueueCancelPayload {
     pub(crate) name: String,

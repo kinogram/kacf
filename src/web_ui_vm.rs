@@ -23,9 +23,10 @@ use crate::web_ui_models::{
     VmLogsResponse, VmProvisionPayload, VmQueueCancelPayload, VmQueueQuery, VmQueueResponse,
     VmQueueStatsResponse, VmReadyQuery, VmReadyResponse, VmSelfDebugPlanPayload,
     VmSelfDebugPlanResponse, VmSelfDebugRunDetailQuery, VmSelfDebugRunDetailResponse,
-    VmSelfDebugRunSummary, VmSelfDebugRunTaskDetail, VmSelfDebugRunsQuery, VmSelfDebugRunsResponse,
-    VmSelfDebugStopPayload, VmSelfDebugStrategyRulesResponse, VmSelfDebugStrategyRulesSavePayload,
-    VmSelfDebugStrategyStat, VmSelfDebugStrategyStatsResponse, VmSnapshotEntry,
+    VmSelfDebugContextResponse, VmSelfDebugRunSummary, VmSelfDebugRunTaskDetail,
+    VmSelfDebugRunsQuery, VmSelfDebugRunsResponse, VmSelfDebugStopPayload,
+    VmSelfDebugStrategyRulesResponse, VmSelfDebugStrategyRulesSavePayload, VmSelfDebugStrategyStat,
+    VmSelfDebugStrategyStatsResponse, VmSnapshotEntry,
     VmSnapshotListQuery, VmSnapshotListResponse, VmSnapshotPayload, VmStateStore, VmStatusResponse,
 };
 
@@ -3053,6 +3054,122 @@ pub(crate) async fn get_vm_self_debug_run_detail(
         name,
         run_id: run_id.to_string(),
         tasks,
+    })
+}
+
+pub(crate) async fn get_vm_self_debug_context(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+    query: web::Query<VmSelfDebugRunDetailQuery>,
+) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    let name = match sanitize_vm_name(&query.name) {
+        Some(v) => v,
+        None => return HttpResponse::BadRequest().body("invalid vm name"),
+    };
+    let run_id = query.run_id.trim();
+    if run_id.is_empty() {
+        return HttpResponse::BadRequest().body("run_id is empty");
+    }
+    let _guard = lock_recover(&data.projects_lock, "projects_lock");
+    let items = load_exec_queue(&ctx.managed_root_dir, &name);
+    let mut failed_steps: Vec<VmExecQueueItem> = items
+        .into_iter()
+        .filter(|x| {
+            (x.run_kind == "self_debug"
+                || x.run_kind == "self_debug_strategy"
+                || x.run_kind == "self_debug_verify_after_strategy")
+                && x.run_id == run_id
+                && (x.status == "failed" || x.status == "canceled")
+        })
+        .collect();
+    if failed_steps.is_empty() {
+        return HttpResponse::NotFound().body("no failed steps for run_id");
+    }
+    failed_steps.sort_by(|a, b| {
+        a.created_at_unix
+            .cmp(&b.created_at_unix)
+            .then_with(|| a.id.cmp(&b.id))
+    });
+
+    let mut category_count: BTreeMap<String, usize> = BTreeMap::new();
+    let mut key_lines: Vec<String> = Vec::new();
+    for step in &failed_steps {
+        let category = if step.failure_category.trim().is_empty() {
+            "unknown_failure".to_string()
+        } else {
+            step.failure_category.trim().to_string()
+        };
+        *category_count.entry(category).or_insert(0) += 1;
+        for line in &step.failure_key_lines {
+            let t = line.trim();
+            if t.is_empty() {
+                continue;
+            }
+            if key_lines.iter().any(|x| x == t) {
+                continue;
+            }
+            key_lines.push(t.to_string());
+            if key_lines.len() >= 20 {
+                break;
+            }
+        }
+        if key_lines.len() >= 20 {
+            break;
+        }
+    }
+
+    let mut categories: Vec<String> = category_count
+        .into_iter()
+        .map(|(k, v)| format!("{k}:{v}"))
+        .collect();
+    categories.sort();
+
+    let mut lines = Vec::new();
+    lines.push(format!("run_id={}", run_id));
+    lines.push(format!("failed_steps={}", failed_steps.len()));
+    lines.push(format!("categories={}", categories.join(", ")));
+    lines.push(String::new());
+    lines.push("recent_failed_steps:".to_string());
+    for (idx, step) in failed_steps.iter().rev().take(8).enumerate() {
+        lines.push(format!(
+            "#{} kind={} status={} exit={} category={}",
+            idx + 1,
+            step.run_kind,
+            step.status,
+            step.exit_code,
+            if step.failure_category.trim().is_empty() {
+                "unknown_failure"
+            } else {
+                step.failure_category.as_str()
+            }
+        ));
+        lines.push(format!("cmd={}", step.command));
+        if !step.message.trim().is_empty() {
+            lines.push(format!("msg={}", step.message.trim()));
+        }
+        if !step.output_preview.trim().is_empty() {
+            lines.push(format!("out={}", tail_text(&step.output_preview, 500)));
+        }
+    }
+    if !key_lines.is_empty() {
+        lines.push(String::new());
+        lines.push("key_failure_lines:".to_string());
+        for line in &key_lines {
+            lines.push(format!("- {}", line));
+        }
+    }
+    let context_text = lines.join("\n");
+    HttpResponse::Ok().json(VmSelfDebugContextResponse {
+        name,
+        run_id: run_id.to_string(),
+        failed_steps: failed_steps.len(),
+        categories,
+        key_lines,
+        context_text,
     })
 }
 

@@ -131,6 +131,12 @@ function setVmSelfDebugTimelineText(text) {
     node.textContent = text || '';
 }
 
+function setVmSelfDebugContextText(text) {
+    const node = el('vm_self_debug_context');
+    if (!node) return;
+    node.textContent = text || '';
+}
+
 function buildSelfDebugTimelineText(tasks) {
     const list = Array.isArray(tasks) ? tasks : [];
     if (!list.length) {
@@ -212,6 +218,7 @@ function setVmMutatingDisabled(disabled) {
         'vm_self_debug_runs_refresh_btn',
         'vm_self_debug_stats_btn',
         'vm_self_debug_detail_btn',
+        'vm_self_debug_context_btn',
         'vm_self_debug_pause_btn',
         'vm_self_debug_resume_btn',
         'vm_self_debug_stop_btn',
@@ -865,6 +872,7 @@ async function refreshVmSelfDebugRunDetail() {
     if (!name || !runId) {
         setVmSelfDebugTimelineText('');
         setVmSelfDebugRunDetailText('');
+        setVmSelfDebugContextText('');
         return;
     }
     try {
@@ -921,6 +929,21 @@ async function stopVmSelfDebugRun() {
     }
 }
 
+async function refreshVmSelfDebugContext() {
+    const name = selectedVmName();
+    const runId = String(el('vm_self_debug_run_id')?.value || '').trim();
+    if (!name || !runId) {
+        setVmSelfDebugContextText('');
+        return;
+    }
+    try {
+        const data = await vmApi(`/vm/self_debug/context?name=${encodeURIComponent(name)}&run_id=${encodeURIComponent(runId)}`, 'GET');
+        setVmSelfDebugContextText(String(data?.context_text || ''));
+    } catch (e) {
+        setVmSelfDebugContextText(fmt('status_vm_self_debug_context_failed', 'Load self-debug context failed: {error}', { error: String(e) }));
+    }
+}
+
 async function pauseVmSelfDebugRun() {
     const name = selectedVmName();
     const runId = String(el('vm_self_debug_run_id')?.value || '').trim();
@@ -938,6 +961,7 @@ async function pauseVmSelfDebugRun() {
         await refreshVmExecQueue();
         await refreshVmSelfDebugRuns();
         await refreshVmSelfDebugRunDetail();
+        await refreshVmSelfDebugContext();
     } catch (e) {
         setStatus(fmt('status_vm_self_debug_pause_failed', 'Pause self-debug run failed: {error}', { error: String(e) }), 'status-danger');
     }
@@ -960,6 +984,7 @@ async function resumeVmSelfDebugRun() {
         await refreshVmExecQueue();
         await refreshVmSelfDebugRuns();
         await refreshVmSelfDebugRunDetail();
+        await refreshVmSelfDebugContext();
     } catch (e) {
         setStatus(fmt('status_vm_self_debug_resume_failed', 'Resume self-debug run failed: {error}', { error: String(e) }), 'status-danger');
     }
@@ -1328,6 +1353,7 @@ function bindVmEvents() {
     el('vm_self_debug_runs_refresh_btn')?.addEventListener('click', refreshVmSelfDebugRuns);
     el('vm_self_debug_stats_btn')?.addEventListener('click', refreshVmSelfDebugStrategyStats);
     el('vm_self_debug_detail_btn')?.addEventListener('click', refreshVmSelfDebugRunDetail);
+    el('vm_self_debug_context_btn')?.addEventListener('click', refreshVmSelfDebugContext);
     el('vm_self_debug_pause_btn')?.addEventListener('click', pauseVmSelfDebugRun);
     el('vm_self_debug_resume_btn')?.addEventListener('click', resumeVmSelfDebugRun);
     el('vm_self_debug_stop_btn')?.addEventListener('click', stopVmSelfDebugRun);
@@ -1344,11 +1370,15 @@ function bindVmEvents() {
         await refreshVmSelfDebugRuns();
         await refreshVmSelfDebugStrategyStats();
         await refreshVmSelfDebugRunDetail();
+        await refreshVmSelfDebugContext();
     });
     el('vm_exec_profile')?.addEventListener('change', previewVmExecProfile);
     el('vm_exec_profile_workdir')?.addEventListener('input', previewVmExecProfile);
     el('vm_exec_profile_test_cmd')?.addEventListener('input', previewVmExecProfile);
-    el('vm_self_debug_run_id')?.addEventListener('input', refreshVmSelfDebugRunDetail);
+    el('vm_self_debug_run_id')?.addEventListener('input', async () => {
+        await refreshVmSelfDebugRunDetail();
+        await refreshVmSelfDebugContext();
+    });
     setInterval(setVmReadOnlyByContext, 1000);
 }
 
@@ -1379,6 +1409,7 @@ async function init(opts) {
     await refreshVmSelfDebugStrategyStats();
     await loadVmSelfDebugStrategyRules();
     await refreshVmSelfDebugRunDetail();
+    await refreshVmSelfDebugContext();
 }
 
 window.KACF = window.KACF || {};
