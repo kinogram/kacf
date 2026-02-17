@@ -64,6 +64,7 @@
   "label_vm_self_debug_verify_cmd": "自调试验证命令（可选）",
   "label_vm_self_debug_success_streak_target": "提前结束成功连击阈值",
   "label_vm_self_debug_fail_streak_target": "提前结束失败连击阈值",
+  "label_vm_self_debug_max_task_budget": "自调试最大任务数（0=不限制）",
   "label_vm_self_debug_run_id": "自调试运行 ID",
   "label_vm_self_debug_strategy_rules": "策略规则（JSON）",
   "label_vm_exec_batch_commands": "批量命令（每行一条）",

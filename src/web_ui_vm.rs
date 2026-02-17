@@ -2878,10 +2878,14 @@ pub(crate) async fn preview_vm_self_debug_plan(
         Some(v) => v,
         None => return HttpResponse::BadRequest().body("invalid vm name"),
     };
-    let tasks = match build_self_debug_tasks(&body) {
+    let mut tasks = match build_self_debug_tasks(&body) {
         Ok(v) => v,
         Err(e) => return HttpResponse::BadRequest().body(e),
     };
+    let budget = body.max_task_budget.clamp(0, 500) as usize;
+    if budget > 0 && tasks.len() > budget {
+        tasks.truncate(budget);
+    }
     HttpResponse::Ok().json(VmSelfDebugPlanResponse {
         name,
         total_tasks: tasks.len(),
@@ -2907,10 +2911,14 @@ pub(crate) async fn start_vm_self_debug_plan(
         Some(v) => v,
         None => return HttpResponse::BadRequest().body("invalid vm name"),
     };
-    let tasks = match build_self_debug_tasks(&body) {
+    let mut tasks = match build_self_debug_tasks(&body) {
         Ok(v) => v,
         Err(e) => return HttpResponse::BadRequest().body(e),
     };
+    let budget = body.max_task_budget.clamp(0, 500) as usize;
+    if budget > 0 && tasks.len() > budget {
+        tasks.truncate(budget);
+    }
     let run_id = if body.run_id.trim().is_empty() {
         self_debug_run_id()
     } else {

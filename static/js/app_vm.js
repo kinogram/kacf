@@ -235,6 +235,7 @@ function setVmMutatingDisabled(disabled) {
         'vm_self_debug_verify_cmd',
         'vm_self_debug_success_streak_target',
         'vm_self_debug_fail_streak_target',
+        'vm_self_debug_max_task_budget',
         'vm_self_debug_run_id',
         'vm_self_debug_strategy_rules',
     ].forEach((id) => {
@@ -386,6 +387,7 @@ function collectVmSelfDebugPayload() {
         verify_cmd: String(el('vm_self_debug_verify_cmd')?.value || '').trim(),
         success_streak_target: asBoundedInt(el('vm_self_debug_success_streak_target')?.value, 1, 10, 2),
         fail_streak_target: asBoundedInt(el('vm_self_debug_fail_streak_target')?.value, 1, 10, 3),
+        max_task_budget: asBoundedInt(el('vm_self_debug_max_task_budget')?.value, 0, 500, 0),
         timeout_sec: asBoundedInt(el('vm_exec_timeout_sec')?.value, 1, 3600, 120),
         wait_ready_sec: asBoundedInt(el('vm_exec_wait_ready_sec')?.value, 0, 600, 0),
         priority: asBoundedSignedInt(el('vm_exec_priority')?.value, -100, 100, 0),

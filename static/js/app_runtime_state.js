@@ -163,6 +163,7 @@ function applyStaticCopyToDom() {
         ['label_vm_self_debug_verify_cmd', 'label_vm_self_debug_verify_cmd'],
         ['label_vm_self_debug_success_streak_target', 'label_vm_self_debug_success_streak_target'],
         ['label_vm_self_debug_fail_streak_target', 'label_vm_self_debug_fail_streak_target'],
+        ['label_vm_self_debug_max_task_budget', 'label_vm_self_debug_max_task_budget'],
         ['label_vm_self_debug_run_id', 'label_vm_self_debug_run_id'],
         ['label_vm_self_debug_strategy_rules', 'label_vm_self_debug_strategy_rules'],
         ['label_vm_exec_batch_commands', 'label_vm_exec_batch_commands'],
