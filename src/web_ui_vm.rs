@@ -228,6 +228,7 @@ fn queue_item_from_values(
         failure_key_lines: Vec::new(),
         run_id: String::new(),
         run_kind: String::new(),
+        run_max_runtime_sec: 0,
         strategy_signature: String::new(),
         trigger_task_id: String::new(),
     }
@@ -508,6 +509,52 @@ fn strategy_priority_boost_by_stats(items: &[VmExecQueueItem], category: &str) -
     } else {
         0
     }
+}
+
+fn is_self_debug_kind(kind: &str) -> bool {
+    kind == "self_debug" || kind == "self_debug_strategy" || kind == "self_debug_verify_after_strategy"
+}
+
+fn enforce_self_debug_run_timeout(
+    items: &mut [VmExecQueueItem],
+    run_id: &str,
+    now: u64,
+) -> Option<u64> {
+    if run_id.trim().is_empty() {
+        return None;
+    }
+    let mut min_created = u64::MAX;
+    let mut max_runtime = 0u64;
+    for item in items.iter() {
+        if item.run_id != run_id || !is_self_debug_kind(&item.run_kind) {
+            continue;
+        }
+        min_created = min_created.min(item.created_at_unix);
+        max_runtime = max_runtime.max(item.run_max_runtime_sec);
+    }
+    if max_runtime == 0 || min_created == u64::MAX {
+        return None;
+    }
+    if now.saturating_sub(min_created) < max_runtime {
+        return None;
+    }
+    let mut changed = 0usize;
+    for item in items.iter_mut() {
+        if item.run_id != run_id || !is_self_debug_kind(&item.run_kind) {
+            continue;
+        }
+        if item.status == "pending" || item.status == "paused" {
+            item.status = "canceled".to_string();
+            item.finished_at_unix = now;
+            item.exit_code = -2;
+            item.message = "canceled by run max_runtime timeout".to_string();
+            changed += 1;
+        }
+    }
+    if changed == 0 {
+        return None;
+    }
+    Some(max_runtime)
 }
 
 fn normalize_batch_task(
@@ -1140,7 +1187,29 @@ fn run_next_vm_exec_core(
             &format!("self-debug early-stop gate triggered run_id={}", finished_run_id),
         );
     }
+    let run_timed_out = if !finished_run_id.trim().is_empty() && is_self_debug_kind(&finished_run_kind) {
+        let now = now_unix();
+        let hit = enforce_self_debug_run_timeout(&mut items, &finished_run_id, now);
+        if let Some(max_runtime) = hit {
+            append_vm_log(
+                managed_root_dir,
+                name,
+                &format!(
+                    "self-debug run timeout reached run_id={} max_runtime_sec={}",
+                    finished_run_id, max_runtime
+                ),
+            );
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    };
     let inject_strategy = strategy_candidate.as_ref().and_then(|c| {
+        if run_timed_out {
+            return None;
+        }
         let current = strategy_injected_count(&items, &c.0, &c.3);
         let max_inject = 2usize;
         if current < max_inject {
@@ -1150,6 +1219,11 @@ fn run_next_vm_exec_core(
         }
     });
     if let Some((run_id, category, priority, signature, trigger_task_id, failed_command)) = inject_strategy {
+        let inherited_run_max_runtime = items
+            .iter()
+            .find(|x| x.id == trigger_task_id)
+            .map(|x| x.run_max_runtime_sec)
+            .unwrap_or(0);
         let dynamic_boost = strategy_priority_boost_by_stats(&items, &category);
         let strategy_priority = priority
             .saturating_add(1)
@@ -1167,6 +1241,7 @@ fn run_next_vm_exec_core(
         );
         strategy_item.run_id = run_id.clone();
         strategy_item.run_kind = "self_debug_strategy".to_string();
+        strategy_item.run_max_runtime_sec = inherited_run_max_runtime;
         strategy_item.strategy_signature = signature.clone();
         strategy_item.trigger_task_id = trigger_task_id.clone();
         strategy_item.message = format!(
@@ -1189,6 +1264,7 @@ fn run_next_vm_exec_core(
         );
         verify_after_item.run_id = run_id.clone();
         verify_after_item.run_kind = "self_debug_verify_after_strategy".to_string();
+        verify_after_item.run_max_runtime_sec = inherited_run_max_runtime;
         verify_after_item.strategy_signature = signature.clone();
         verify_after_item.trigger_task_id = trigger_task_id.clone();
         verify_after_item.message = "auto verify-after-strategy task injected".to_string();
@@ -2935,6 +3011,7 @@ pub(crate) async fn start_vm_self_debug_plan(
     let default_wait_ready_sec = body.wait_ready_sec.clamp(0, 600);
     let default_priority = body.priority.clamp(-100, 100);
     let default_retry_max = body.retry_max.clamp(0, 10);
+    let run_max_runtime_sec = body.max_runtime_sec.clamp(0, 86_400);
 
     let _guard = lock_recover(&data.projects_lock, "projects_lock");
     let state = load_vm_state(&ctx.managed_root_dir);
@@ -2953,6 +3030,7 @@ pub(crate) async fn start_vm_self_debug_plan(
         ) {
             item.run_id = run_id.clone();
             item.run_kind = "self_debug".to_string();
+            item.run_max_runtime_sec = run_max_runtime_sec;
             items.push(item);
             added += 1;
         }
@@ -3845,9 +3923,9 @@ pub(crate) async fn delete_vm(
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_self_debug_runs, default_cpu, default_disk_gb, default_memory_mb, normalize_backend,
-        queue_item_from_values, sanitize_self_debug_run_id, sanitize_vm_name,
-        strategy_priority_boost_by_stats,
+        collect_self_debug_runs, default_cpu, default_disk_gb, default_memory_mb,
+        enforce_self_debug_run_timeout, normalize_backend, queue_item_from_values,
+        sanitize_self_debug_run_id, sanitize_vm_name, strategy_priority_boost_by_stats,
     };
 
     #[test]
@@ -3953,5 +4031,27 @@ mod tests {
             small.push(verify);
         }
         assert_eq!(strategy_priority_boost_by_stats(&small, "build_error"), 0);
+    }
+
+    #[test]
+    fn enforce_self_debug_run_timeout_cancels_remaining_tasks() {
+        let mut done = queue_item_from_values("echo done", 10, 0, 0, 0);
+        done.run_id = "sd-timeout".to_string();
+        done.run_kind = "self_debug".to_string();
+        done.run_max_runtime_sec = 30;
+        done.created_at_unix = 100;
+        done.status = "done".to_string();
+
+        let mut pending = queue_item_from_values("echo pending", 10, 0, 0, 0);
+        pending.run_id = "sd-timeout".to_string();
+        pending.run_kind = "self_debug_strategy".to_string();
+        pending.run_max_runtime_sec = 30;
+        pending.created_at_unix = 100;
+        pending.status = "pending".to_string();
+
+        let mut items = vec![done, pending];
+        let hit = enforce_self_debug_run_timeout(&mut items, "sd-timeout", 131);
+        assert_eq!(hit, Some(30));
+        assert_eq!(items[1].status, "canceled");
     }
 }

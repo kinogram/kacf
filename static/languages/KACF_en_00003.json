@@ -65,6 +65,7 @@
   "label_vm_self_debug_success_streak_target": "Early Stop Success Streak Target",
   "label_vm_self_debug_fail_streak_target": "Early Stop Fail Streak Target",
   "label_vm_self_debug_max_task_budget": "Max Self-Debug Tasks (0 = Unlimited)",
+  "label_vm_self_debug_max_runtime_sec": "Run Max Runtime Sec (0 = Unlimited)",
   "label_vm_self_debug_run_id": "Self-Debug Run ID",
   "label_vm_self_debug_strategy_rules": "Strategy Rules (JSON)",
   "label_vm_exec_batch_commands": "Batch Commands (one command per line)",
