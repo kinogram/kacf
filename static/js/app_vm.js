@@ -223,6 +223,7 @@ function setVmMutatingDisabled(disabled) {
         'vm_self_debug_start_btn',
         'vm_self_debug_runs_refresh_btn',
         'vm_self_debug_history_refresh_btn',
+        'vm_self_debug_history_detail_btn',
         'vm_self_debug_history_archive_btn',
         'vm_self_debug_history_clear_btn',
         'vm_self_debug_stats_btn',
@@ -842,6 +843,46 @@ async function refreshVmSelfDebugHistory() {
         setVmSelfDebugHistoryText(lines.join('\n'));
     } catch (e) {
         setVmSelfDebugHistoryText(fmt('status_vm_self_debug_history_failed', 'Load self-debug history failed: {error}', { error: String(e) }));
+    }
+}
+
+async function loadVmSelfDebugHistoryDetail() {
+    const name = selectedVmName();
+    const runId = String(el('vm_self_debug_run_id')?.value || '').trim();
+    if (!name) {
+        setStatus(txt('status_vm_target_required', 'Please select a VM first'), 'status-danger');
+        return;
+    }
+    if (!runId) {
+        setStatus(txt('status_vm_self_debug_run_id_required', 'Please enter self-debug run id first.'), 'status-danger');
+        return;
+    }
+    try {
+        const data = await vmApi(`/vm/self_debug/history/detail?name=${encodeURIComponent(name)}&run_id=${encodeURIComponent(runId)}`, 'GET');
+        const entry = data?.entry || {};
+        const summary = entry?.summary || {};
+        const archivedAt = Number(entry?.archived_at_unix || 0);
+        const failedSteps = Number(entry?.failed_steps || 0);
+        const categories = Array.isArray(entry?.categories) ? entry.categories : [];
+        const keyLines = Array.isArray(entry?.key_lines) ? entry.key_lines : [];
+        const contextText = String(entry?.context_text || '').trim();
+        const lines = [];
+        lines.push(`run_id=${String(summary?.run_id || runId)}`);
+        lines.push(`archived_at=${archivedAt}`);
+        lines.push(`total=${Number(summary?.total || 0)} done=${Number(summary?.done || 0)} failed=${Number(summary?.failed || 0)} canceled=${Number(summary?.canceled || 0)}`);
+        lines.push(`failed_steps=${failedSteps}`);
+        lines.push(`categories=${categories.join(', ')}`);
+        if (keyLines.length) {
+            lines.push(`key_lines=${keyLines.join(' | ')}`);
+        }
+        if (contextText) {
+            lines.push('');
+            lines.push(contextText);
+        }
+        setVmSelfDebugContextText(lines.join('\n'));
+        setStatus(txt('status_vm_self_debug_history_detail_loaded', 'Self-debug history detail loaded.'), 'status-warn');
+    } catch (e) {
+        setStatus(fmt('status_vm_self_debug_history_detail_failed', 'Load self-debug history detail failed: {error}', { error: String(e) }), 'status-danger');
     }
 }
 
@@ -1493,6 +1534,7 @@ function bindVmEvents() {
     el('vm_self_debug_start_btn')?.addEventListener('click', startVmSelfDebugPlan);
     el('vm_self_debug_runs_refresh_btn')?.addEventListener('click', refreshVmSelfDebugRuns);
     el('vm_self_debug_history_refresh_btn')?.addEventListener('click', refreshVmSelfDebugHistory);
+    el('vm_self_debug_history_detail_btn')?.addEventListener('click', loadVmSelfDebugHistoryDetail);
     el('vm_self_debug_history_archive_btn')?.addEventListener('click', archiveVmSelfDebugCompletedRuns);
     el('vm_self_debug_history_clear_btn')?.addEventListener('click', clearVmSelfDebugHistory);
     el('vm_self_debug_stats_btn')?.addEventListener('click', refreshVmSelfDebugStrategyStats);

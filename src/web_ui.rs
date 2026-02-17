@@ -970,6 +970,10 @@ pub async fn run_web_server(
                 web::get().to(web_ui_vm::list_vm_self_debug_history),
             )
             .route(
+                "/vm/self_debug/history/detail",
+                web::get().to(web_ui_vm::get_vm_self_debug_history_detail),
+            )
+            .route(
                 "/vm/self_debug/history/archive_completed",
                 web::post().to(web_ui_vm::archive_vm_self_debug_history),
             )

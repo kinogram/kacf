@@ -709,6 +709,13 @@ pub(crate) struct VmSelfDebugHistoryResponse {
     pub(crate) history: Vec<VmSelfDebugHistoryEntry>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmSelfDebugHistoryDetailResponse {
+    pub(crate) name: String,
+    pub(crate) run_id: String,
+    pub(crate) entry: VmSelfDebugHistoryEntry,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct VmSelfDebugHistoryArchivePayload {
     pub(crate) name: String,

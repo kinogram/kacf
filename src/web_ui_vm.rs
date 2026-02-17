@@ -25,7 +25,8 @@ use crate::web_ui_models::{
     VmSelfDebugPlanResponse, VmSelfDebugRunDetailQuery, VmSelfDebugRunDetailResponse,
     VmSelfDebugContextResponse, VmSelfDebugHistoryArchivePayload,
     VmSelfDebugHistoryArchiveResponse, VmSelfDebugHistoryClearPayload,
-    VmSelfDebugHistoryClearResponse, VmSelfDebugHistoryEntry, VmSelfDebugHistoryResponse,
+    VmSelfDebugHistoryClearResponse, VmSelfDebugHistoryDetailResponse, VmSelfDebugHistoryEntry,
+    VmSelfDebugHistoryResponse,
     VmSelfDebugRunSummary, VmSelfDebugRunTaskDetail,
     VmSelfDebugRunsQuery, VmSelfDebugRunsResponse, VmSelfDebugStopPayload,
     VmSelfDebugStrategyRulesResponse, VmSelfDebugStrategyRulesSavePayload, VmSelfDebugStrategyStat,
@@ -3335,6 +3336,35 @@ pub(crate) async fn list_vm_self_debug_history(
     let mut history = load_self_debug_history(&ctx.managed_root_dir, &name);
     sort_history_entries(&mut history);
     HttpResponse::Ok().json(VmSelfDebugHistoryResponse { name, history })
+}
+
+pub(crate) async fn get_vm_self_debug_history_detail(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+    query: web::Query<VmSelfDebugRunDetailQuery>,
+) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    let name = match sanitize_vm_name(&query.name) {
+        Some(v) => v,
+        None => return HttpResponse::BadRequest().body("invalid vm name"),
+    };
+    let run_id = query.run_id.trim();
+    if run_id.is_empty() {
+        return HttpResponse::BadRequest().body("run_id is empty");
+    }
+    let _guard = lock_recover(&data.projects_lock, "projects_lock");
+    let history = load_self_debug_history(&ctx.managed_root_dir, &name);
+    let Some(entry) = history.into_iter().find(|x| x.summary.run_id == run_id) else {
+        return HttpResponse::NotFound().body("history run not found");
+    };
+    HttpResponse::Ok().json(VmSelfDebugHistoryDetailResponse {
+        name,
+        run_id: run_id.to_string(),
+        entry,
+    })
 }
 
 pub(crate) async fn archive_vm_self_debug_history(
