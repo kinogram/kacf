@@ -28,16 +28,14 @@ const FALLBACK_LOG_DEDUP_MS = 30000;
 const BACKEND_FAILURE_THRESHOLD = 3;
 const SSE_ERROR_LIMIT = 6;
 const SSE_CONNECT_GRACE_MS = 10000;
-const DEFAULT_LOG_MAX_CHARS = 50000;
-const DEFAULT_DIFF_MAX_CHARS = 50000;
-const LARGE_CHAR_LIMIT_WARNING_THRESHOLD = 50000;
+const DEFAULT_LOG_MAX_CHARS = 20000;
+const LARGE_CHAR_LIMIT_WARNING_THRESHOLD = 30000;
 const GLOBAL_OPTION_DEFAULTS = {
     auto_resume_attempts: '',
     stop_after_minutes: '',
     history_max_messages: '40',
     history_max_chars: '70000',
     log_max_chars: String(DEFAULT_LOG_MAX_CHARS),
-    diff_max_chars: String(DEFAULT_DIFF_MAX_CHARS),
 };
 const GLOBAL_OPTION_INPUT_ID_BY_KEY = {
     auto_resume_attempts: 'global_auto_resume_attempts',
@@ -45,7 +43,6 @@ const GLOBAL_OPTION_INPUT_ID_BY_KEY = {
     history_max_messages: 'global_history_max_messages',
     history_max_chars: 'global_history_max_chars',
     log_max_chars: 'global_log_max_chars',
-    diff_max_chars: 'global_diff_max_chars',
 };
 let activeRunLogBucket = '';
 let activeRunProjectLabel = '';
@@ -92,11 +89,33 @@ const BACKEND_COMM_BUTTON_IDS = [
     'revert_btn',
     'push_btn',
     'clarify_submit_btn',
+    'view_diff_btn',
     'project_new_btn',
     'project_save_btn',
     'project_load_btn',
     'project_delete_btn',
+    'open_global_config_btn',
     'save_global_config_btn',
+    'vm_provision_btn',
+    'vm_refresh_btn',
+    'vm_ready_btn',
+    'vm_bootstrap_btn',
+    'vm_start_btn',
+    'vm_stop_btn',
+    'vm_delete_btn',
+    'vm_refresh_logs_btn',
+    'vm_snapshot_refresh_btn',
+    'vm_snapshot_create_btn',
+    'vm_snapshot_apply_btn',
+    'vm_snapshot_delete_btn',
+    'vm_clone_btn',
+    'vm_exec_btn',
+    'vm_exec_cancel_btn',
+    'vm_exec_enqueue_btn',
+    'vm_exec_batch_enqueue_btn',
+    'vm_exec_run_next_btn',
+    'vm_exec_queue_refresh_btn',
+    'vm_exec_queue_cancel_btn',
 ];
 const PROJECT_CONTROL_IDS = [
     'project_name',
@@ -253,21 +272,15 @@ function logMaxCharsSetting() {
     return parseBoundedInt(globalOptions.log_max_chars, 1, 2_000_000, DEFAULT_LOG_MAX_CHARS);
 }
 
-function diffMaxCharsSetting() {
-    return parseBoundedInt(globalOptions.diff_max_chars, 1, 2_000_000, DEFAULT_DIFF_MAX_CHARS);
-}
-
 function maybeWarnLargeCharLimit(source) {
     const logLimit = logMaxCharsSetting();
-    const diffLimit = diffMaxCharsSetting();
-    if (logLimit <= LARGE_CHAR_LIMIT_WARNING_THRESHOLD && diffLimit <= LARGE_CHAR_LIMIT_WARNING_THRESHOLD) {
+    if (logLimit <= LARGE_CHAR_LIMIT_WARNING_THRESHOLD) {
         return;
     }
     setStatus(fmt('status_large_char_limit_warning', '', {
         source: source || txt('label_global_config', ''),
         threshold: LARGE_CHAR_LIMIT_WARNING_THRESHOLD,
         log_limit: logLimit,
-        diff_limit: diffLimit,
     }), 'status-warn');
 }
 
@@ -276,10 +289,6 @@ function truncateTailChars(raw, maxChars) {
     if (maxChars <= 0) return '';
     if (text.length <= maxChars) return text;
     return text.slice(text.length - maxChars);
-}
-
-function sanitizeDiffText(raw) {
-    return truncateTailChars(raw, diffMaxCharsSetting());
 }
 
 function sanitizeLogContent(raw) {
@@ -304,11 +313,7 @@ function sanitizeProjectUiStateMap(rawMap) {
     Object.keys(rawMap).forEach(k => {
         const entry = rawMap[k];
         if (!entry || typeof entry !== 'object') return;
-        const normalized = { ...entry };
-        if (typeof normalized.diff_text === 'string') {
-            normalized.diff_text = sanitizeDiffText(normalized.diff_text);
-        }
-        out[String(k)] = normalized;
+        out[String(k)] = { ...entry };
     });
     return out;
 }
@@ -430,13 +435,32 @@ function buildIconSvg(name) {
         return svg;
     }
 
+    if (name === 'link') {
+        const first = document.createElementNS(NS, 'path');
+        first.setAttribute('d', 'M10 13a5 5 0 0 0 7.07 0l1.41-1.41a5 5 0 0 0-7.07-7.07L10 5');
+        first.setAttribute('fill', 'none');
+        first.setAttribute('stroke', 'currentColor');
+        first.setAttribute('stroke-width', '2');
+        first.setAttribute('stroke-linecap', 'round');
+        first.setAttribute('stroke-linejoin', 'round');
+        svg.appendChild(first);
+        const second = document.createElementNS(NS, 'path');
+        second.setAttribute('d', 'M14 11a5 5 0 0 0-7.07 0l-1.41 1.41a5 5 0 1 0 7.07 7.07L14 19');
+        second.setAttribute('fill', 'none');
+        second.setAttribute('stroke', 'currentColor');
+        second.setAttribute('stroke-width', '2');
+        second.setAttribute('stroke-linecap', 'round');
+        second.setAttribute('stroke-linejoin', 'round');
+        svg.appendChild(second);
+        return svg;
+    }
+
     const path = document.createElementNS(NS, 'path');
     const dMap = {
         'chevron-left': 'M15 6l-6 6 6 6',
         'chevron-right': 'M9 6l6 6-6 6',
         'x': 'M6 6l12 12M18 6l-12 12',
         'menu': 'M4 7h16M4 12h16M4 17h16',
-        'link': 'M10 13a5 5 0 0 0 7.07 0l1.41-1.41a5 5 0 0 0-7.07-7.07L10 5',
         'shield': 'M12 2l7 4v6c0 5-3 9-7 10C8 21 5 17 5 12V6l7-4',
     };
     const d = dMap[name] || '';
@@ -828,10 +852,36 @@ function setTopbarHintText(el, text, opts) {
     });
 }
 
-function setRunningProjectIndicator(label) {
-    const el = document.getElementById('running_project_text');
+let topbarParts = { run: '', project: '', unattended: '' };
+
+function renderTopbarCombined(opts) {
+    const el = document.getElementById('topbar_line_text');
     if (!el) return;
-    setTopbarHintText(el, fmt('running_project_line', '', { name: label || txt('running_project_none', '') }));
+    const line = fmt('topbar_combined_line', '', {
+        run: String(topbarParts.run || ''),
+        project: String(topbarParts.project || ''),
+        unattended: String(topbarParts.unattended || ''),
+    });
+    setTopbarHintText(el, line, opts || {});
+}
+
+function setTopbarPart(kind, text, opts) {
+    const k = String(kind || '');
+    if (k === 'run') topbarParts.run = String(text || '');
+    else if (k === 'project') topbarParts.project = String(text || '');
+    else if (k === 'unattended') topbarParts.unattended = String(text || '');
+    renderTopbarCombined(opts || {});
+}
+
+function refreshTopbarCombined() {
+    renderTopbarCombined({ force: true, allowResetWhenSameText: true });
+}
+
+function setRunningProjectIndicator(label) {
+    setTopbarPart(
+        'project',
+        fmt('running_project_line', '', { name: label || txt('running_project_none', '') }),
+    );
     renderProjectAccordion();
 }
 
@@ -1047,10 +1097,8 @@ window.KACF.state = {
     parseBoundedInt,
     normalizeGlobalOptions,
     logMaxCharsSetting,
-    diffMaxCharsSetting,
     maybeWarnLargeCharLimit,
     truncateTailChars,
-    sanitizeDiffText,
     sanitizeLogContent,
     sanitizeProjectLogsMap,
     sanitizeProjectUiStateMap,
@@ -1091,6 +1139,9 @@ window.KACF.state = {
     setOfflineInputLock,
     isReadOnlyView,
     applyReadOnlyMode,
+    setTopbarPart,
+    refreshTopbarCombined,
+    setGuestModeLocked,
     updateGoRunningProjectButton,
     goToRunningProjectView,
     currentProjectLabel,

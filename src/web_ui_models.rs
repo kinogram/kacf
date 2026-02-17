@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct StartPayload {
@@ -256,8 +257,6 @@ pub(crate) struct GlobalOptions {
     pub(crate) history_max_chars: String,
     #[serde(default)]
     pub(crate) log_max_chars: String,
-    #[serde(default)]
-    pub(crate) diff_max_chars: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -272,4 +271,283 @@ pub(crate) struct UiCachePatch {
     pub(crate) project_logs: Option<std::collections::BTreeMap<String, String>>,
     #[serde(default)]
     pub(crate) project_ui_state: Option<std::collections::BTreeMap<String, serde_json::Value>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct VmInstance {
+    pub(crate) name: String,
+    pub(crate) backend: String,
+    pub(crate) power_state: String,
+    pub(crate) cpu: u32,
+    pub(crate) memory_mb: u32,
+    pub(crate) disk_gb: u32,
+    pub(crate) disk_path: String,
+    #[serde(default)]
+    pub(crate) os_image: String,
+    pub(crate) created_at_unix: u64,
+    pub(crate) updated_at_unix: u64,
+    #[serde(default)]
+    pub(crate) last_message: String,
+    #[serde(default)]
+    pub(crate) process_id: Option<u32>,
+    #[serde(default)]
+    pub(crate) ssh_port: Option<u16>,
+    #[serde(default)]
+    pub(crate) ssh_user: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub(crate) struct VmStateStore {
+    #[serde(default)]
+    pub(crate) vms: BTreeMap<String, VmInstance>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct VmCapability {
+    pub(crate) backend: String,
+    pub(crate) available: bool,
+    pub(crate) detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct VmStatusResponse {
+    pub(crate) readonly: bool,
+    pub(crate) capabilities: Vec<VmCapability>,
+    pub(crate) vms: Vec<VmInstance>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VmProvisionPayload {
+    pub(crate) name: String,
+    #[serde(default)]
+    pub(crate) backend: String,
+    #[serde(default)]
+    pub(crate) cpu: u32,
+    #[serde(default)]
+    pub(crate) memory_mb: u32,
+    #[serde(default)]
+    pub(crate) disk_gb: u32,
+    #[serde(default)]
+    pub(crate) os_image: String,
+    #[serde(default)]
+    pub(crate) ssh_user: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VmActionPayload {
+    pub(crate) name: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VmDeletePayload {
+    pub(crate) name: String,
+    #[serde(default)]
+    pub(crate) purge_disk: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmActionResponse {
+    pub(crate) ok: bool,
+    pub(crate) effective: bool,
+    pub(crate) message: String,
+    pub(crate) vm: Option<VmInstance>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VmLogQuery {
+    pub(crate) name: String,
+    #[serde(default)]
+    pub(crate) tail: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmLogsResponse {
+    pub(crate) name: String,
+    pub(crate) path: String,
+    pub(crate) bytes: usize,
+    pub(crate) text: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VmSnapshotPayload {
+    pub(crate) name: String,
+    pub(crate) snapshot: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VmSnapshotListQuery {
+    pub(crate) name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmSnapshotListResponse {
+    pub(crate) name: String,
+    pub(crate) snapshots: Vec<VmSnapshotEntry>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmSnapshotEntry {
+    pub(crate) tag: String,
+    #[serde(default)]
+    pub(crate) vm_size: String,
+    #[serde(default)]
+    pub(crate) created_at: String,
+    #[serde(default)]
+    pub(crate) vm_clock: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VmClonePayload {
+    pub(crate) source_name: String,
+    pub(crate) new_name: String,
+    #[serde(default)]
+    pub(crate) snapshot: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VmExecPayload {
+    pub(crate) name: String,
+    pub(crate) command: String,
+    #[serde(default)]
+    pub(crate) timeout_sec: u64,
+    #[serde(default)]
+    pub(crate) wait_ready_sec: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmExecResponse {
+    pub(crate) ok: bool,
+    pub(crate) exit_code: i32,
+    pub(crate) stdout: String,
+    pub(crate) stderr: String,
+    pub(crate) message: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VmExecCancelPayload {
+    pub(crate) name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmExecCancelResponse {
+    pub(crate) ok: bool,
+    pub(crate) message: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VmBootstrapPayload {
+    pub(crate) name: String,
+    #[serde(default)]
+    pub(crate) profile: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct VmExecQueueItem {
+    pub(crate) id: String,
+    pub(crate) command: String,
+    pub(crate) status: String,
+    pub(crate) created_at_unix: u64,
+    #[serde(default)]
+    pub(crate) timeout_sec: u64,
+    #[serde(default)]
+    pub(crate) wait_ready_sec: u64,
+    #[serde(default)]
+    pub(crate) priority: i32,
+    #[serde(default)]
+    pub(crate) retry_max: u32,
+    #[serde(default)]
+    pub(crate) retry_count: u32,
+    #[serde(default)]
+    pub(crate) next_run_after_unix: u64,
+    #[serde(default)]
+    pub(crate) started_at_unix: u64,
+    #[serde(default)]
+    pub(crate) finished_at_unix: u64,
+    #[serde(default)]
+    pub(crate) exit_code: i32,
+    #[serde(default)]
+    pub(crate) message: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VmQueueQuery {
+    pub(crate) name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmQueueResponse {
+    pub(crate) name: String,
+    pub(crate) items: Vec<VmExecQueueItem>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmQueueStatsResponse {
+    pub(crate) name: String,
+    pub(crate) total: usize,
+    pub(crate) pending: usize,
+    pub(crate) running: usize,
+    pub(crate) done: usize,
+    pub(crate) failed: usize,
+    pub(crate) canceled: usize,
+    pub(crate) done_success_rate: f64,
+    pub(crate) avg_duration_sec: f64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VmExecEnqueuePayload {
+    pub(crate) name: String,
+    pub(crate) command: String,
+    #[serde(default)]
+    pub(crate) timeout_sec: u64,
+    #[serde(default)]
+    pub(crate) wait_ready_sec: u64,
+    #[serde(default)]
+    pub(crate) priority: i32,
+    #[serde(default)]
+    pub(crate) retry_max: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VmExecBatchTaskPayload {
+    pub(crate) command: String,
+    #[serde(default)]
+    pub(crate) timeout_sec: u64,
+    #[serde(default)]
+    pub(crate) wait_ready_sec: u64,
+    #[serde(default)]
+    pub(crate) priority: i32,
+    #[serde(default)]
+    pub(crate) retry_max: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VmExecEnqueueBatchPayload {
+    pub(crate) name: String,
+    #[serde(default)]
+    pub(crate) timeout_sec: u64,
+    #[serde(default)]
+    pub(crate) wait_ready_sec: u64,
+    #[serde(default)]
+    pub(crate) priority: i32,
+    #[serde(default)]
+    pub(crate) retry_max: u32,
+    #[serde(default)]
+    pub(crate) tasks: Vec<VmExecBatchTaskPayload>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VmQueueCancelPayload {
+    pub(crate) name: String,
+    pub(crate) task_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VmReadyQuery {
+    pub(crate) name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmReadyResponse {
+    pub(crate) ok: bool,
+    pub(crate) message: String,
 }

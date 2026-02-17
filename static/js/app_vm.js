@@ -1,0 +1,786 @@
+(() => {
+function assertVmDependencies() {
+    const root = window.KACF || {};
+    const state = root.state || {};
+    const logPipeline = root.logPipeline || {};
+    const requiredState = ['txt', 'fmt', 'isReadOnlyView'];
+    const requiredLog = ['setStatus', 'appendLog'];
+    requiredState.forEach((name) => {
+        if (typeof state[name] !== 'function') {
+            throw new Error(`KACF.state.${name} is not available`);
+        }
+    });
+    requiredLog.forEach((name) => {
+        if (typeof logPipeline[name] !== 'function') {
+            throw new Error(`KACF.logPipeline.${name} is not available`);
+        }
+    });
+}
+
+assertVmDependencies();
+
+const { txt, fmt, isReadOnlyView } = window.KACF.state;
+const { setStatus, appendLog } = window.KACF.logPipeline;
+
+let vmReadonly = false;
+let vmGuestMode = false;
+let vmBound = false;
+let vmRefreshTimer = null;
+let vmLogRefreshTimer = null;
+let vmQueueRefreshTimer = null;
+
+function el(id) {
+    return document.getElementById(id);
+}
+
+function asPositiveInt(raw, fallback) {
+    const n = Number.parseInt(String(raw || '').trim(), 10);
+    if (!Number.isFinite(n) || n <= 0) return fallback;
+    return n;
+}
+
+function asBoundedInt(raw, min, max, fallback) {
+    const n = Number.parseInt(String(raw || '').trim(), 10);
+    if (!Number.isFinite(n)) return fallback;
+    if (n < min) return min;
+    if (n > max) return max;
+    return n;
+}
+
+function asBoundedSignedInt(raw, min, max, fallback) {
+    const n = Number.parseInt(String(raw || '').trim(), 10);
+    if (!Number.isFinite(n)) return fallback;
+    if (n < min) return min;
+    if (n > max) return max;
+    return n;
+}
+
+function selectedVmName() {
+    return (el('vm_target_select')?.value || '').trim();
+}
+
+function setVmStatusLine(text) {
+    const node = el('vm_status_text');
+    if (node) node.textContent = text || '';
+}
+
+function setVmLogsText(text) {
+    const node = el('vm_logs');
+    if (!node) return;
+    node.textContent = text || '';
+}
+
+function setVmSnapshotsText(text) {
+    const node = el('vm_snapshots');
+    if (!node) return;
+    node.textContent = text || '';
+}
+
+function setVmExecOutput(text) {
+    const node = el('vm_exec_output');
+    if (!node) return;
+    node.textContent = text || '';
+}
+
+function setVmExecQueueText(text) {
+    const node = el('vm_exec_queue');
+    if (!node) return;
+    node.textContent = text || '';
+}
+
+function setVmExecQueueStatsText(text) {
+    const node = el('vm_exec_queue_stats');
+    if (!node) return;
+    node.textContent = text || '';
+}
+
+function setVmMutatingDisabled(disabled) {
+    [
+        'vm_provision_btn',
+        'vm_start_btn',
+        'vm_stop_btn',
+        'vm_delete_btn',
+        'vm_snapshot_create_btn',
+        'vm_snapshot_apply_btn',
+        'vm_snapshot_delete_btn',
+        'vm_clone_btn',
+        'vm_exec_btn',
+        'vm_bootstrap_btn',
+        'vm_exec_cancel_btn',
+        'vm_exec_enqueue_btn',
+        'vm_exec_batch_enqueue_btn',
+        'vm_exec_run_next_btn',
+        'vm_exec_queue_refresh_btn',
+        'vm_exec_queue_cancel_btn',
+    ].forEach((id) => {
+        const node = el(id);
+        if (node) node.disabled = !!disabled;
+    });
+}
+
+function setVmReadOnlyByContext() {
+    const readonly = vmGuestMode || vmReadonly || isReadOnlyView();
+    setVmMutatingDisabled(readonly);
+}
+
+function renderCapabilities(caps) {
+    const list = Array.isArray(caps) ? caps : [];
+    const text = list.map((x) => `${x.backend}: ${x.available ? 'OK' : 'N/A'} (${x.detail || '-'})`).join(' | ');
+    const node = el('vm_capabilities');
+    if (node) {
+        node.textContent = fmt('vm_capabilities_line', 'Capabilities: {caps}', {
+            caps: text || txt('none_text', 'None'),
+        });
+    }
+}
+
+function renderVmTargetList(vms) {
+    const select = el('vm_target_select');
+    if (!select) return;
+    const items = Array.isArray(vms) ? vms : [];
+    const current = select.value;
+    select.innerHTML = '';
+    if (!items.length) {
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = txt('vm_target_empty', 'No VM available');
+        select.appendChild(opt);
+        return;
+    }
+    items.forEach((vm) => {
+        const opt = document.createElement('option');
+        opt.value = vm.name || '';
+        opt.textContent = `${vm.name || '-'} (${vm.power_state || '-'})`;
+        select.appendChild(opt);
+    });
+    if (current && items.some((vm) => vm.name === current)) {
+        select.value = current;
+    }
+}
+
+function renderVmList(vms) {
+    const items = Array.isArray(vms) ? vms : [];
+    const node = el('vm_list');
+    if (!node) return;
+    if (!items.length) {
+        node.textContent = txt('vm_list_empty', 'No VM instance yet.');
+        return;
+    }
+    const lines = [];
+    items.forEach((vm, idx) => {
+        lines.push(`#${idx + 1} ${vm.name || '-'}`);
+        lines.push(`  state=${vm.power_state || '-'} backend=${vm.backend || '-'} cpu=${vm.cpu || '-'} mem=${vm.memory_mb || '-'}MB disk=${vm.disk_gb || '-'}GB`);
+        lines.push(`  ssh=${vm.ssh_user || 'root'}@127.0.0.1:${vm.ssh_port || '-'} pid=${vm.process_id || '-'}`);
+        lines.push(`  disk=${vm.disk_path || '-'} image=${vm.os_image || '-'}`);
+        lines.push(`  msg=${vm.last_message || '-'}`);
+    });
+    node.textContent = lines.join('\n');
+}
+
+async function vmApi(path, method, payload) {
+    const resp = await fetch(path, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: payload ? JSON.stringify(payload) : undefined,
+    });
+    if (!resp.ok) {
+        const msg = await resp.text();
+        throw new Error(`${resp.status} ${msg}`);
+    }
+    return resp.json();
+}
+
+async function refreshVmStatus() {
+    try {
+        const data = await vmApi('/vm/status', 'GET');
+        vmReadonly = !!data.readonly;
+        setVmReadOnlyByContext();
+        renderCapabilities(data.capabilities || []);
+        renderVmTargetList(data.vms || []);
+        renderVmList(data.vms || []);
+        setVmStatusLine(txt('status_vm_synced', 'VM status synchronized'));
+        await refreshVmSnapshots();
+        await refreshVmLogs();
+    } catch (e) {
+        setVmStatusLine(fmt('status_vm_sync_failed', 'VM status sync failed: {error}', { error: String(e) }));
+    }
+}
+
+async function refreshVmSnapshots() {
+    const name = selectedVmName();
+    if (!name) {
+        setVmSnapshotsText(txt('vm_snapshot_empty', 'No snapshots yet.'));
+        return;
+    }
+    try {
+        const data = await vmApi(`/vm/snapshot/list?name=${encodeURIComponent(name)}`, 'GET');
+        const list = Array.isArray(data?.snapshots) ? data.snapshots : [];
+        if (!list.length) {
+            setVmSnapshotsText(txt('vm_snapshot_empty', 'No snapshots yet.'));
+            return;
+        }
+        const lines = list.map((s, i) => {
+            const tag = String(s?.tag || '-');
+            const size = String(s?.vm_size || '-');
+            const at = String(s?.created_at || '-');
+            const clk = String(s?.vm_clock || '-');
+            return `#${i + 1} ${tag} | size=${size} | at=${at} | clock=${clk}`;
+        });
+        setVmSnapshotsText(lines.join('\n'));
+    } catch (e) {
+        setVmSnapshotsText(fmt('status_vm_snapshot_list_failed', 'List VM snapshots failed: {error}', { error: String(e) }));
+    }
+}
+
+function snapshotNameInput() {
+    return (el('vm_snapshot_name')?.value || '').trim();
+}
+
+function cloneNewNameInput() {
+    return (el('vm_clone_new_name')?.value || '').trim();
+}
+
+async function createVmSnapshot() {
+    const name = selectedVmName();
+    const snapshot = snapshotNameInput();
+    if (!name) {
+        setStatus(txt('status_vm_target_required', 'Please select a VM first'), 'status-danger');
+        return;
+    }
+    if (!snapshot) {
+        setStatus(txt('status_vm_snapshot_name_required', 'Please enter snapshot name first.'), 'status-danger');
+        return;
+    }
+    try {
+        const res = await vmApi('/vm/snapshot/create', 'POST', { name, snapshot });
+        setStatus(txt('status_vm_snapshot_create_ok', 'Snapshot created.'), 'status-warn');
+        appendLog(fmt('log_vm_action', '[VM] {message}', { message: res.message || 'snapshot create ok' }));
+        await refreshVmStatus();
+        await refreshVmSnapshots();
+        await refreshVmLogs();
+    } catch (e) {
+        setStatus(fmt('status_vm_snapshot_create_failed', 'Snapshot create failed: {error}', { error: String(e) }), 'status-danger');
+    }
+}
+
+async function applyVmSnapshot() {
+    const name = selectedVmName();
+    const snapshot = snapshotNameInput();
+    if (!name) {
+        setStatus(txt('status_vm_target_required', 'Please select a VM first'), 'status-danger');
+        return;
+    }
+    if (!snapshot) {
+        setStatus(txt('status_vm_snapshot_name_required', 'Please enter snapshot name first.'), 'status-danger');
+        return;
+    }
+    const confirmText = fmt('confirm_vm_snapshot_apply', 'Apply snapshot "{snapshot}" to VM "{name}"?', { name, snapshot });
+    if (!window.confirm(confirmText)) return;
+    try {
+        const res = await vmApi('/vm/snapshot/apply', 'POST', { name, snapshot });
+        setStatus(txt('status_vm_snapshot_apply_ok', 'Snapshot applied.'), 'status-warn');
+        appendLog(fmt('log_vm_action', '[VM] {message}', { message: res.message || 'snapshot apply ok' }));
+        await refreshVmStatus();
+        await refreshVmSnapshots();
+        await refreshVmLogs();
+    } catch (e) {
+        setStatus(fmt('status_vm_snapshot_apply_failed', 'Snapshot apply failed: {error}', { error: String(e) }), 'status-danger');
+    }
+}
+
+async function deleteVmSnapshot() {
+    const name = selectedVmName();
+    const snapshot = snapshotNameInput();
+    if (!name) {
+        setStatus(txt('status_vm_target_required', 'Please select a VM first'), 'status-danger');
+        return;
+    }
+    if (!snapshot) {
+        setStatus(txt('status_vm_snapshot_name_required', 'Please enter snapshot name first.'), 'status-danger');
+        return;
+    }
+    const confirmText = fmt('confirm_vm_snapshot_delete', 'Delete snapshot "{snapshot}" from VM "{name}"?', { name, snapshot });
+    if (!window.confirm(confirmText)) return;
+    try {
+        const res = await vmApi('/vm/snapshot/delete', 'POST', { name, snapshot });
+        setStatus(txt('status_vm_snapshot_delete_ok', 'Snapshot deleted.'), 'status-warn');
+        appendLog(fmt('log_vm_action', '[VM] {message}', { message: res.message || 'snapshot delete ok' }));
+        await refreshVmStatus();
+        await refreshVmSnapshots();
+        await refreshVmLogs();
+    } catch (e) {
+        setStatus(fmt('status_vm_snapshot_delete_failed', 'Snapshot delete failed: {error}', { error: String(e) }), 'status-danger');
+    }
+}
+
+async function cloneVmFromSnapshot() {
+    const source_name = selectedVmName();
+    const snapshot = snapshotNameInput();
+    const new_name = cloneNewNameInput();
+    if (!source_name) {
+        setStatus(txt('status_vm_target_required', 'Please select a VM first'), 'status-danger');
+        return;
+    }
+    if (!new_name) {
+        setStatus(txt('status_vm_clone_name_required', 'Please enter new VM name first.'), 'status-danger');
+        return;
+    }
+    const confirmText = fmt('confirm_vm_clone', 'Clone VM "{source}" into "{target}"?', {
+        source: source_name,
+        target: new_name,
+    });
+    if (!window.confirm(confirmText)) return;
+    try {
+        const res = await vmApi('/vm/clone', 'POST', { source_name, new_name, snapshot });
+        setStatus(txt('status_vm_clone_ok', 'VM clone created.'), 'status-warn');
+        appendLog(fmt('log_vm_action', '[VM] {message}', { message: res.message || 'clone ok' }));
+        await refreshVmStatus();
+        await refreshVmSnapshots();
+        await refreshVmLogs();
+    } catch (e) {
+        setStatus(fmt('status_vm_clone_failed', 'VM clone failed: {error}', { error: String(e) }), 'status-danger');
+    }
+}
+
+async function execInVm() {
+    const name = selectedVmName();
+    const command = (el('vm_exec_command')?.value || '').trim();
+    const timeoutSec = asBoundedInt(el('vm_exec_timeout_sec')?.value, 1, 3600, 60);
+    const waitReadySec = asBoundedInt(el('vm_exec_wait_ready_sec')?.value, 0, 600, 0);
+    if (!name) {
+        setStatus(txt('status_vm_target_required', 'Please select a VM first'), 'status-danger');
+        return;
+    }
+    if (!command) {
+        setStatus(txt('status_vm_exec_command_required', 'Please enter VM command first.'), 'status-danger');
+        return;
+    }
+    setVmExecOutput('');
+    try {
+        const res = await vmApi('/vm/exec', 'POST', {
+            name,
+            command,
+            timeout_sec: timeoutSec,
+            wait_ready_sec: waitReadySec,
+        });
+        const lines = [];
+        lines.push(`ok=${!!res.ok} exit=${Number(res.exit_code)}`);
+        lines.push(`message=${res.message || ''}`);
+        lines.push('--- stdout ---');
+        lines.push(String(res.stdout || ''));
+        lines.push('--- stderr ---');
+        lines.push(String(res.stderr || ''));
+        setVmExecOutput(lines.join('\n'));
+        if (res.ok) {
+            setStatus(txt('status_vm_exec_ok', 'VM command executed.'), 'status-warn');
+        } else {
+            setStatus(txt('status_vm_exec_nonzero', 'VM command finished with non-zero exit.'), 'status-danger');
+        }
+        await refreshVmStatus();
+        await refreshVmLogs();
+    } catch (e) {
+        setStatus(fmt('status_vm_exec_failed', 'VM exec failed: {error}', { error: String(e) }), 'status-danger');
+        setVmExecOutput(String(e));
+    }
+}
+
+async function enqueueVmExec() {
+    const name = selectedVmName();
+    const command = (el('vm_exec_command')?.value || '').trim();
+    const timeoutSec = asBoundedInt(el('vm_exec_timeout_sec')?.value, 1, 3600, 60);
+    const waitReadySec = asBoundedInt(el('vm_exec_wait_ready_sec')?.value, 0, 600, 0);
+    const priority = asBoundedSignedInt(el('vm_exec_priority')?.value, -100, 100, 0);
+    const retryMax = asBoundedInt(el('vm_exec_retry_max')?.value, 0, 10, 0);
+    if (!name) {
+        setStatus(txt('status_vm_target_required', 'Please select a VM first'), 'status-danger');
+        return;
+    }
+    if (!command) {
+        setStatus(txt('status_vm_exec_command_required', 'Please enter VM command first.'), 'status-danger');
+        return;
+    }
+    try {
+        await vmApi('/vm/exec/enqueue', 'POST', {
+            name,
+            command,
+            timeout_sec: timeoutSec,
+            wait_ready_sec: waitReadySec,
+            priority,
+            retry_max: retryMax,
+        });
+        setStatus(txt('status_vm_exec_enqueue_ok', 'VM command queued.'), 'status-warn');
+        await refreshVmExecQueue();
+    } catch (e) {
+        setStatus(fmt('status_vm_exec_queue_failed', 'VM exec queue operation failed: {error}', { error: String(e) }), 'status-danger');
+    }
+}
+
+async function enqueueVmExecBatch() {
+    const name = selectedVmName();
+    const timeoutSec = asBoundedInt(el('vm_exec_timeout_sec')?.value, 1, 3600, 60);
+    const waitReadySec = asBoundedInt(el('vm_exec_wait_ready_sec')?.value, 0, 600, 0);
+    const priority = asBoundedSignedInt(el('vm_exec_priority')?.value, -100, 100, 0);
+    const retryMax = asBoundedInt(el('vm_exec_retry_max')?.value, 0, 10, 0);
+    const raw = String(el('vm_exec_batch_commands')?.value || '');
+    const tasks = raw
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map((command) => ({ command }));
+    if (!name) {
+        setStatus(txt('status_vm_target_required', 'Please select a VM first'), 'status-danger');
+        return;
+    }
+    if (!tasks.length) {
+        setStatus(txt('status_vm_exec_batch_required', 'Please enter at least one command in batch list.'), 'status-danger');
+        return;
+    }
+    try {
+        await vmApi('/vm/exec/enqueue_batch', 'POST', {
+            name,
+            timeout_sec: timeoutSec,
+            wait_ready_sec: waitReadySec,
+            priority,
+            retry_max: retryMax,
+            tasks,
+        });
+        setStatus(fmt('status_vm_exec_batch_ok', 'Queued {count} VM commands.', { count: tasks.length }), 'status-warn');
+        await refreshVmExecQueue();
+    } catch (e) {
+        setStatus(fmt('status_vm_exec_queue_failed', 'VM exec queue operation failed: {error}', { error: String(e) }), 'status-danger');
+    }
+}
+
+async function runNextVmExec() {
+    const name = selectedVmName();
+    if (!name) {
+        setStatus(txt('status_vm_target_required', 'Please select a VM first'), 'status-danger');
+        return;
+    }
+    try {
+        const res = await vmApi(`/vm/exec/queue/run_next?name=${encodeURIComponent(name)}`, 'POST');
+        const lines = [];
+        lines.push(`ok=${!!res.ok} exit=${Number(res.exit_code)}`);
+        lines.push(`message=${res.message || ''}`);
+        lines.push('--- stdout ---');
+        lines.push(String(res.stdout || ''));
+        lines.push('--- stderr ---');
+        lines.push(String(res.stderr || ''));
+        setVmExecOutput(lines.join('\n'));
+        await refreshVmExecQueue();
+        await refreshVmLogs();
+    } catch (e) {
+        setStatus(fmt('status_vm_exec_queue_failed', 'VM exec queue operation failed: {error}', { error: String(e) }), 'status-danger');
+    }
+}
+
+async function cancelVmQueueTask() {
+    const name = selectedVmName();
+    const taskId = (el('vm_exec_cancel_task_id')?.value || '').trim();
+    if (!name) {
+        setStatus(txt('status_vm_target_required', 'Please select a VM first'), 'status-danger');
+        return;
+    }
+    if (!taskId) {
+        setStatus(txt('status_vm_exec_task_id_required', 'Please enter queue task id first.'), 'status-danger');
+        return;
+    }
+    try {
+        await vmApi('/vm/exec/queue/cancel', 'POST', { name, task_id: taskId });
+        setStatus(txt('status_vm_exec_queue_cancel_ok', 'Queue task cancel requested.'), 'status-warn');
+        await refreshVmExecQueue();
+    } catch (e) {
+        setStatus(fmt('status_vm_exec_queue_failed', 'VM exec queue operation failed: {error}', { error: String(e) }), 'status-danger');
+    }
+}
+
+async function checkVmReady() {
+    const name = selectedVmName();
+    if (!name) {
+        setStatus(txt('status_vm_target_required', 'Please select a VM first'), 'status-danger');
+        return;
+    }
+    try {
+        const data = await vmApi(`/vm/ready?name=${encodeURIComponent(name)}`, 'GET');
+        if (data?.ok) {
+            setStatus(txt('status_vm_ready_ok', 'VM SSH is ready.'), 'status-warn');
+        } else {
+            setStatus(fmt('status_vm_ready_fail', 'VM SSH is not ready: {error}', {
+                error: String(data?.message || 'unknown'),
+            }), 'status-danger');
+        }
+        await refreshVmStatus();
+        await refreshVmLogs();
+    } catch (e) {
+        setStatus(fmt('status_vm_ready_fail', 'VM SSH is not ready: {error}', {
+            error: String(e),
+        }), 'status-danger');
+    }
+}
+
+async function bootstrapVm() {
+    const name = selectedVmName();
+    if (!name) {
+        setStatus(txt('status_vm_target_required', 'Please select a VM first'), 'status-danger');
+        return;
+    }
+    const confirmText = fmt('confirm_vm_bootstrap', 'Bootstrap VM "{name}" now?', { name });
+    if (!window.confirm(confirmText)) return;
+    setVmExecOutput('');
+    try {
+        const res = await vmApi('/vm/bootstrap', 'POST', { name, profile: 'dev-basic' });
+        const lines = [];
+        lines.push(`ok=${!!res.ok} exit=${Number(res.exit_code)}`);
+        lines.push(`message=${res.message || ''}`);
+        lines.push('--- stdout ---');
+        lines.push(String(res.stdout || ''));
+        lines.push('--- stderr ---');
+        lines.push(String(res.stderr || ''));
+        setVmExecOutput(lines.join('\n'));
+        if (res.ok) {
+            setStatus(txt('status_vm_bootstrap_ok', 'VM bootstrap finished.'), 'status-warn');
+        } else {
+            setStatus(txt('status_vm_bootstrap_nonzero', 'VM bootstrap finished with non-zero exit.'), 'status-danger');
+        }
+        await refreshVmStatus();
+        await refreshVmLogs();
+    } catch (e) {
+        setStatus(fmt('status_vm_bootstrap_failed', 'VM bootstrap failed: {error}', { error: String(e) }), 'status-danger');
+        setVmExecOutput(String(e));
+    }
+}
+
+async function cancelVmExec() {
+    const name = selectedVmName();
+    if (!name) {
+        setStatus(txt('status_vm_target_required', 'Please select a VM first'), 'status-danger');
+        return;
+    }
+    try {
+        const res = await vmApi('/vm/exec/cancel', 'POST', { name });
+        setStatus(res?.message || txt('status_vm_exec_cancel_ok', 'Cancel request sent.'), 'status-warn');
+        await refreshVmLogs();
+    } catch (e) {
+        setStatus(fmt('status_vm_exec_cancel_failed', 'Cancel VM exec failed: {error}', { error: String(e) }), 'status-danger');
+    }
+}
+
+async function refreshVmLogs() {
+    const name = selectedVmName();
+    if (!name) {
+        setVmLogsText(txt('vm_log_empty', 'No VM selected.'));
+        return;
+    }
+    try {
+        const data = await vmApi(`/vm/logs?name=${encodeURIComponent(name)}&tail=12000`, 'GET');
+        const text = String(data?.text || '').trim();
+        if (!text) {
+            setVmLogsText(txt('vm_log_empty', 'No logs yet.'));
+            return;
+        }
+        setVmLogsText(text);
+    } catch (e) {
+        setVmLogsText(fmt('status_vm_log_fetch_failed', 'Fetch VM logs failed: {error}', { error: String(e) }));
+    }
+}
+
+async function refreshVmExecQueue() {
+    const name = selectedVmName();
+    if (!name) {
+        setVmExecQueueText(txt('vm_exec_queue_empty', 'No queued task.'));
+        setVmExecQueueStatsText('');
+        return;
+    }
+    try {
+        const data = await vmApi(`/vm/exec/queue?name=${encodeURIComponent(name)}`, 'GET');
+        const list = Array.isArray(data?.items) ? data.items : [];
+        if (!list.length) {
+            setVmExecQueueText(txt('vm_exec_queue_empty', 'No queued task.'));
+        } else {
+            const lines = list.map((x, i) => {
+                const id = String(x?.id || '-');
+                const st = String(x?.status || '-');
+                const ec = Number(x?.exit_code || 0);
+                const p = Number(x?.priority || 0);
+                const rc = Number(x?.retry_count || 0);
+                const rm = Number(x?.retry_max || 0);
+                const nextRun = Number(x?.next_run_after_unix || 0);
+                const cmd = String(x?.command || '').slice(0, 120);
+                return `#${i + 1} ${id} [${st}] p=${p} retry=${rc}/${rm} next=${nextRun} exit=${ec} cmd=${cmd}`;
+            });
+            setVmExecQueueText(lines.join('\n'));
+        }
+        await refreshVmExecQueueStats();
+    } catch (e) {
+        setVmExecQueueText(fmt('status_vm_exec_queue_failed', 'VM exec queue operation failed: {error}', { error: String(e) }));
+        setVmExecQueueStatsText('');
+    }
+}
+
+async function refreshVmExecQueueStats() {
+    const name = selectedVmName();
+    if (!name) {
+        setVmExecQueueStatsText('');
+        return;
+    }
+    try {
+        const s = await vmApi(`/vm/exec/queue/stats?name=${encodeURIComponent(name)}`, 'GET');
+        const line = fmt('vm_exec_queue_stats_line', 'Queue total={total} pending={pending} running={running} done={done} failed={failed} canceled={canceled} ok={ok_rate}% avg={avg_sec}s', {
+            total: Number(s?.total || 0),
+            pending: Number(s?.pending || 0),
+            running: Number(s?.running || 0),
+            done: Number(s?.done || 0),
+            failed: Number(s?.failed || 0),
+            canceled: Number(s?.canceled || 0),
+            ok_rate: Number(s?.done_success_rate || 0).toFixed(1),
+            avg_sec: Number(s?.avg_duration_sec || 0).toFixed(1),
+        });
+        setVmExecQueueStatsText(line);
+    } catch (_e) {
+        setVmExecQueueStatsText('');
+    }
+}
+
+async function provisionVm() {
+    const name = (el('vm_name')?.value || '').trim();
+    if (!name) {
+        setStatus(txt('status_vm_name_required', 'VM name is required'), 'status-danger');
+        return;
+    }
+    try {
+        const body = {
+            name,
+            backend: (el('vm_backend')?.value || '').trim(),
+            os_image: (el('vm_os_image')?.value || '').trim(),
+            ssh_user: (el('vm_ssh_user')?.value || '').trim(),
+            cpu: asPositiveInt(el('vm_cpu')?.value, 2),
+            memory_mb: asPositiveInt(el('vm_memory_mb')?.value, 4096),
+            disk_gb: asPositiveInt(el('vm_disk_gb')?.value, 40),
+        };
+        const res = await vmApi('/vm/provision', 'POST', body);
+        setStatus(txt('status_vm_provision_ok', 'VM provisioned'), 'status-warn');
+        appendLog(fmt('log_vm_action', '[VM] {message}', { message: res.message || 'provision ok' }));
+        await refreshVmStatus();
+        await refreshVmLogs();
+    } catch (e) {
+        setStatus(fmt('status_vm_provision_failed', 'VM provision failed: {error}', { error: String(e) }), 'status-danger');
+    }
+}
+
+async function startVm() {
+    const name = selectedVmName();
+    if (!name) {
+        setStatus(txt('status_vm_target_required', 'Please select a VM first'), 'status-danger');
+        return;
+    }
+    try {
+        const res = await vmApi('/vm/start', 'POST', { name });
+        setStatus(txt('status_vm_start_ok', 'VM start request submitted'), 'status-warn');
+        appendLog(fmt('log_vm_action', '[VM] {message}', { message: res.message || 'start ok' }));
+        await refreshVmStatus();
+        await refreshVmLogs();
+    } catch (e) {
+        setStatus(fmt('status_vm_start_failed', 'VM start failed: {error}', { error: String(e) }), 'status-danger');
+    }
+}
+
+async function stopVm() {
+    const name = selectedVmName();
+    if (!name) {
+        setStatus(txt('status_vm_target_required', 'Please select a VM first'), 'status-danger');
+        return;
+    }
+    try {
+        const res = await vmApi('/vm/stop', 'POST', { name });
+        setStatus(txt('status_vm_stop_ok', 'VM stop request submitted'), 'status-warn');
+        appendLog(fmt('log_vm_action', '[VM] {message}', { message: res.message || 'stop ok' }));
+        await refreshVmStatus();
+        await refreshVmLogs();
+    } catch (e) {
+        setStatus(fmt('status_vm_stop_failed', 'VM stop failed: {error}', { error: String(e) }), 'status-danger');
+    }
+}
+
+async function deleteVm() {
+    const name = selectedVmName();
+    if (!name) {
+        setStatus(txt('status_vm_target_required', 'Please select a VM first'), 'status-danger');
+        return;
+    }
+    const confirmText = fmt('confirm_vm_delete', 'Delete VM "{name}"?', { name });
+    if (!window.confirm(confirmText)) return;
+    try {
+        const purgeDisk = !!el('vm_purge_disk')?.checked;
+        const res = await vmApi('/vm/delete', 'POST', { name, purge_disk: purgeDisk });
+        setStatus(txt('status_vm_delete_ok', 'VM deleted'), 'status-warn');
+        appendLog(fmt('log_vm_action', '[VM] {message}', { message: res.message || 'delete ok' }));
+        await refreshVmStatus();
+        await refreshVmLogs();
+    } catch (e) {
+        setStatus(fmt('status_vm_delete_failed', 'VM delete failed: {error}', { error: String(e) }), 'status-danger');
+    }
+}
+
+function bindVmEvents() {
+    if (vmBound) return;
+    vmBound = true;
+    el('vm_refresh_btn')?.addEventListener('click', refreshVmStatus);
+    el('vm_ready_btn')?.addEventListener('click', checkVmReady);
+    el('vm_bootstrap_btn')?.addEventListener('click', bootstrapVm);
+    el('vm_provision_btn')?.addEventListener('click', provisionVm);
+    el('vm_start_btn')?.addEventListener('click', startVm);
+    el('vm_stop_btn')?.addEventListener('click', stopVm);
+    el('vm_delete_btn')?.addEventListener('click', deleteVm);
+    el('vm_refresh_logs_btn')?.addEventListener('click', refreshVmLogs);
+    el('vm_snapshot_refresh_btn')?.addEventListener('click', refreshVmSnapshots);
+    el('vm_snapshot_create_btn')?.addEventListener('click', createVmSnapshot);
+    el('vm_snapshot_apply_btn')?.addEventListener('click', applyVmSnapshot);
+    el('vm_snapshot_delete_btn')?.addEventListener('click', deleteVmSnapshot);
+    el('vm_clone_btn')?.addEventListener('click', cloneVmFromSnapshot);
+    el('vm_exec_btn')?.addEventListener('click', execInVm);
+    el('vm_exec_cancel_btn')?.addEventListener('click', cancelVmExec);
+    el('vm_exec_enqueue_btn')?.addEventListener('click', enqueueVmExec);
+    el('vm_exec_batch_enqueue_btn')?.addEventListener('click', enqueueVmExecBatch);
+    el('vm_exec_run_next_btn')?.addEventListener('click', runNextVmExec);
+    el('vm_exec_queue_refresh_btn')?.addEventListener('click', refreshVmExecQueue);
+    el('vm_exec_queue_cancel_btn')?.addEventListener('click', cancelVmQueueTask);
+    el('vm_target_select')?.addEventListener('change', async () => {
+        setVmReadOnlyByContext();
+        await refreshVmSnapshots();
+        await refreshVmExecQueue();
+        await refreshVmLogs();
+    });
+    setInterval(setVmReadOnlyByContext, 1000);
+}
+
+async function init(opts) {
+    const options = opts || {};
+    vmGuestMode = !!options.guestMode;
+    const card = el('vm_card');
+    if (!card) return;
+    if (vmGuestMode) {
+        card.style.display = 'none';
+        return;
+    }
+    bindVmEvents();
+    await refreshVmStatus();
+    if (!vmRefreshTimer) {
+        vmRefreshTimer = setInterval(refreshVmStatus, 15000);
+    }
+    if (!vmLogRefreshTimer) {
+        vmLogRefreshTimer = setInterval(refreshVmLogs, 8000);
+    }
+    if (!vmQueueRefreshTimer) {
+        vmQueueRefreshTimer = setInterval(refreshVmExecQueue, 4000);
+    }
+    await refreshVmSnapshots();
+    await refreshVmExecQueue();
+}
+
+window.KACF = window.KACF || {};
+window.KACF.vm = {
+    init,
+    refreshVmStatus,
+    refreshVmLogs,
+};
+})();

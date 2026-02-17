@@ -15,10 +15,12 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::auth;
 use crate::deepseek_api;
 use crate::lock_utils::lock_recover;
 use crate::protocol::{AgentEvent, AgentRequest};
 use crate::web_ui_analytics;
+use crate::web_ui_authz;
 use crate::web_ui_cache_logic;
 use crate::web_ui_debug;
 use crate::web_ui_events::{self, EventBuffer, SerializableEvent};
@@ -36,12 +38,14 @@ use crate::web_ui_runtime_metrics;
 use crate::web_ui_session;
 use crate::web_ui_slug;
 use crate::web_ui_store;
-use crate::auth;
-use crate::web_ui_authz;
+use crate::web_ui_vm;
 
 /// Index HTML page embedded at compile time.
 const INDEX_HTML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/index.html"));
+const DIFF_HTML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/diff.html"));
 const APP_CSS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/app.css"));
+const DIFF_JS: &str =
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/js/diff_view.js"));
 const APP_JS: &str = concat!(
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -76,6 +80,11 @@ const APP_JS: &str = concat!(
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/static/js/app_runtime_sync.js"
+    )),
+    "\n",
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/static/js/app_vm.js"
     )),
     "\n",
     include_str!(concat!(
@@ -121,10 +130,6 @@ fn managed_root_path() -> PathBuf {
         .join(MANAGED_ROOT_DIR)
 }
 
-fn managed_workspaces_path() -> PathBuf {
-    managed_root_path().join(MANAGED_WORKSPACES_DIR)
-}
-
 pub(crate) fn merge_shared_config_into_draft(draft: &mut DraftPayload, cfg: &SharedConfig) {
     if !cfg.api_key.trim().is_empty() {
         draft.api_key = cfg.api_key.trim().to_string();
@@ -147,36 +152,6 @@ pub(crate) fn normalize_resume_draft_defaults(draft: &mut DraftPayload) {
     if draft.model.trim().is_empty() {
         draft.model = web_ui_models::default_model_name();
     }
-}
-
-fn require_managed_workspace(workspace: &str) -> Result<PathBuf, String> {
-    web_ui_store::require_managed_workspace(workspace, MANAGED_ROOT_DIR, MANAGED_WORKSPACES_DIR)
-}
-
-fn save_project_config(
-    workspace: &str,
-    unattended_mode: bool,
-) -> std::io::Result<()> {
-    let cfg = ProjectConfig {
-        unattended_mode,
-        updated_at_unix: now_unix(),
-    };
-    web_ui_store::save_project_config(
-        workspace,
-        MANAGED_ROOT_DIR,
-        MANAGED_WORKSPACES_DIR,
-        PROJECT_CONFIG_FILENAME,
-        &cfg,
-    )
-}
-
-pub(crate) fn read_project_config(workspace: &str) -> Option<ProjectConfig> {
-    web_ui_store::read_project_config(
-        workspace,
-        MANAGED_ROOT_DIR,
-        MANAGED_WORKSPACES_DIR,
-        PROJECT_CONFIG_FILENAME,
-    )
 }
 
 fn require_managed_workspace_for_root(
@@ -232,19 +207,14 @@ fn load_language_packs_checked() -> Result<(), String> {
     web_ui_languages::ensure_language_packs_checked()
 }
 
-pub(crate) fn read_ui_cache() -> UiCachePayload {
-    web_ui_store::read_ui_cache(MANAGED_ROOT_DIR, UI_CACHE_FILENAME)
-}
-
-fn write_ui_cache(payload: &UiCachePayload) -> std::io::Result<()> {
-    web_ui_store::write_ui_cache(MANAGED_ROOT_DIR, UI_CACHE_FILENAME, payload)
-}
-
 pub(crate) fn read_ui_cache_for_root(managed_root_dir: &str) -> UiCachePayload {
     web_ui_store::read_ui_cache(managed_root_dir, UI_CACHE_FILENAME)
 }
 
-fn write_ui_cache_for_root(managed_root_dir: &str, payload: &UiCachePayload) -> std::io::Result<()> {
+fn write_ui_cache_for_root(
+    managed_root_dir: &str,
+    payload: &UiCachePayload,
+) -> std::io::Result<()> {
     web_ui_store::write_ui_cache(managed_root_dir, UI_CACHE_FILENAME, payload)
 }
 
@@ -256,30 +226,6 @@ pub(crate) fn read_global_history_limits(opts: Option<&GlobalOptions>) -> (Strin
         opts.history_max_messages.trim().to_string(),
         opts.history_max_chars.trim().to_string(),
     )
-}
-
-pub(crate) fn read_resume_info(workspace: &str, goal: &str) -> Option<ResumeInfo> {
-    let path = require_managed_workspace(workspace)
-        .ok()?
-        .join(SESSION_STATE_FILENAME);
-    let content = fs::read_to_string(path).ok()?;
-    let meta: ResumeMeta = serde_json::from_str(&content).ok()?;
-    if !goal.trim().is_empty() && !meta.goal.trim().is_empty() && meta.goal.trim() != goal.trim() {
-        return Some(ResumeInfo {
-            resumable: false,
-            updated_at_unix: meta.updated_at_unix,
-            iteration: meta.iteration,
-            message_count: meta.message_count,
-            last_status: Some("发现历史断点，但目标与当前输入不一致".to_string()),
-        });
-    }
-    Some(ResumeInfo {
-        resumable: true,
-        updated_at_unix: meta.updated_at_unix,
-        iteration: meta.iteration,
-        message_count: meta.message_count,
-        last_status: meta.last_status,
-    })
 }
 
 pub(crate) fn read_resume_info_for_root(
@@ -408,7 +354,8 @@ async fn upsert_project(
             ctx.username.clone().unwrap_or_else(|| "guest".to_string()),
         );
         fields.insert("role", format!("{:?}", ctx.role));
-        data.auth.audit("web_upsert_project_denied_readonly", &fields);
+        data.auth
+            .audit("web_upsert_project_denied_readonly", &fields);
         return HttpResponse::Forbidden().body("read-only session");
     }
     if let Err(e) = web_ui_authz::ensure_user_dirs(&ctx) {
@@ -451,7 +398,8 @@ async fn delete_project(
             ctx.username.clone().unwrap_or_else(|| "guest".to_string()),
         );
         fields.insert("role", format!("{:?}", ctx.role));
-        data.auth.audit("web_delete_project_denied_readonly", &fields);
+        data.auth
+            .audit("web_delete_project_denied_readonly", &fields);
         return HttpResponse::Forbidden().body("read-only session");
     }
     if let Err(e) = web_ui_authz::ensure_user_dirs(&ctx) {
@@ -665,25 +613,51 @@ async fn index_page(req: HttpRequest, data: web::Data<AppState>) -> impl Respond
             .finish();
     }
     HttpResponse::Ok()
+        .insert_header(("Cache-Control", "no-store"))
         .content_type("text/html; charset=utf-8")
         .body(INDEX_HTML)
 }
 
+async fn diff_page(req: HttpRequest, data: web::Data<AppState>) -> impl Responder {
+    let sid = auth::session::read_session_cookie(&req).unwrap_or_default();
+    let ok = data.auth.resolve_session(&sid).is_some();
+    if !ok {
+        return HttpResponse::Found()
+            .insert_header(("Location", "/login"))
+            .finish();
+    }
+    HttpResponse::Ok()
+        .insert_header(("Cache-Control", "no-store"))
+        .content_type("text/html; charset=utf-8")
+        .body(DIFF_HTML)
+}
+
 async fn app_css() -> impl Responder {
     HttpResponse::Ok()
+        .insert_header(("Cache-Control", "no-store"))
         .content_type("text/css; charset=utf-8")
         .body(APP_CSS)
 }
 
 async fn app_js() -> impl Responder {
     HttpResponse::Ok()
+        .insert_header(("Cache-Control", "no-store"))
         .content_type("application/javascript; charset=utf-8")
         .body(APP_JS)
 }
 
+async fn diff_js() -> impl Responder {
+    HttpResponse::Ok()
+        .insert_header(("Cache-Control", "no-store"))
+        .content_type("application/javascript; charset=utf-8")
+        .body(DIFF_JS)
+}
+
 async fn list_languages() -> impl Responder {
     match list_language_packs() {
-        Ok(languages) => HttpResponse::Ok().json(LanguageListResponse { languages }),
+        Ok(languages) => HttpResponse::Ok()
+            .insert_header(("Cache-Control", "no-store"))
+            .json(LanguageListResponse { languages }),
         Err(e) => HttpResponse::InternalServerError().body(e),
     }
 }
@@ -695,6 +669,7 @@ async fn get_language_pack(path: web::Path<String>) -> impl Responder {
     }
     match read_language_pack(&code) {
         Ok(content) => HttpResponse::Ok()
+            .insert_header(("Cache-Control", "no-store"))
             .content_type("application/json; charset=utf-8")
             .body(content),
         Err(e) if e == "language not found" => HttpResponse::NotFound().body(e),
@@ -713,6 +688,85 @@ pub(crate) fn release_gate(
     running: bool,
 ) -> (bool, String) {
     web_ui_analytics::release_gate(readiness_score, gate_threshold, blockers, running)
+}
+
+#[derive(serde::Deserialize)]
+struct DiffDataQuery {
+    bucket: String,
+}
+
+#[derive(serde::Serialize)]
+struct DiffDataResponse {
+    ok: bool,
+    bucket: String,
+    project_label: String,
+    run_state: String,
+    run_text: String,
+    diff_text: String,
+}
+
+async fn diff_data(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+    query: web::Query<DiffDataQuery>,
+) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(c) => c,
+        Err(resp) => return resp,
+    };
+    let bucket = query.bucket.trim().to_string();
+    if bucket.is_empty() || bucket.len() > 512 {
+        return HttpResponse::BadRequest().body("invalid bucket");
+    }
+    let (project_label, project_workspace, run_state, run_text) = {
+        let _guard = lock_recover(&data.projects_lock, "projects_lock");
+        let cache = read_ui_cache_for_root(&ctx.managed_root_dir);
+        let mut project_label = String::new();
+        let mut project_workspace: Option<String> = None;
+        if let Some(id) = bucket.strip_prefix("project:") {
+            if let Some(p) = cache.projects.iter().find(|p| p.id == id) {
+                project_workspace = Some(p.workspace.clone());
+                project_label = if !p.name.trim().is_empty() {
+                    p.name.trim().to_string()
+                } else if !p.workspace.trim().is_empty() {
+                    p.workspace.trim().to_string()
+                } else {
+                    id.to_string()
+                };
+            } else {
+                project_label = id.to_string();
+            }
+        }
+
+        let mut run_state = "idle".to_string();
+        let mut run_text = String::new();
+        if let Some(v) = cache.project_ui_state.get(&bucket) {
+            if let Some(obj) = v.as_object() {
+                if let Some(s) = obj.get("run_state").and_then(|x| x.as_str()) {
+                    run_state = s.to_string();
+                }
+                if let Some(s) = obj.get("run_text").and_then(|x| x.as_str()) {
+                    run_text = s.to_string();
+                }
+            }
+        }
+        (project_label, project_workspace, run_state, run_text)
+    };
+
+    let diff_text = project_workspace
+        .as_deref()
+        .and_then(|ws| require_managed_workspace_for_root(ws, &ctx.managed_root_dir).ok())
+        .and_then(|path| crate::git_utils::diff_last_commit(&path).ok())
+        .unwrap_or_default();
+
+    HttpResponse::Ok().json(DiffDataResponse {
+        ok: true,
+        bucket,
+        project_label,
+        run_state,
+        run_text,
+        diff_text,
+    })
 }
 
 pub async fn run_web_server(
@@ -755,11 +809,13 @@ pub async fn run_web_server(
         App::new()
             .app_data(web::Data::new(state.clone()))
             .route("/", web::get().to(index_page))
+            .route("/diff", web::get().to(diff_page))
             .route("/login", web::get().to(auth::login_page))
             .route("/account", web::get().to(auth::account_page))
             .route("/admin", web::get().to(auth::admin_page))
             .route("/assets/app.css", web::get().to(app_css))
             .route("/assets/app.js", web::get().to(app_js))
+            .route("/assets/diff.js", web::get().to(diff_js))
             .route("/assets/auth.js", web::get().to(auth::auth_js))
             .route("/assets/account.js", web::get().to(auth::account_js))
             .route("/assets/admin.js", web::get().to(auth::admin_js))
@@ -768,16 +824,31 @@ pub async fn run_web_server(
                 "/assets/languages/{code}.json",
                 web::get().to(get_language_pack),
             )
-            .route("/auth/bootstrap_status", web::get().to(auth::bootstrap_status))
-            .route("/auth/bootstrap_admin", web::post().to(auth::bootstrap_admin))
+            .route(
+                "/auth/bootstrap_status",
+                web::get().to(auth::bootstrap_status),
+            )
+            .route(
+                "/auth/bootstrap_admin",
+                web::post().to(auth::bootstrap_admin),
+            )
             .route("/auth/register", web::post().to(auth::register))
             .route("/auth/login", web::post().to(auth::login))
-            .route("/auth/verify_email_code", web::post().to(auth::verify_email_code))
+            .route(
+                "/auth/verify_email_code",
+                web::post().to(auth::verify_email_code),
+            )
             .route("/auth/guest", web::post().to(auth::guest_start))
             .route("/auth/logout", web::post().to(auth::logout))
             .route("/auth/me", web::get().to(auth::auth_me))
-            .route("/admin/api/settings", web::get().to(auth::admin_get_settings))
-            .route("/admin/api/settings", web::post().to(auth::admin_put_settings))
+            .route(
+                "/admin/api/settings",
+                web::get().to(auth::admin_get_settings),
+            )
+            .route(
+                "/admin/api/settings",
+                web::post().to(auth::admin_put_settings),
+            )
             .route("/admin/api/users", web::get().to(auth::admin_list_users))
             .route("/admin/api/users", web::post().to(auth::admin_create_user))
             .route(
@@ -797,7 +868,10 @@ pub async fn run_web_server(
                 web::post().to(auth::admin_set_password),
             )
             .route("/admin/api/audit", web::get().to(auth::admin_audit_tail))
-            .route("/account/api/profile", web::post().to(auth::account_update_profile))
+            .route(
+                "/account/api/profile",
+                web::post().to(auth::account_update_profile),
+            )
             .route(
                 "/account/api/password",
                 web::post().to(auth::account_change_password),
@@ -840,6 +914,31 @@ pub async fn run_web_server(
             .route("/ui_cache", web::get().to(get_ui_cache))
             .route("/ui_cache", web::put().to(put_ui_cache))
             .route("/ui_state", web::get().to(web_ui_session::get_ui_state))
+            .route("/diff_data", web::get().to(diff_data))
+            .route("/vm/status", web::get().to(web_ui_vm::get_vm_status))
+            .route("/vm/logs", web::get().to(web_ui_vm::get_vm_logs))
+            .route("/vm/snapshot/list", web::get().to(web_ui_vm::list_vm_snapshots))
+            .route("/vm/snapshot/create", web::post().to(web_ui_vm::create_vm_snapshot))
+            .route("/vm/snapshot/apply", web::post().to(web_ui_vm::apply_vm_snapshot))
+            .route("/vm/snapshot/delete", web::post().to(web_ui_vm::delete_vm_snapshot))
+            .route("/vm/clone", web::post().to(web_ui_vm::clone_vm_from_snapshot))
+            .route("/vm/exec", web::post().to(web_ui_vm::exec_in_vm))
+            .route("/vm/exec/cancel", web::post().to(web_ui_vm::cancel_vm_exec))
+            .route("/vm/bootstrap", web::post().to(web_ui_vm::bootstrap_vm))
+            .route("/vm/exec/queue", web::get().to(web_ui_vm::list_vm_exec_queue))
+            .route("/vm/exec/queue/stats", web::get().to(web_ui_vm::vm_exec_queue_stats))
+            .route("/vm/exec/enqueue", web::post().to(web_ui_vm::enqueue_vm_exec))
+            .route(
+                "/vm/exec/enqueue_batch",
+                web::post().to(web_ui_vm::enqueue_vm_exec_batch),
+            )
+            .route("/vm/exec/queue/cancel", web::post().to(web_ui_vm::cancel_vm_exec_task))
+            .route("/vm/exec/queue/run_next", web::post().to(web_ui_vm::run_next_vm_exec))
+            .route("/vm/ready", web::get().to(web_ui_vm::check_vm_ready))
+            .route("/vm/provision", web::post().to(web_ui_vm::provision_vm))
+            .route("/vm/start", web::post().to(web_ui_vm::start_vm))
+            .route("/vm/stop", web::post().to(web_ui_vm::stop_vm))
+            .route("/vm/delete", web::post().to(web_ui_vm::delete_vm))
             .route("/health", web::get().to(health))
             .route("/metrics", web::get().to(metrics))
             .route("/clarify", web::post().to(web_ui_session::answer_clarify))

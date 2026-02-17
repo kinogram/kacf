@@ -133,11 +133,29 @@ function applyStaticCopyToDom() {
         ['label_git_user_email', 'label_git_user_email'],
         ['hint_run_new_round', 'hint_run_new_round'],
         ['section_status_title', 'section_status_title'],
-        ['unattended_state_text', 'unattended_state_default'],
         ['section_clarify_title', 'section_clarify_title'],
         ['section_log_title', 'section_log_title'],
+        ['section_vm_title', 'section_vm_title'],
+        ['section_vm_sub', 'section_vm_sub'],
+        ['label_vm_name', 'label_vm_name'],
+        ['label_vm_backend', 'label_vm_backend'],
+        ['label_vm_os_image', 'label_vm_os_image'],
+        ['label_vm_ssh_user', 'label_vm_ssh_user'],
+        ['label_vm_cpu', 'label_vm_cpu'],
+        ['label_vm_memory_mb', 'label_vm_memory_mb'],
+        ['label_vm_disk_gb', 'label_vm_disk_gb'],
+        ['label_vm_target_select', 'label_vm_target_select'],
+        ['label_vm_purge_disk', 'label_vm_purge_disk'],
+        ['label_vm_snapshot_name', 'label_vm_snapshot_name'],
+        ['label_vm_clone_new_name', 'label_vm_clone_new_name'],
+        ['label_vm_exec_command', 'label_vm_exec_command'],
+        ['label_vm_exec_timeout_sec', 'label_vm_exec_timeout_sec'],
+        ['label_vm_exec_wait_ready_sec', 'label_vm_exec_wait_ready_sec'],
+        ['label_vm_exec_priority', 'label_vm_exec_priority'],
+        ['label_vm_exec_retry_max', 'label_vm_exec_retry_max'],
+        ['label_vm_exec_batch_commands', 'label_vm_exec_batch_commands'],
+        ['label_vm_exec_cancel_task_id', 'label_vm_exec_cancel_task_id'],
         ['hint_log_exports', 'hint_log_exports'],
-        ['section_diff_title', 'section_diff_title'],
         ['section_global_title', 'section_global_title'],
         ['label_api_key', 'label_api_key'],
         ['label_model', 'label_model'],
@@ -146,7 +164,6 @@ function applyStaticCopyToDom() {
         ['label_global_auto_resume_attempts', 'label_global_auto_resume_attempts'],
         ['label_global_stop_after_minutes', 'label_global_stop_after_minutes'],
         ['label_global_log_max_chars', 'label_global_log_max_chars'],
-        ['label_global_diff_max_chars', 'label_global_diff_max_chars'],
     ];
     staticMap.forEach(([id, key]) => {
         const el = document.getElementById(id);
@@ -170,6 +187,27 @@ function applyStaticCopyToDom() {
         ['export_log_btn', 'btn_export_log'],
         ['export_snapshot_btn', 'btn_export_snapshot'],
         ['export_report_btn', 'btn_export_report'],
+        ['view_diff_btn', 'btn_view_diff'],
+        ['vm_provision_btn', 'btn_vm_provision'],
+        ['vm_refresh_btn', 'btn_vm_refresh'],
+        ['vm_ready_btn', 'btn_vm_ready'],
+        ['vm_bootstrap_btn', 'btn_vm_bootstrap'],
+        ['vm_start_btn', 'btn_vm_start'],
+        ['vm_stop_btn', 'btn_vm_stop'],
+        ['vm_delete_btn', 'btn_vm_delete'],
+        ['vm_refresh_logs_btn', 'btn_vm_refresh_logs'],
+        ['vm_snapshot_refresh_btn', 'btn_vm_snapshot_refresh'],
+        ['vm_snapshot_create_btn', 'btn_vm_snapshot_create'],
+        ['vm_snapshot_apply_btn', 'btn_vm_snapshot_apply'],
+        ['vm_snapshot_delete_btn', 'btn_vm_snapshot_delete'],
+        ['vm_clone_btn', 'btn_vm_clone'],
+        ['vm_exec_btn', 'btn_vm_exec'],
+        ['vm_exec_cancel_btn', 'btn_vm_exec_cancel'],
+        ['vm_exec_enqueue_btn', 'btn_vm_exec_enqueue'],
+        ['vm_exec_batch_enqueue_btn', 'btn_vm_exec_batch_enqueue'],
+        ['vm_exec_run_next_btn', 'btn_vm_exec_run_next'],
+        ['vm_exec_queue_refresh_btn', 'btn_vm_exec_queue_refresh'],
+        ['vm_exec_queue_cancel_btn', 'btn_vm_exec_queue_cancel'],
     ];
     buttonTextMap.forEach(([id, key]) => {
         const el = document.getElementById(id);
@@ -203,12 +241,23 @@ function applyStaticCopyToDom() {
         ['global_history_max_messages', 'ph_history_max_messages'],
         ['global_history_max_chars', 'ph_history_max_chars'],
         ['global_log_max_chars', 'ph_global_log_max_chars'],
-        ['global_diff_max_chars', 'ph_global_diff_max_chars'],
         ['goal', 'ph_goal'],
         ['git_user_name', 'ph_git_user_name'],
         ['git_user_email', 'ph_git_user_email'],
         ['api_key', 'ph_api_key'],
-        ['project_search', 'project_search_placeholder']
+        ['project_search', 'project_search_placeholder'],
+        ['vm_name', 'ph_vm_name'],
+        ['vm_os_image', 'ph_vm_os_image'],
+        ['vm_ssh_user', 'ph_vm_ssh_user'],
+        ['vm_snapshot_name', 'ph_vm_snapshot_name'],
+        ['vm_clone_new_name', 'ph_vm_clone_new_name'],
+        ['vm_exec_command', 'ph_vm_exec_command'],
+        ['vm_exec_timeout_sec', 'ph_vm_exec_timeout_sec'],
+        ['vm_exec_wait_ready_sec', 'ph_vm_exec_wait_ready_sec'],
+        ['vm_exec_priority', 'ph_vm_exec_priority'],
+        ['vm_exec_retry_max', 'ph_vm_exec_retry_max'],
+        ['vm_exec_batch_commands', 'ph_vm_exec_batch_commands'],
+        ['vm_exec_cancel_task_id', 'ph_vm_exec_cancel_task_id'],
     ];
     placeholderMap.forEach(([id, key]) => {
         const el = document.getElementById(id);
@@ -221,6 +270,14 @@ function applyStaticCopyToDom() {
         summary.textContent = fmt('project_summary_total', '', { total: loadProjects().length });
     }
     setProjectDraftState();
+    if (typeof setTopbarPart === 'function') {
+        setTopbarPart('run', fmt('runbar_line', '', { state: txt('run_idle', '') }), { force: true });
+        setTopbarPart(
+            'project',
+            fmt('running_project_line', '', { name: txt('running_project_none', '') }),
+            { force: true },
+        );
+    }
     // Make sidebar buttons resilient: don't depend on project rendering (which may throw) to populate them.
     applySidebarLayout();
     renderUnattendedState();
@@ -254,11 +311,10 @@ function closeGlobalConfigModal() {
 async function saveGlobalConfig() {
     updateGlobalOptionsFromInputs();
     maybeWarnLargeCharLimit(txt('label_global_config', ''));
-    if (logMaxCharsSetting() > LARGE_CHAR_LIMIT_WARNING_THRESHOLD || diffMaxCharsSetting() > LARGE_CHAR_LIMIT_WARNING_THRESHOLD) {
+    if (logMaxCharsSetting() > LARGE_CHAR_LIMIT_WARNING_THRESHOLD) {
         alert(fmt('warn_large_char_limit_alert', '', {
             threshold: LARGE_CHAR_LIMIT_WARNING_THRESHOLD,
             log_limit: logMaxCharsSetting(),
-            diff_limit: diffMaxCharsSetting(),
         }));
     }
     const wantedLanguage = normalizeLanguageCode(document.getElementById('language_select')?.value || currentLanguage);
@@ -285,8 +341,6 @@ function setAutoSaveState(text) {
 }
 
 function renderUnattendedState() {
-    const el = document.getElementById('unattended_state_text');
-    if (!el) return;
     const configuredUnattendedMode = !!document.getElementById('unattended_mode')?.checked;
     const unattendedMode = runSessionActive ? activeRunUnattendedMode : configuredUnattendedMode;
     const mins = stopAfterMinutesSetting();
@@ -311,10 +365,8 @@ function renderUnattendedState() {
         resume_left: String(resumeLeft),
         stop: stopText,
     });
-    if (typeof setTopbarHintText === 'function') {
-        setTopbarHintText(el, line);
-    } else {
-        el.textContent = line;
+    if (typeof setTopbarPart === 'function') {
+        setTopbarPart('unattended', line);
     }
 }
 

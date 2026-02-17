@@ -14,9 +14,7 @@
         <div class="topbar-brand" id="topbar_brand" aria-label=""></div>
         <div class="topbar-status" role="status" aria-live="polite">
             <div class="runbar" id="runbar" data-state="idle"><div class="runbar-fill"></div></div>
-            <div class="hint" id="runbar_text"></div>
-            <div class="hint" id="running_project_text"></div>
-            <div class="hint" id="unattended_state_text"></div>
+            <div class="hint" id="topbar_line_text"></div>
         </div>
         <!-- Global settings: gear icon only; accessible label is set via language pack at runtime. -->
         <button class="btn-ghost btn-icon-only" id="open_global_config_btn">⚙</button>
@@ -157,6 +155,151 @@
                 </section>
             </div>
 
+            <section class="card" style="margin-top:14px;" id="vm_card">
+                <h2 class="title" id="section_vm_title"></h2>
+                <p class="sub" id="section_vm_sub"></p>
+                <div class="row three">
+                    <div>
+                        <label for="vm_name" id="label_vm_name"></label>
+                        <input id="vm_name" type="text" placeholder="">
+                    </div>
+                    <div>
+                        <label for="vm_backend" id="label_vm_backend"></label>
+                        <select id="vm_backend">
+                            <option value="metadata-only">metadata-only</option>
+                            <option value="qemu">qemu</option>
+                            <option value="libvirt">libvirt</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="vm_os_image" id="label_vm_os_image"></label>
+                        <input id="vm_os_image" type="text" placeholder="">
+                    </div>
+                    <div>
+                        <label for="vm_ssh_user" id="label_vm_ssh_user"></label>
+                        <input id="vm_ssh_user" type="text" value="root">
+                    </div>
+                </div>
+                <div class="row three">
+                    <div>
+                        <label for="vm_cpu" id="label_vm_cpu"></label>
+                        <input id="vm_cpu" type="text" value="2">
+                    </div>
+                    <div>
+                        <label for="vm_memory_mb" id="label_vm_memory_mb"></label>
+                        <input id="vm_memory_mb" type="text" value="4096">
+                    </div>
+                    <div>
+                        <label for="vm_disk_gb" id="label_vm_disk_gb"></label>
+                        <input id="vm_disk_gb" type="text" value="40">
+                    </div>
+                </div>
+                <div class="buttons">
+                    <button id="vm_provision_btn"></button>
+                    <button class="btn-ghost" id="vm_refresh_btn"></button>
+                    <button class="btn-ghost" id="vm_ready_btn"></button>
+                    <button class="btn-ghost" id="vm_bootstrap_btn"></button>
+                </div>
+                <div class="row two" style="margin-top:10px;">
+                    <div>
+                        <label for="vm_target_select" id="label_vm_target_select"></label>
+                        <select id="vm_target_select"></select>
+                    </div>
+                    <div>
+                        <div class="checkbox-row">
+                            <input id="vm_purge_disk" type="checkbox">
+                            <label for="vm_purge_disk" id="label_vm_purge_disk"></label>
+                        </div>
+                    </div>
+                </div>
+                <div class="buttons">
+                    <button class="btn-ghost" id="vm_start_btn"></button>
+                    <button class="btn-ghost" id="vm_stop_btn"></button>
+                    <button class="btn-danger" id="vm_delete_btn"></button>
+                </div>
+                <div class="buttons">
+                    <button class="btn-ghost" id="vm_refresh_logs_btn"></button>
+                </div>
+                <div class="row two" style="margin-top:10px;">
+                    <div>
+                        <label for="vm_snapshot_name" id="label_vm_snapshot_name"></label>
+                        <input id="vm_snapshot_name" type="text" placeholder="">
+                    </div>
+                    <div class="buttons" style="align-items:flex-end;">
+                        <button class="btn-ghost" id="vm_snapshot_refresh_btn"></button>
+                        <button class="btn-ghost" id="vm_snapshot_create_btn"></button>
+                        <button class="btn-ghost" id="vm_snapshot_apply_btn"></button>
+                        <button class="btn-danger" id="vm_snapshot_delete_btn"></button>
+                    </div>
+                </div>
+                <div class="row two" style="margin-top:10px;">
+                    <div>
+                        <label for="vm_clone_new_name" id="label_vm_clone_new_name"></label>
+                        <input id="vm_clone_new_name" type="text" placeholder="">
+                    </div>
+                    <div class="buttons" style="align-items:flex-end;">
+                        <button class="btn-ghost" id="vm_clone_btn"></button>
+                    </div>
+                </div>
+                <div class="hint" id="vm_capabilities"></div>
+                <div class="hint" id="vm_status_text"></div>
+                <pre id="vm_list" style="max-height:240px;overflow:auto;"></pre>
+                <pre id="vm_snapshots" style="max-height:140px;overflow:auto;"></pre>
+                <div class="row two" style="margin-top:10px;">
+                    <div>
+                        <label for="vm_exec_command" id="label_vm_exec_command"></label>
+                        <input id="vm_exec_command" type="text" placeholder="">
+                    </div>
+                    <div class="buttons" style="align-items:flex-end;">
+                        <button class="btn-ghost" id="vm_exec_btn"></button>
+                        <button class="btn-danger" id="vm_exec_cancel_btn"></button>
+                    </div>
+                </div>
+                <div class="row two" style="margin-top:10px;">
+                    <div>
+                        <label for="vm_exec_timeout_sec" id="label_vm_exec_timeout_sec"></label>
+                        <input id="vm_exec_timeout_sec" type="text" value="60">
+                    </div>
+                    <div>
+                        <label for="vm_exec_wait_ready_sec" id="label_vm_exec_wait_ready_sec"></label>
+                        <input id="vm_exec_wait_ready_sec" type="text" value="0">
+                    </div>
+                </div>
+                <div class="row two" style="margin-top:10px;">
+                    <div>
+                        <label for="vm_exec_priority" id="label_vm_exec_priority"></label>
+                        <input id="vm_exec_priority" type="text" value="0">
+                    </div>
+                    <div>
+                        <label for="vm_exec_retry_max" id="label_vm_exec_retry_max"></label>
+                        <input id="vm_exec_retry_max" type="text" value="0">
+                    </div>
+                </div>
+                <div class="buttons">
+                    <button class="btn-ghost" id="vm_exec_enqueue_btn"></button>
+                    <button class="btn-ghost" id="vm_exec_batch_enqueue_btn"></button>
+                    <button class="btn-ghost" id="vm_exec_run_next_btn"></button>
+                    <button class="btn-ghost" id="vm_exec_queue_refresh_btn"></button>
+                </div>
+                <div style="margin-top:10px;">
+                    <label for="vm_exec_batch_commands" id="label_vm_exec_batch_commands"></label>
+                    <textarea id="vm_exec_batch_commands" rows="4" placeholder=""></textarea>
+                </div>
+                <div class="row two" style="margin-top:10px;">
+                    <div>
+                        <label for="vm_exec_cancel_task_id" id="label_vm_exec_cancel_task_id"></label>
+                        <input id="vm_exec_cancel_task_id" type="text" placeholder="">
+                    </div>
+                    <div class="buttons" style="align-items:flex-end;">
+                        <button class="btn-danger" id="vm_exec_queue_cancel_btn"></button>
+                    </div>
+                </div>
+                <pre id="vm_exec_output" style="max-height:200px;overflow:auto;"></pre>
+                <div class="hint" id="vm_exec_queue_stats"></div>
+                <pre id="vm_exec_queue" style="max-height:200px;overflow:auto;"></pre>
+                <pre id="vm_logs" style="max-height:220px;overflow:auto;"></pre>
+            </section>
+
             <section class="card log-panel" style="margin-top:14px;">
         <h2 class="title" id="section_log_title"></h2>
         <pre id="log"></pre>
@@ -165,13 +308,9 @@
             <button class="btn-ghost" id="export_log_btn"></button>
             <button class="btn-ghost" id="export_snapshot_btn"></button>
             <button class="btn-ghost" id="export_report_btn"></button>
+            <button class="btn-ghost" id="view_diff_btn"></button>
         </div>
         <div class="hint" id="hint_log_exports"></div>
-            </section>
-
-            <section class="card diff-panel" id="diff_section" style="margin-top:14px;display:none;">
-        <h2 class="title" id="section_diff_title"></h2>
-        <div id="diff"></div>
             </section>
         </main>
     </div>
@@ -225,10 +364,7 @@
                 <label for="global_log_max_chars" id="label_global_log_max_chars"></label>
                 <input id="global_log_max_chars" type="text" placeholder="">
             </div>
-            <div>
-                <label for="global_diff_max_chars" id="label_global_diff_max_chars"></label>
-                <input id="global_diff_max_chars" type="text" placeholder="">
-            </div>
+            <div></div>
         </div>
         <div class="buttons">
             <button id="save_global_config_btn"></button>
