@@ -22,7 +22,8 @@ use crate::web_ui_models::{
     VmExecProfilesResponse, VmExecQueueItem, VmExecResponse, VmInstance, VmLogQuery,
     VmLogsResponse, VmProvisionPayload, VmQueueCancelPayload, VmQueueQuery, VmQueueResponse,
     VmQueueStatsResponse, VmReadyQuery, VmReadyResponse, VmSelfDebugPlanPayload,
-    VmSelfDebugPlanResponse, VmSelfDebugRunSummary, VmSelfDebugRunsQuery, VmSelfDebugRunsResponse,
+    VmSelfDebugPlanResponse, VmSelfDebugRunDetailQuery, VmSelfDebugRunDetailResponse,
+    VmSelfDebugRunSummary, VmSelfDebugRunTaskDetail, VmSelfDebugRunsQuery, VmSelfDebugRunsResponse,
     VmSelfDebugStopPayload, VmSnapshotEntry, VmSnapshotListQuery, VmSnapshotListResponse,
     VmSnapshotPayload, VmStateStore, VmStatusResponse,
 };
@@ -119,6 +120,15 @@ fn tail_text(raw: &str, max_chars: usize) -> String {
     text.chars().skip(total - max_chars).collect()
 }
 
+fn build_exec_output_preview(stdout: &str, stderr: &str, max_chars: usize) -> String {
+    let out = tail_text(stdout, max_chars / 2);
+    let err = tail_text(stderr, max_chars / 2);
+    if out.is_empty() && err.is_empty() {
+        return String::new();
+    }
+    format!("stdout:\n{}\n\nstderr:\n{}", out, err)
+}
+
 fn load_exec_queue(managed_root_dir: &str, vm_name: &str) -> Vec<VmExecQueueItem> {
     let path = vm_exec_queue_path(managed_root_dir, vm_name);
     let text = match fs::read_to_string(path) {
@@ -188,6 +198,7 @@ fn queue_item_from_values(
         finished_at_unix: 0,
         exit_code: 0,
         message: String::new(),
+        output_preview: String::new(),
         run_id: String::new(),
         run_kind: String::new(),
     }
@@ -788,6 +799,7 @@ fn run_next_vm_exec_core(
         item.finished_at_unix = now_unix();
         item.exit_code = exec_resp.exit_code;
         item.message = exec_resp.message.clone();
+        item.output_preview = build_exec_output_preview(&exec_resp.stdout, &exec_resp.stderr, 1200);
         item.next_run_after_unix = 0;
         finished_run_id = item.run_id.clone();
         finished_run_kind = item.run_kind.clone();
@@ -2616,6 +2628,50 @@ pub(crate) async fn list_vm_self_debug_runs(
     let items = load_exec_queue(&ctx.managed_root_dir, &name);
     let runs = collect_self_debug_runs(&items);
     HttpResponse::Ok().json(VmSelfDebugRunsResponse { name, runs })
+}
+
+pub(crate) async fn get_vm_self_debug_run_detail(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+    query: web::Query<VmSelfDebugRunDetailQuery>,
+) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    let name = match sanitize_vm_name(&query.name) {
+        Some(v) => v,
+        None => return HttpResponse::BadRequest().body("invalid vm name"),
+    };
+    let run_id = query.run_id.trim();
+    if run_id.is_empty() {
+        return HttpResponse::BadRequest().body("run_id is empty");
+    }
+    let _guard = lock_recover(&data.projects_lock, "projects_lock");
+    let items = load_exec_queue(&ctx.managed_root_dir, &name);
+    let tasks: Vec<VmSelfDebugRunTaskDetail> = items
+        .into_iter()
+        .filter(|x| x.run_kind == "self_debug" && x.run_id == run_id)
+        .map(|x| VmSelfDebugRunTaskDetail {
+            id: x.id,
+            status: x.status,
+            exit_code: x.exit_code,
+            command: x.command,
+            message: x.message,
+            output_preview: x.output_preview,
+            created_at_unix: x.created_at_unix,
+            started_at_unix: x.started_at_unix,
+            finished_at_unix: x.finished_at_unix,
+        })
+        .collect();
+    if tasks.is_empty() {
+        return HttpResponse::NotFound().body("self-debug run not found");
+    }
+    HttpResponse::Ok().json(VmSelfDebugRunDetailResponse {
+        name,
+        run_id: run_id.to_string(),
+        tasks,
+    })
 }
 
 pub(crate) async fn stop_vm_self_debug_run(

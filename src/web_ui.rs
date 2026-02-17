@@ -966,6 +966,10 @@ pub async fn run_web_server(
                 web::get().to(web_ui_vm::list_vm_self_debug_runs),
             )
             .route(
+                "/vm/self_debug/run_detail",
+                web::get().to(web_ui_vm::get_vm_self_debug_run_detail),
+            )
+            .route(
                 "/vm/self_debug/stop",
                 web::post().to(web_ui_vm::stop_vm_self_debug_run),
             )

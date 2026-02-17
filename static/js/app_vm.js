@@ -113,6 +113,12 @@ function setVmSelfDebugRunsText(text) {
     node.textContent = text || '';
 }
 
+function setVmSelfDebugRunDetailText(text) {
+    const node = el('vm_self_debug_run_detail');
+    if (!node) return;
+    node.textContent = text || '';
+}
+
 function setVmMutatingDisabled(disabled) {
     [
         'vm_provision_btn',
@@ -136,6 +142,7 @@ function setVmMutatingDisabled(disabled) {
         'vm_self_debug_preview_btn',
         'vm_self_debug_start_btn',
         'vm_self_debug_runs_refresh_btn',
+        'vm_self_debug_detail_btn',
         'vm_self_debug_stop_btn',
         'vm_exec_run_next_btn',
         'vm_exec_queue_refresh_btn',
@@ -711,6 +718,35 @@ async function refreshVmSelfDebugRuns() {
     }
 }
 
+async function refreshVmSelfDebugRunDetail() {
+    const name = selectedVmName();
+    const runId = String(el('vm_self_debug_run_id')?.value || '').trim();
+    if (!name || !runId) {
+        setVmSelfDebugRunDetailText('');
+        return;
+    }
+    try {
+        const data = await vmApi(`/vm/self_debug/run_detail?name=${encodeURIComponent(name)}&run_id=${encodeURIComponent(runId)}`, 'GET');
+        const tasks = Array.isArray(data?.tasks) ? data.tasks : [];
+        if (!tasks.length) {
+            setVmSelfDebugRunDetailText(txt('vm_self_debug_run_detail_empty', 'No run detail.'));
+            return;
+        }
+        const lines = tasks.map((t, i) => {
+            const id = String(t?.id || '-');
+            const st = String(t?.status || '-');
+            const ec = Number(t?.exit_code || 0);
+            const cmd = String(t?.command || '');
+            const msg = String(t?.message || '');
+            const out = String(t?.output_preview || '');
+            return `#${i + 1} ${id} [${st}] exit=${ec}\ncmd=${cmd}\nmsg=${msg}\nout=${out}`;
+        });
+        setVmSelfDebugRunDetailText(lines.join('\n\n'));
+    } catch (e) {
+        setVmSelfDebugRunDetailText(fmt('status_vm_self_debug_run_detail_failed', 'Load self-debug run detail failed: {error}', { error: String(e) }));
+    }
+}
+
 async function stopVmSelfDebugRun() {
     const name = selectedVmName();
     const runId = String(el('vm_self_debug_run_id')?.value || '').trim();
@@ -727,6 +763,7 @@ async function stopVmSelfDebugRun() {
         setStatus(txt('status_vm_self_debug_stop_ok', 'Self-debug stop requested.'), 'status-warn');
         await refreshVmExecQueue();
         await refreshVmSelfDebugRuns();
+        await refreshVmSelfDebugRunDetail();
     } catch (e) {
         setStatus(fmt('status_vm_self_debug_stop_failed', 'Stop self-debug run failed: {error}', { error: String(e) }), 'status-danger');
     }
@@ -1093,6 +1130,7 @@ function bindVmEvents() {
     el('vm_self_debug_preview_btn')?.addEventListener('click', previewVmSelfDebugPlan);
     el('vm_self_debug_start_btn')?.addEventListener('click', startVmSelfDebugPlan);
     el('vm_self_debug_runs_refresh_btn')?.addEventListener('click', refreshVmSelfDebugRuns);
+    el('vm_self_debug_detail_btn')?.addEventListener('click', refreshVmSelfDebugRunDetail);
     el('vm_self_debug_stop_btn')?.addEventListener('click', stopVmSelfDebugRun);
     el('vm_exec_run_next_btn')?.addEventListener('click', runNextVmExec);
     el('vm_exec_queue_refresh_btn')?.addEventListener('click', refreshVmExecQueue);
@@ -1103,10 +1141,12 @@ function bindVmEvents() {
         await refreshVmExecQueue();
         await refreshVmLogs();
         await refreshVmSelfDebugRuns();
+        await refreshVmSelfDebugRunDetail();
     });
     el('vm_exec_profile')?.addEventListener('change', previewVmExecProfile);
     el('vm_exec_profile_workdir')?.addEventListener('input', previewVmExecProfile);
     el('vm_exec_profile_test_cmd')?.addEventListener('input', previewVmExecProfile);
+    el('vm_self_debug_run_id')?.addEventListener('input', refreshVmSelfDebugRunDetail);
     setInterval(setVmReadOnlyByContext, 1000);
 }
 
@@ -1134,6 +1174,7 @@ async function init(opts) {
     await refreshVmSnapshots();
     await refreshVmExecQueue();
     await refreshVmSelfDebugRuns();
+    await refreshVmSelfDebugRunDetail();
 }
 
 window.KACF = window.KACF || {};
