@@ -470,6 +470,12 @@ pub(crate) struct VmExecQueueItem {
     #[serde(default)]
     pub(crate) output_preview: String,
     #[serde(default)]
+    pub(crate) failure_category: String,
+    #[serde(default)]
+    pub(crate) failure_signature: String,
+    #[serde(default)]
+    pub(crate) failure_key_lines: Vec<String>,
+    #[serde(default)]
     pub(crate) run_id: String,
     #[serde(default)]
     pub(crate) run_kind: String,
@@ -684,6 +690,9 @@ pub(crate) struct VmSelfDebugRunTaskDetail {
     pub(crate) command: String,
     pub(crate) message: String,
     pub(crate) output_preview: String,
+    pub(crate) failure_category: String,
+    pub(crate) failure_signature: String,
+    pub(crate) failure_key_lines: Vec<String>,
     pub(crate) created_at_unix: u64,
     pub(crate) started_at_unix: u64,
     pub(crate) finished_at_unix: u64,

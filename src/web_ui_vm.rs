@@ -199,9 +199,85 @@ fn queue_item_from_values(
         exit_code: 0,
         message: String::new(),
         output_preview: String::new(),
+        failure_category: String::new(),
+        failure_signature: String::new(),
+        failure_key_lines: Vec::new(),
         run_id: String::new(),
         run_kind: String::new(),
     }
+}
+
+fn extract_failure_key_lines(stderr: &str, stdout: &str, message: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for src in [stderr, stdout, message] {
+        for line in src.lines() {
+            let t = line.trim();
+            if t.is_empty() {
+                continue;
+            }
+            let low = t.to_ascii_lowercase();
+            let hit = low.contains("error")
+                || low.contains("failed")
+                || low.contains("panic")
+                || low.contains("exception")
+                || low.contains("timeout")
+                || low.contains("not found")
+                || low.contains("permission denied")
+                || low.contains("assert");
+            if hit {
+                out.push(t.chars().take(220).collect::<String>());
+                if out.len() >= 6 {
+                    return out;
+                }
+            }
+        }
+    }
+    if out.is_empty() && !message.trim().is_empty() {
+        out.push(message.trim().chars().take(220).collect());
+    }
+    out
+}
+
+fn classify_failure(
+    exit_code: i32,
+    stderr: &str,
+    stdout: &str,
+    message: &str,
+) -> (String, String, Vec<String>) {
+    if exit_code == 0 || exit_code == 10 {
+        return (String::new(), String::new(), Vec::new());
+    }
+    if exit_code == -2 {
+        return ("canceled".to_string(), "execution canceled".to_string(), Vec::new());
+    }
+    let full = format!(
+        "{}\n{}\n{}",
+        stderr.to_ascii_lowercase(),
+        stdout.to_ascii_lowercase(),
+        message.to_ascii_lowercase()
+    );
+    let category = if full.contains("timeout") || exit_code == 124 || exit_code == 137 {
+        "timeout"
+    } else if full.contains("permission denied") {
+        "permission"
+    } else if full.contains("not found") || full.contains("no such file") || full.contains("command not found") {
+        "missing_dependency"
+    } else if full.contains("assert") || full.contains("test failed") || full.contains("failures:") {
+        "test_failure"
+    } else if full.contains("panic") || full.contains("exception") || full.contains("traceback") {
+        "runtime_exception"
+    } else if full.contains("compile") || full.contains("syntax error") || full.contains("cannot find") {
+        "build_error"
+    } else {
+        "unknown_failure"
+    };
+    let key_lines = extract_failure_key_lines(stderr, stdout, message);
+    let signature = if let Some(first) = key_lines.first() {
+        first.clone()
+    } else {
+        message.trim().chars().take(160).collect()
+    };
+    (category.to_string(), signature, key_lines)
 }
 
 fn collect_self_debug_runs(items: &[VmExecQueueItem]) -> Vec<VmSelfDebugRunSummary> {
@@ -800,6 +876,15 @@ fn run_next_vm_exec_core(
         item.exit_code = exec_resp.exit_code;
         item.message = exec_resp.message.clone();
         item.output_preview = build_exec_output_preview(&exec_resp.stdout, &exec_resp.stderr, 1200);
+        let (cat, sig, lines) = classify_failure(
+            exec_resp.exit_code,
+            &exec_resp.stderr,
+            &exec_resp.stdout,
+            &exec_resp.message,
+        );
+        item.failure_category = cat;
+        item.failure_signature = sig;
+        item.failure_key_lines = lines;
         item.next_run_after_unix = 0;
         finished_run_id = item.run_id.clone();
         finished_run_kind = item.run_kind.clone();
@@ -2659,6 +2744,9 @@ pub(crate) async fn get_vm_self_debug_run_detail(
             command: x.command,
             message: x.message,
             output_preview: x.output_preview,
+            failure_category: x.failure_category,
+            failure_signature: x.failure_signature,
+            failure_key_lines: x.failure_key_lines,
             created_at_unix: x.created_at_unix,
             started_at_unix: x.started_at_unix,
             finished_at_unix: x.finished_at_unix,

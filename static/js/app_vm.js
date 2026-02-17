@@ -739,7 +739,10 @@ async function refreshVmSelfDebugRunDetail() {
             const cmd = String(t?.command || '');
             const msg = String(t?.message || '');
             const out = String(t?.output_preview || '');
-            return `#${i + 1} ${id} [${st}] exit=${ec}\ncmd=${cmd}\nmsg=${msg}\nout=${out}`;
+            const cat = String(t?.failure_category || '');
+            const sig = String(t?.failure_signature || '');
+            const keyLines = Array.isArray(t?.failure_key_lines) ? t.failure_key_lines.map((x) => String(x || '')).filter(Boolean) : [];
+            return `#${i + 1} ${id} [${st}] exit=${ec}\ncmd=${cmd}\nmsg=${msg}\ncat=${cat}\nsig=${sig}\nkeys=${keyLines.join(' | ')}\nout=${out}`;
         });
         setVmSelfDebugRunDetailText(lines.join('\n\n'));
     } catch (e) {
