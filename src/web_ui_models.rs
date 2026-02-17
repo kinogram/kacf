@@ -616,6 +616,10 @@ pub(crate) struct VmSelfDebugPlanPayload {
     #[serde(default)]
     pub(crate) verify_cmd: String,
     #[serde(default)]
+    pub(crate) success_streak_target: u32,
+    #[serde(default)]
+    pub(crate) fail_streak_target: u32,
+    #[serde(default)]
     pub(crate) timeout_sec: u64,
     #[serde(default)]
     pub(crate) wait_ready_sec: u64,

@@ -586,16 +586,46 @@ fn build_self_debug_tasks(
     } else {
         body.verify_cmd.trim().to_string()
     };
+    let success_target = if body.success_streak_target == 0 {
+        2
+    } else {
+        body.success_streak_target.clamp(1, 10)
+    };
+    let fail_target = if body.fail_streak_target == 0 {
+        3
+    } else {
+        body.fail_streak_target.clamp(1, 10)
+    };
     let wd = workdir.as_deref();
     let mut out = Vec::new();
+    out.push(VmExecBatchTaskPayload {
+        command: prepend_workdir(
+            "sh -lc \"mkdir -p .kacf && echo 0 > .kacf/self_debug_success_streak && echo 0 > .kacf/self_debug_fail_streak\"",
+            wd,
+        ),
+        timeout_sec: 0,
+        wait_ready_sec: 0,
+        priority: 0,
+        retry_max: 0,
+    });
     for i in 1..=cycles {
         let start_line = format!("echo '[self-debug] cycle {i}/{cycles} start'");
         let end_line = format!("echo '[self-debug] cycle {i}/{cycles} end'");
+        let verify_gate = format!(
+            "sh -lc '{} && s=$(cat .kacf/self_debug_success_streak 2>/dev/null || echo 0); f=$(cat .kacf/self_debug_fail_streak 2>/dev/null || echo 0); s=$((s+1)); f=0; echo $s > .kacf/self_debug_success_streak; echo $f > .kacf/self_debug_fail_streak; echo \"[self-debug] verify success streak=$s/{}\"; if [ \"$s\" -ge \"{}\" ]; then echo \"[self-debug] success streak reached, request early stop\"; touch .kacf/self_debug_stop_request; fi' || sh -lc 's=$(cat .kacf/self_debug_success_streak 2>/dev/null || echo 0); f=$(cat .kacf/self_debug_fail_streak 2>/dev/null || echo 0); s=0; f=$((f+1)); echo $s > .kacf/self_debug_success_streak; echo $f > .kacf/self_debug_fail_streak; echo \"[self-debug] verify fail streak=$f/{}\"; if [ \"$f\" -ge \"{}\" ]; then echo \"[self-debug] fail streak reached, request early stop\"; touch .kacf/self_debug_stop_request; fi; exit 0'",
+            verify_cmd.replace('\'', "'\"'\"'"),
+            success_target,
+            success_target,
+            fail_target,
+            fail_target
+        );
+        let check_stop = "sh -lc \"if [ -f .kacf/self_debug_stop_request ]; then echo '[self-debug] early-stop flag detected'; exit 10; fi\"".to_string();
         let cmds = [
             start_line.as_str(),
             test_cmd.as_str(),
             fix_cmd,
-            verify_cmd.as_str(),
+            verify_gate.as_str(),
+            check_stop.as_str(),
             end_line.as_str(),
         ];
         for cmd in cmds {
@@ -752,13 +782,19 @@ fn run_next_vm_exec_core(
 
     let _guard = lock_recover(projects_lock, "projects_lock");
     let mut items = load_exec_queue(managed_root_dir, name);
+    let mut finished_run_id = String::new();
+    let mut finished_run_kind = String::new();
     if let Some(item) = items.iter_mut().find(|x| x.id == task_id) {
         item.finished_at_unix = now_unix();
         item.exit_code = exec_resp.exit_code;
         item.message = exec_resp.message.clone();
         item.next_run_after_unix = 0;
+        finished_run_id = item.run_id.clone();
+        finished_run_kind = item.run_kind.clone();
         item.status = if exec_resp.exit_code == -2 {
             "canceled".to_string()
+        } else if exec_resp.exit_code == 10 && item.run_kind == "self_debug" {
+            "done".to_string()
         } else if exec_resp.ok {
             "done".to_string()
         } else if item.retry_count < item.retry_max {
@@ -777,6 +813,30 @@ fn run_next_vm_exec_core(
         } else {
             "failed".to_string()
         };
+    }
+    if exec_resp.exit_code == 10
+        && finished_run_kind == "self_debug"
+        && !finished_run_id.trim().is_empty()
+    {
+        for item in items.iter_mut() {
+            if item.id == task_id {
+                continue;
+            }
+            if item.run_kind != "self_debug" || item.run_id != finished_run_id {
+                continue;
+            }
+            if item.status == "pending" {
+                item.status = "canceled".to_string();
+                item.finished_at_unix = now_unix();
+                item.exit_code = -2;
+                item.message = "canceled by early-stop gate".to_string();
+            }
+        }
+        append_vm_log(
+            managed_root_dir,
+            name,
+            &format!("self-debug early-stop gate triggered run_id={}", finished_run_id),
+        );
     }
     let _ = save_exec_queue(managed_root_dir, name, &items);
     append_vm_log(
