@@ -685,6 +685,7 @@ pub(crate) struct VmSelfDebugRunDetailQuery {
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct VmSelfDebugRunTaskDetail {
     pub(crate) id: String,
+    pub(crate) run_kind: String,
     pub(crate) status: String,
     pub(crate) exit_code: i32,
     pub(crate) command: String,

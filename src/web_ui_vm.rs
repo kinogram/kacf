@@ -280,11 +280,25 @@ fn classify_failure(
     (category.to_string(), signature, key_lines)
 }
 
+fn strategy_command_for_failure_category(category: &str) -> &'static str {
+    match category {
+        "missing_dependency" => "sh -lc 'if command -v apt-get >/dev/null 2>&1; then export DEBIAN_FRONTEND=noninteractive; apt-get update && apt-get install -y build-essential git curl python3 python3-pip nodejs npm || true; elif command -v dnf >/dev/null 2>&1; then dnf install -y gcc gcc-c++ make git curl python3 python3-pip nodejs npm || true; elif command -v yum >/dev/null 2>&1; then yum install -y gcc gcc-c++ make git curl python3 python3-pip nodejs npm || true; elif command -v apk >/dev/null 2>&1; then apk add --no-cache build-base git curl python3 py3-pip nodejs npm || true; else echo no-supported-pkg-manager; fi'",
+        "permission" => "sh -lc 'chmod -R u+rw . 2>/dev/null || true; find . -type d -exec chmod u+rwx {} + 2>/dev/null || true'",
+        "timeout" => "sh -lc 'echo [self-debug][strategy] timeout-diagnostics; ps aux --sort=-%cpu | head -n 20; ps aux --sort=-%mem | head -n 20'",
+        "build_error" => "sh -lc 'echo [self-debug][strategy] build-error-context; git status --short; git diff --stat'",
+        "test_failure" => "sh -lc 'echo [self-debug][strategy] test-failure-context; git status --short; git diff --stat'",
+        "runtime_exception" => "sh -lc 'echo [self-debug][strategy] runtime-exception-context; git status --short; git diff --stat'",
+        _ => "sh -lc 'echo [self-debug][strategy] generic-failure-context; git status --short; git diff --stat'",
+    }
+}
+
 fn collect_self_debug_runs(items: &[VmExecQueueItem]) -> Vec<VmSelfDebugRunSummary> {
     let mut map: BTreeMap<String, VmSelfDebugRunSummary> = BTreeMap::new();
     for item in items {
         let run_id = item.run_id.trim();
-        if run_id.is_empty() || item.run_kind != "self_debug" {
+        if run_id.is_empty()
+            || (item.run_kind != "self_debug" && item.run_kind != "self_debug_strategy")
+        {
             continue;
         }
         let entry = map.entry(run_id.to_string()).or_insert(VmSelfDebugRunSummary {
@@ -871,6 +885,7 @@ fn run_next_vm_exec_core(
     let mut items = load_exec_queue(managed_root_dir, name);
     let mut finished_run_id = String::new();
     let mut finished_run_kind = String::new();
+    let mut inject_strategy: Option<(String, String, i32)> = None;
     if let Some(item) = items.iter_mut().find(|x| x.id == task_id) {
         item.finished_at_unix = now_unix();
         item.exit_code = exec_resp.exit_code;
@@ -910,6 +925,17 @@ fn run_next_vm_exec_core(
         } else {
             "failed".to_string()
         };
+        if item.status == "failed"
+            && item.run_kind == "self_debug"
+            && !item.run_id.trim().is_empty()
+        {
+            inject_strategy = Some((
+                item.run_id.clone(),
+                item.failure_category.clone(),
+                item.priority,
+            ));
+            item.message = format!("{} [strategy-injected]", item.message);
+        }
     }
     if exec_resp.exit_code == 10
         && finished_run_kind == "self_debug"
@@ -933,6 +959,27 @@ fn run_next_vm_exec_core(
             managed_root_dir,
             name,
             &format!("self-debug early-stop gate triggered run_id={}", finished_run_id),
+        );
+    }
+    if let Some((run_id, category, priority)) = inject_strategy {
+        let mut strategy_item = queue_item_from_values(
+            strategy_command_for_failure_category(&category),
+            180,
+            0,
+            priority.saturating_add(1).clamp(-100, 100),
+            0,
+        );
+        strategy_item.run_id = run_id.clone();
+        strategy_item.run_kind = "self_debug_strategy".to_string();
+        strategy_item.message = format!("auto strategy task injected for category={}", category);
+        items.push(strategy_item);
+        append_vm_log(
+            managed_root_dir,
+            name,
+            &format!(
+                "self-debug strategy injected run_id={} category={}",
+                run_id, category
+            ),
         );
     }
     let _ = save_exec_queue(managed_root_dir, name, &items);
@@ -2736,9 +2783,13 @@ pub(crate) async fn get_vm_self_debug_run_detail(
     let items = load_exec_queue(&ctx.managed_root_dir, &name);
     let tasks: Vec<VmSelfDebugRunTaskDetail> = items
         .into_iter()
-        .filter(|x| x.run_kind == "self_debug" && x.run_id == run_id)
+        .filter(|x| {
+            (x.run_kind == "self_debug" || x.run_kind == "self_debug_strategy")
+                && x.run_id == run_id
+        })
         .map(|x| VmSelfDebugRunTaskDetail {
             id: x.id,
+            run_kind: x.run_kind,
             status: x.status,
             exit_code: x.exit_code,
             command: x.command,

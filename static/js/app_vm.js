@@ -734,6 +734,7 @@ async function refreshVmSelfDebugRunDetail() {
         }
         const lines = tasks.map((t, i) => {
             const id = String(t?.id || '-');
+            const kind = String(t?.run_kind || '-');
             const st = String(t?.status || '-');
             const ec = Number(t?.exit_code || 0);
             const cmd = String(t?.command || '');
@@ -742,7 +743,7 @@ async function refreshVmSelfDebugRunDetail() {
             const cat = String(t?.failure_category || '');
             const sig = String(t?.failure_signature || '');
             const keyLines = Array.isArray(t?.failure_key_lines) ? t.failure_key_lines.map((x) => String(x || '')).filter(Boolean) : [];
-            return `#${i + 1} ${id} [${st}] exit=${ec}\ncmd=${cmd}\nmsg=${msg}\ncat=${cat}\nsig=${sig}\nkeys=${keyLines.join(' | ')}\nout=${out}`;
+            return `#${i + 1} ${id} kind=${kind} [${st}] exit=${ec}\ncmd=${cmd}\nmsg=${msg}\ncat=${cat}\nsig=${sig}\nkeys=${keyLines.join(' | ')}\nout=${out}`;
         });
         setVmSelfDebugRunDetailText(lines.join('\n\n'));
     } catch (e) {
