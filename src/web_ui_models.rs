@@ -616,6 +616,8 @@ pub(crate) struct VmExecCustomProfileDeletePayload {
 pub(crate) struct VmSelfDebugPlanPayload {
     pub(crate) name: String,
     #[serde(default)]
+    pub(crate) run_id: String,
+    #[serde(default)]
     pub(crate) profile: String,
     #[serde(default)]
     pub(crate) cycles: u32,
@@ -694,6 +696,17 @@ pub(crate) struct VmSelfDebugStrategyStat {
 pub(crate) struct VmSelfDebugStrategyStatsResponse {
     pub(crate) name: String,
     pub(crate) stats: Vec<VmSelfDebugStrategyStat>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmSelfDebugStrategyRulesResponse {
+    pub(crate) rules: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VmSelfDebugStrategyRulesSavePayload {
+    #[serde(default)]
+    pub(crate) rules: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

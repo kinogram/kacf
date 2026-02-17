@@ -24,9 +24,9 @@ use crate::web_ui_models::{
     VmQueueStatsResponse, VmReadyQuery, VmReadyResponse, VmSelfDebugPlanPayload,
     VmSelfDebugPlanResponse, VmSelfDebugRunDetailQuery, VmSelfDebugRunDetailResponse,
     VmSelfDebugRunSummary, VmSelfDebugRunTaskDetail, VmSelfDebugRunsQuery, VmSelfDebugRunsResponse,
-    VmSelfDebugStopPayload, VmSelfDebugStrategyStat, VmSelfDebugStrategyStatsResponse,
-    VmSnapshotEntry, VmSnapshotListQuery, VmSnapshotListResponse, VmSnapshotPayload, VmStateStore,
-    VmStatusResponse,
+    VmSelfDebugStopPayload, VmSelfDebugStrategyRulesResponse, VmSelfDebugStrategyRulesSavePayload,
+    VmSelfDebugStrategyStat, VmSelfDebugStrategyStatsResponse, VmSnapshotEntry,
+    VmSnapshotListQuery, VmSnapshotListResponse, VmSnapshotPayload, VmStateStore, VmStatusResponse,
 };
 
 const VM_DIR: &str = "vm";
@@ -35,6 +35,7 @@ const VM_RUNTIME_DIR: &str = "runtime";
 const VM_LOG_DIR: &str = "logs";
 const VM_STATE_FILE: &str = "vm_state.json";
 const VM_PROFILES_FILE: &str = "vm_exec_profiles.json";
+const VM_STRATEGY_RULES_FILE: &str = "vm_self_debug_strategy_rules.json";
 
 fn now_unix() -> u64 {
     SystemTime::now()
@@ -69,6 +70,10 @@ fn vm_log_dir(managed_root_dir: &str) -> PathBuf {
 
 fn vm_profiles_path(managed_root_dir: &str) -> PathBuf {
     vm_root_path(managed_root_dir).join(VM_PROFILES_FILE)
+}
+
+fn vm_strategy_rules_path(managed_root_dir: &str) -> PathBuf {
+    vm_root_path(managed_root_dir).join(VM_STRATEGY_RULES_FILE)
 }
 
 fn vm_pid_path(managed_root_dir: &str, vm_name: &str) -> PathBuf {
@@ -169,6 +174,23 @@ fn self_debug_run_id() -> String {
         .map(|d| d.subsec_nanos())
         .unwrap_or(0);
     format!("sd-{}-{}", now_unix(), ns)
+}
+
+fn sanitize_self_debug_run_id(raw: &str) -> Option<String> {
+    let value = raw.trim();
+    if value.is_empty() {
+        return None;
+    }
+    if value.len() > 64 {
+        return None;
+    }
+    if !value
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return None;
+    }
+    Some(value.to_string())
 }
 
 fn retry_backoff_secs(retry_count: u32) -> u64 {
@@ -283,7 +305,7 @@ fn classify_failure(
     (category.to_string(), signature, key_lines)
 }
 
-fn strategy_command_for_failure_category(category: &str) -> &'static str {
+fn default_strategy_command_for_failure_category(category: &str) -> &'static str {
     match category {
         "missing_dependency" => "sh -lc 'if command -v apt-get >/dev/null 2>&1; then export DEBIAN_FRONTEND=noninteractive; apt-get update && apt-get install -y build-essential git curl python3 python3-pip nodejs npm || true; elif command -v dnf >/dev/null 2>&1; then dnf install -y gcc gcc-c++ make git curl python3 python3-pip nodejs npm || true; elif command -v yum >/dev/null 2>&1; then yum install -y gcc gcc-c++ make git curl python3 python3-pip nodejs npm || true; elif command -v apk >/dev/null 2>&1; then apk add --no-cache build-base git curl python3 py3-pip nodejs npm || true; else echo no-supported-pkg-manager; fi'",
         "permission" => "sh -lc 'chmod -R u+rw . 2>/dev/null || true; find . -type d -exec chmod u+rwx {} + 2>/dev/null || true'",
@@ -293,6 +315,71 @@ fn strategy_command_for_failure_category(category: &str) -> &'static str {
         "runtime_exception" => "sh -lc 'echo [self-debug][strategy] runtime-exception-context; git status --short; git diff --stat'",
         _ => "sh -lc 'echo [self-debug][strategy] generic-failure-context; git status --short; git diff --stat'",
     }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+struct VmSelfDebugStrategyRulesStore {
+    #[serde(default)]
+    rules: BTreeMap<String, String>,
+}
+
+fn load_strategy_rules(managed_root_dir: &str) -> VmSelfDebugStrategyRulesStore {
+    let path = vm_strategy_rules_path(managed_root_dir);
+    let text = match fs::read_to_string(path) {
+        Ok(v) => v,
+        Err(_) => return VmSelfDebugStrategyRulesStore::default(),
+    };
+    serde_json::from_str::<VmSelfDebugStrategyRulesStore>(&text).unwrap_or_default()
+}
+
+fn save_strategy_rules(
+    managed_root_dir: &str,
+    store: &VmSelfDebugStrategyRulesStore,
+) -> std::io::Result<()> {
+    let path = vm_strategy_rules_path(managed_root_dir);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let text = serde_json::to_string_pretty(store)?;
+    let tmp = path.with_extension("tmp");
+    fs::write(&tmp, text)?;
+    fs::rename(tmp, path)?;
+    Ok(())
+}
+
+fn sanitize_strategy_rules(raw: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+    let allowed = [
+        "missing_dependency",
+        "permission",
+        "timeout",
+        "build_error",
+        "test_failure",
+        "runtime_exception",
+        "unknown_failure",
+    ];
+    let mut out = BTreeMap::new();
+    for key in allowed {
+        let Some(cmd) = raw.get(key) else {
+            continue;
+        };
+        let t = cmd.trim();
+        if t.is_empty() || t.len() > 2000 {
+            continue;
+        }
+        out.insert(key.to_string(), t.to_string());
+    }
+    out
+}
+
+fn strategy_command_for_failure_category(managed_root_dir: &str, category: &str) -> String {
+    let store = load_strategy_rules(managed_root_dir);
+    if let Some(cmd) = store.rules.get(category) {
+        let t = cmd.trim();
+        if !t.is_empty() {
+            return t.to_string();
+        }
+    }
+    default_strategy_command_for_failure_category(category).to_string()
 }
 
 fn strategy_injected_count(items: &[VmExecQueueItem], run_id: &str, signature: &str) -> usize {
@@ -1044,7 +1131,7 @@ fn run_next_vm_exec_core(
             item.message = format!("{} [strategy-injected]", item.message);
         }
         let mut strategy_item = queue_item_from_values(
-            strategy_command_for_failure_category(&category),
+            &strategy_command_for_failure_category(managed_root_dir, &category),
             180,
             0,
             priority.saturating_add(1).clamp(-100, 100),
@@ -2793,7 +2880,14 @@ pub(crate) async fn start_vm_self_debug_plan(
         Ok(v) => v,
         Err(e) => return HttpResponse::BadRequest().body(e),
     };
-    let run_id = self_debug_run_id();
+    let run_id = if body.run_id.trim().is_empty() {
+        self_debug_run_id()
+    } else {
+        match sanitize_self_debug_run_id(&body.run_id) {
+            Some(v) => v,
+            None => return HttpResponse::BadRequest().body("invalid run_id"),
+        }
+    };
     let default_timeout_sec = if body.timeout_sec == 0 {
         120
     } else {
@@ -2833,7 +2927,16 @@ pub(crate) async fn start_vm_self_debug_plan(
     append_vm_log(
         &ctx.managed_root_dir,
         &name,
-        &format!("self-debug plan enqueued run_id={} tasks={added}", run_id),
+        &format!(
+            "self-debug plan enqueued run_id={} tasks={} mode={}",
+            run_id,
+            added,
+            if body.run_id.trim().is_empty() {
+                "new"
+            } else {
+                "append"
+            }
+        ),
     );
     spawn_vm_exec_worker(
         ctx.managed_root_dir.clone(),
@@ -2940,6 +3043,40 @@ pub(crate) async fn get_vm_self_debug_strategy_stats(
     let items = load_exec_queue(&ctx.managed_root_dir, &name);
     let stats = collect_self_debug_strategy_stats(&items);
     HttpResponse::Ok().json(VmSelfDebugStrategyStatsResponse { name, stats })
+}
+
+pub(crate) async fn get_vm_self_debug_strategy_rules(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    let store = load_strategy_rules(&ctx.managed_root_dir);
+    HttpResponse::Ok().json(VmSelfDebugStrategyRulesResponse { rules: store.rules })
+}
+
+pub(crate) async fn save_vm_self_debug_strategy_rules(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+    body: web::Json<VmSelfDebugStrategyRulesSavePayload>,
+) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if !ctx.can_write {
+        return HttpResponse::Forbidden().body("read-only session");
+    }
+    let rules = sanitize_strategy_rules(&body.rules);
+    let _guard = lock_recover(&data.projects_lock, "projects_lock");
+    let store = VmSelfDebugStrategyRulesStore { rules };
+    if let Err(e) = save_strategy_rules(&ctx.managed_root_dir, &store) {
+        return HttpResponse::InternalServerError()
+            .body(format!("save strategy rules failed: {e}"));
+    }
+    HttpResponse::Ok().json(VmSelfDebugStrategyRulesResponse { rules: store.rules })
 }
 
 pub(crate) async fn stop_vm_self_debug_run(

@@ -213,6 +213,8 @@ function setVmMutatingDisabled(disabled) {
         'vm_self_debug_stats_btn',
         'vm_self_debug_detail_btn',
         'vm_self_debug_stop_btn',
+        'vm_self_debug_rules_load_btn',
+        'vm_self_debug_rules_save_btn',
         'vm_exec_run_next_btn',
         'vm_exec_queue_refresh_btn',
         'vm_exec_queue_cancel_btn',
@@ -225,6 +227,7 @@ function setVmMutatingDisabled(disabled) {
         'vm_self_debug_success_streak_target',
         'vm_self_debug_fail_streak_target',
         'vm_self_debug_run_id',
+        'vm_self_debug_strategy_rules',
     ].forEach((id) => {
         const node = el(id);
         if (node) node.disabled = !!disabled;
@@ -365,6 +368,7 @@ function profileTestCmdInput() {
 function collectVmSelfDebugPayload() {
     return {
         name: selectedVmName(),
+        run_id: String(el('vm_self_debug_run_id')?.value || '').trim(),
         profile: String(el('vm_exec_profile')?.value || '').trim(),
         cycles: asBoundedInt(el('vm_self_debug_cycles')?.value, 1, 30, 3),
         workdir: profileWorkdirInput(),
@@ -815,6 +819,43 @@ async function refreshVmSelfDebugStrategyStats() {
     }
 }
 
+function formatStrategyRulesText(rulesObj) {
+    const obj = rulesObj && typeof rulesObj === 'object' ? rulesObj : {};
+    return JSON.stringify(obj, null, 2);
+}
+
+function parseStrategyRulesText(raw) {
+    const text = String(raw || '').trim();
+    if (!text) return {};
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('rules must be a JSON object');
+    }
+    return parsed;
+}
+
+async function loadVmSelfDebugStrategyRules() {
+    try {
+        const data = await vmApi('/vm/self_debug/strategy_rules', 'GET');
+        const area = el('vm_self_debug_strategy_rules');
+        if (area) area.value = formatStrategyRulesText(data?.rules || {});
+        setStatus(txt('status_vm_self_debug_rules_loaded', 'Strategy rules loaded.'), 'status-warn');
+    } catch (e) {
+        setStatus(fmt('status_vm_self_debug_rules_load_failed', 'Load strategy rules failed: {error}', { error: String(e) }), 'status-danger');
+    }
+}
+
+async function saveVmSelfDebugStrategyRules() {
+    try {
+        const area = el('vm_self_debug_strategy_rules');
+        const rules = parseStrategyRulesText(area?.value || '');
+        await vmApi('/vm/self_debug/strategy_rules', 'POST', { rules });
+        setStatus(txt('status_vm_self_debug_rules_saved', 'Strategy rules saved.'), 'status-warn');
+    } catch (e) {
+        setStatus(fmt('status_vm_self_debug_rules_save_failed', 'Save strategy rules failed: {error}', { error: String(e) }), 'status-danger');
+    }
+}
+
 async function refreshVmSelfDebugRunDetail() {
     const name = selectedVmName();
     const runId = String(el('vm_self_debug_run_id')?.value || '').trim();
@@ -1241,6 +1282,8 @@ function bindVmEvents() {
     el('vm_self_debug_stats_btn')?.addEventListener('click', refreshVmSelfDebugStrategyStats);
     el('vm_self_debug_detail_btn')?.addEventListener('click', refreshVmSelfDebugRunDetail);
     el('vm_self_debug_stop_btn')?.addEventListener('click', stopVmSelfDebugRun);
+    el('vm_self_debug_rules_load_btn')?.addEventListener('click', loadVmSelfDebugStrategyRules);
+    el('vm_self_debug_rules_save_btn')?.addEventListener('click', saveVmSelfDebugStrategyRules);
     el('vm_exec_run_next_btn')?.addEventListener('click', runNextVmExec);
     el('vm_exec_queue_refresh_btn')?.addEventListener('click', refreshVmExecQueue);
     el('vm_exec_queue_cancel_btn')?.addEventListener('click', cancelVmQueueTask);
@@ -1285,6 +1328,7 @@ async function init(opts) {
     await refreshVmExecQueue();
     await refreshVmSelfDebugRuns();
     await refreshVmSelfDebugStrategyStats();
+    await loadVmSelfDebugStrategyRules();
     await refreshVmSelfDebugRunDetail();
 }
 
