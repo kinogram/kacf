@@ -41,6 +41,7 @@ const VM_STATE_FILE: &str = "vm_state.json";
 const VM_PROFILES_FILE: &str = "vm_exec_profiles.json";
 const VM_STRATEGY_RULES_FILE: &str = "vm_self_debug_strategy_rules.json";
 const VM_HISTORY_SUFFIX: &str = ".self_debug.history.json";
+const VM_HISTORY_MAX_ENTRIES: usize = 200;
 
 fn now_unix() -> u64 {
     SystemTime::now()
@@ -470,6 +471,22 @@ fn save_self_debug_history(
     fs::write(&tmp, text)?;
     fs::rename(tmp, path)?;
     Ok(())
+}
+
+fn sort_history_entries(entries: &mut [VmSelfDebugHistoryEntry]) {
+    entries.sort_by(|a, b| {
+        b.archived_at_unix
+            .cmp(&a.archived_at_unix)
+            .then_with(|| b.summary.updated_at_unix.cmp(&a.summary.updated_at_unix))
+            .then_with(|| b.summary.run_id.cmp(&a.summary.run_id))
+    });
+}
+
+fn trim_history_entries(entries: &mut Vec<VmSelfDebugHistoryEntry>, max_entries: usize) {
+    if max_entries == 0 || entries.len() <= max_entries {
+        return;
+    }
+    entries.truncate(max_entries);
 }
 
 fn upsert_history_entry(
@@ -1361,7 +1378,26 @@ fn run_next_vm_exec_core(
             item.message = format!("{} [strategy-skip-limit]", item.message);
         }
     }
+    let now = now_unix();
+    let mut history = load_self_debug_history(managed_root_dir, name);
+    let (archived_runs, removed_tasks) =
+        archive_completed_self_debug_runs(&mut items, &mut history, now);
+    sort_history_entries(&mut history);
+    trim_history_entries(&mut history, VM_HISTORY_MAX_ENTRIES);
     let _ = save_exec_queue(managed_root_dir, name, &items);
+    let _ = save_self_debug_history(managed_root_dir, name, &history);
+    if archived_runs > 0 {
+        append_vm_log(
+            managed_root_dir,
+            name,
+            &format!(
+                "self-debug auto-archive archived_runs={} removed_tasks={} history_total={}",
+                archived_runs,
+                removed_tasks,
+                history.len()
+            ),
+        );
+    }
     append_vm_log(
         managed_root_dir,
         name,
@@ -3182,12 +3218,7 @@ pub(crate) async fn list_vm_self_debug_history(
     };
     let _guard = lock_recover(&data.projects_lock, "projects_lock");
     let mut history = load_self_debug_history(&ctx.managed_root_dir, &name);
-    history.sort_by(|a, b| {
-        b.archived_at_unix
-            .cmp(&a.archived_at_unix)
-            .then_with(|| b.summary.updated_at_unix.cmp(&a.summary.updated_at_unix))
-            .then_with(|| b.summary.run_id.cmp(&a.summary.run_id))
-    });
+    sort_history_entries(&mut history);
     HttpResponse::Ok().json(VmSelfDebugHistoryResponse { name, history })
 }
 
@@ -3212,12 +3243,8 @@ pub(crate) async fn archive_vm_self_debug_history(
     let mut history = load_self_debug_history(&ctx.managed_root_dir, &name);
     let now = now_unix();
     let (archived_runs, removed_tasks) = archive_completed_self_debug_runs(&mut items, &mut history, now);
-    history.sort_by(|a, b| {
-        b.archived_at_unix
-            .cmp(&a.archived_at_unix)
-            .then_with(|| b.summary.updated_at_unix.cmp(&a.summary.updated_at_unix))
-            .then_with(|| b.summary.run_id.cmp(&a.summary.run_id))
-    });
+    sort_history_entries(&mut history);
+    trim_history_entries(&mut history, VM_HISTORY_MAX_ENTRIES);
     if let Err(e) = save_exec_queue(&ctx.managed_root_dir, &name, &items) {
         return HttpResponse::InternalServerError().body(format!("save queue failed: {e}"));
     }
@@ -4123,6 +4150,7 @@ mod tests {
         archive_completed_self_debug_runs, collect_self_debug_runs, default_cpu, default_disk_gb,
         default_memory_mb, enforce_self_debug_run_timeout, normalize_backend, queue_item_from_values,
         sanitize_self_debug_run_id, sanitize_vm_name, strategy_priority_boost_by_stats,
+        trim_history_entries, VmSelfDebugHistoryEntry,
     };
 
     #[test]
@@ -4276,5 +4304,57 @@ mod tests {
         assert_eq!(history[0].summary.run_id, "sd-done");
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].run_id, "sd-pending");
+    }
+
+    #[test]
+    fn trim_history_entries_keeps_latest_count() {
+        let mut entries = vec![
+            VmSelfDebugHistoryEntry {
+                summary: crate::web_ui_models::VmSelfDebugRunSummary {
+                    run_id: "a".to_string(),
+                    total: 1,
+                    pending: 0,
+                    paused: 0,
+                    running: 0,
+                    done: 1,
+                    failed: 0,
+                    canceled: 0,
+                    updated_at_unix: 1,
+                },
+                archived_at_unix: 3,
+            },
+            VmSelfDebugHistoryEntry {
+                summary: crate::web_ui_models::VmSelfDebugRunSummary {
+                    run_id: "b".to_string(),
+                    total: 1,
+                    pending: 0,
+                    paused: 0,
+                    running: 0,
+                    done: 1,
+                    failed: 0,
+                    canceled: 0,
+                    updated_at_unix: 2,
+                },
+                archived_at_unix: 2,
+            },
+            VmSelfDebugHistoryEntry {
+                summary: crate::web_ui_models::VmSelfDebugRunSummary {
+                    run_id: "c".to_string(),
+                    total: 1,
+                    pending: 0,
+                    paused: 0,
+                    running: 0,
+                    done: 1,
+                    failed: 0,
+                    canceled: 0,
+                    updated_at_unix: 3,
+                },
+                archived_at_unix: 1,
+            },
+        ];
+        trim_history_entries(&mut entries, 2);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].summary.run_id, "a");
+        assert_eq!(entries[1].summary.run_id, "b");
     }
 }
