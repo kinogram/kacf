@@ -1025,10 +1025,12 @@ async function refreshVmSelfDebugRunDetail() {
             const out = String(t?.output_preview || '');
             const cat = String(t?.failure_category || '');
             const sig = String(t?.failure_signature || '');
+            const risk = String(t?.command_risk_level || 'low');
+            const riskTags = Array.isArray(t?.command_risk_tags) ? t.command_risk_tags.map((x) => String(x || '')).filter(Boolean) : [];
             const ssig = String(t?.strategy_signature || '');
             const trigger = String(t?.trigger_task_id || '');
             const keyLines = Array.isArray(t?.failure_key_lines) ? t.failure_key_lines.map((x) => String(x || '')).filter(Boolean) : [];
-            return `#${i + 1} ${id} kind=${kind} [${st}] exit=${ec}\ncmd=${cmd}\nmsg=${msg}\ncat=${cat}\nsig=${sig}\nstrategy_sig=${ssig}\ntrigger=${trigger}\nkeys=${keyLines.join(' | ')}\nout=${out}`;
+            return `#${i + 1} ${id} kind=${kind} [${st}] exit=${ec}\ncmd=${cmd}\nmsg=${msg}\ncat=${cat}\nsig=${sig}\nrisk=${risk} tags=${riskTags.join(',')}\nstrategy_sig=${ssig}\ntrigger=${trigger}\nkeys=${keyLines.join(' | ')}\nout=${out}`;
         });
         setVmSelfDebugRunDetailText(lines.join('\n\n'));
     } catch (e) {

@@ -250,6 +250,7 @@ fn queue_item_from_values(
     priority: i32,
     retry_max: u32,
 ) -> VmExecQueueItem {
+    let (risk_level, risk_tags) = classify_command_risk(cmd);
     VmExecQueueItem {
         id: queue_task_id(),
         command: cmd.to_string(),
@@ -272,9 +273,72 @@ fn queue_item_from_values(
         run_id: String::new(),
         run_kind: String::new(),
         run_max_runtime_sec: 0,
+        command_risk_level: risk_level,
+        command_risk_tags: risk_tags,
         strategy_signature: String::new(),
         trigger_task_id: String::new(),
     }
+}
+
+fn classify_command_risk(cmd: &str) -> (String, Vec<String>) {
+    let text = cmd.trim();
+    if text.is_empty() {
+        return ("low".to_string(), Vec::new());
+    }
+    let low = text.to_ascii_lowercase();
+    let mut tags: Vec<String> = Vec::new();
+    let mut score: u8 = 0;
+
+    let medium_hits = [
+        ("sudo ", "privilege"),
+        ("apt-get ", "pkg-manager"),
+        ("dnf ", "pkg-manager"),
+        ("yum ", "pkg-manager"),
+        ("apk ", "pkg-manager"),
+        ("pip install", "pkg-manager"),
+        ("npm install", "pkg-manager"),
+        ("cargo install", "pkg-manager"),
+        ("chmod ", "permission"),
+        ("chown ", "permission"),
+        ("systemctl ", "service"),
+    ];
+    for (pat, tag) in medium_hits {
+        if low.contains(pat) {
+            score = score.max(1);
+            if !tags.iter().any(|x| x == tag) {
+                tags.push(tag.to_string());
+            }
+        }
+    }
+
+    let high_hits = [
+        ("rm -rf /", "destructive"),
+        ("mkfs", "filesystem"),
+        ("dd if=", "disk-write"),
+        ("shutdown", "system-power"),
+        ("reboot", "system-power"),
+        ("userdel ", "account"),
+        ("groupdel ", "account"),
+        ("iptables ", "network-firewall"),
+        ("nft ", "network-firewall"),
+        ("curl ", "network-download"),
+        ("wget ", "network-download"),
+    ];
+    for (pat, tag) in high_hits {
+        if low.contains(pat) {
+            score = score.max(2);
+            if !tags.iter().any(|x| x == tag) {
+                tags.push(tag.to_string());
+            }
+        }
+    }
+
+    let level = match score {
+        0 => "low",
+        1 => "medium",
+        _ => "high",
+    };
+    (level.to_string(), tags)
 }
 
 fn extract_failure_key_lines(stderr: &str, stdout: &str, message: &str) -> Vec<String> {
@@ -1239,7 +1303,7 @@ fn run_next_vm_exec_core(
     name: &str,
     projects_lock: &Arc<Mutex<()>>,
 ) -> Result<Option<VmExecResponse>, String> {
-    let (task_id, cmd, timeout_sec, wait_ready_sec, ssh_user, ssh_port) = {
+    let (task_id, cmd, cmd_risk_level, cmd_risk_tags, timeout_sec, wait_ready_sec, ssh_user, ssh_port) = {
         let _guard = lock_recover(projects_lock, "projects_lock");
         let mut state = load_vm_state(managed_root_dir);
         let Some(vm) = state.vms.get_mut(name) else {
@@ -1278,6 +1342,8 @@ fn run_next_vm_exec_core(
         items[idx].started_at_unix = now_unix();
         let task_id = items[idx].id.clone();
         let cmd = items[idx].command.clone();
+        let cmd_risk_level = items[idx].command_risk_level.clone();
+        let cmd_risk_tags = items[idx].command_risk_tags.clone();
         let timeout_sec = if items[idx].timeout_sec == 0 {
             30
         } else {
@@ -1289,12 +1355,28 @@ fn run_next_vm_exec_core(
         (
             task_id,
             cmd,
+            cmd_risk_level,
+            cmd_risk_tags,
             timeout_sec,
             wait_ready_sec,
             normalize_ssh_user(&vm.ssh_user),
             ssh_port,
         )
     };
+    append_vm_log(
+        managed_root_dir,
+        name,
+        &format!(
+            "queue task running task_id={} risk_level={} risk_tags={}",
+            task_id,
+            cmd_risk_level,
+            if cmd_risk_tags.is_empty() {
+                "-".to_string()
+            } else {
+                cmd_risk_tags.join(",")
+            }
+        ),
+    );
 
     if let Err(e) = wait_until_ssh_ready(&ssh_user, ssh_port, wait_ready_sec) {
         let _guard = lock_recover(projects_lock, "projects_lock");
@@ -3547,6 +3629,8 @@ pub(crate) async fn get_vm_self_debug_run_detail(
             failure_category: x.failure_category,
             failure_signature: x.failure_signature,
             failure_key_lines: x.failure_key_lines,
+            command_risk_level: x.command_risk_level,
+            command_risk_tags: x.command_risk_tags,
             strategy_signature: x.strategy_signature,
             trigger_task_id: x.trigger_task_id,
             created_at_unix: x.created_at_unix,
@@ -4546,6 +4630,21 @@ mod tests {
         );
         assert!(ensure_queue_capacity(10, 5, 20).is_ok());
         assert!(ensure_queue_capacity(20, 1, 20).is_err());
+    }
+
+    #[test]
+    fn command_risk_classification_marks_high_and_low() {
+        let (l1, t1) = super::classify_command_risk("echo hello");
+        assert_eq!(l1, "low");
+        assert!(t1.is_empty());
+
+        let (l2, t2) = super::classify_command_risk("sudo apt-get install -y git");
+        assert_eq!(l2, "medium");
+        assert!(t2.iter().any(|x| x == "privilege"));
+
+        let (l3, t3) = super::classify_command_risk("rm -rf /tmp/x && reboot");
+        assert_eq!(l3, "high");
+        assert!(t3.iter().any(|x| x == "system-power"));
     }
 
     #[actix_web::test]
