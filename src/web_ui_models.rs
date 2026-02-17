@@ -670,7 +670,7 @@ pub(crate) struct VmSelfDebugStopPayload {
     pub(crate) run_id: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct VmSelfDebugRunSummary {
     pub(crate) run_id: String,
     pub(crate) total: usize,
@@ -687,6 +687,45 @@ pub(crate) struct VmSelfDebugRunSummary {
 pub(crate) struct VmSelfDebugRunsResponse {
     pub(crate) name: String,
     pub(crate) runs: Vec<VmSelfDebugRunSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct VmSelfDebugHistoryEntry {
+    pub(crate) summary: VmSelfDebugRunSummary,
+    pub(crate) archived_at_unix: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmSelfDebugHistoryResponse {
+    pub(crate) name: String,
+    pub(crate) history: Vec<VmSelfDebugHistoryEntry>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VmSelfDebugHistoryArchivePayload {
+    pub(crate) name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmSelfDebugHistoryArchiveResponse {
+    pub(crate) name: String,
+    pub(crate) archived_runs: usize,
+    pub(crate) removed_tasks: usize,
+    pub(crate) history_total: usize,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VmSelfDebugHistoryClearPayload {
+    pub(crate) name: String,
+    #[serde(default)]
+    pub(crate) run_id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmSelfDebugHistoryClearResponse {
+    pub(crate) name: String,
+    pub(crate) removed: usize,
+    pub(crate) history_total: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]

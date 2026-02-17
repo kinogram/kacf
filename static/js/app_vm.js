@@ -113,6 +113,12 @@ function setVmSelfDebugRunsText(text) {
     node.textContent = text || '';
 }
 
+function setVmSelfDebugHistoryText(text) {
+    const node = el('vm_self_debug_history');
+    if (!node) return;
+    node.textContent = text || '';
+}
+
 function setVmSelfDebugRunDetailText(text) {
     const node = el('vm_self_debug_run_detail');
     if (!node) return;
@@ -216,6 +222,9 @@ function setVmMutatingDisabled(disabled) {
         'vm_self_debug_preview_btn',
         'vm_self_debug_start_btn',
         'vm_self_debug_runs_refresh_btn',
+        'vm_self_debug_history_refresh_btn',
+        'vm_self_debug_history_archive_btn',
+        'vm_self_debug_history_clear_btn',
         'vm_self_debug_stats_btn',
         'vm_self_debug_detail_btn',
         'vm_self_debug_context_btn',
@@ -806,6 +815,82 @@ async function refreshVmSelfDebugRuns() {
     }
 }
 
+async function refreshVmSelfDebugHistory() {
+    const name = selectedVmName();
+    if (!name) {
+        setVmSelfDebugHistoryText('');
+        return;
+    }
+    try {
+        const data = await vmApi(`/vm/self_debug/history?name=${encodeURIComponent(name)}`, 'GET');
+        const history = Array.isArray(data?.history) ? data.history : [];
+        if (!history.length) {
+            setVmSelfDebugHistoryText(txt('vm_self_debug_history_empty', 'No self-debug history.'));
+            return;
+        }
+        const lines = history.map((h, i) => {
+            const s = h?.summary || {};
+            const id = String(s?.run_id || '-');
+            const total = Number(s?.total || 0);
+            const done = Number(s?.done || 0);
+            const failed = Number(s?.failed || 0);
+            const canceled = Number(s?.canceled || 0);
+            const at = Number(s?.updated_at_unix || 0);
+            const archivedAt = Number(h?.archived_at_unix || 0);
+            return `#${i + 1} ${id} total=${total} d=${done} f=${failed} c=${canceled} at=${at} archived=${archivedAt}`;
+        });
+        setVmSelfDebugHistoryText(lines.join('\n'));
+    } catch (e) {
+        setVmSelfDebugHistoryText(fmt('status_vm_self_debug_history_failed', 'Load self-debug history failed: {error}', { error: String(e) }));
+    }
+}
+
+async function archiveVmSelfDebugCompletedRuns() {
+    const name = selectedVmName();
+    if (!name) {
+        setStatus(txt('status_vm_target_required', 'Please select a VM first'), 'status-danger');
+        return;
+    }
+    try {
+        const data = await vmApi('/vm/self_debug/history/archive_completed', 'POST', { name });
+        const archived = Number(data?.archived_runs || 0);
+        const removed = Number(data?.removed_tasks || 0);
+        setStatus(
+            fmt('status_vm_self_debug_history_archived', 'Self-debug history archived runs={runs}, removed tasks={tasks}.', {
+                runs: archived,
+                tasks: removed,
+            }),
+            'status-warn'
+        );
+        await refreshVmExecQueue();
+        await refreshVmSelfDebugRuns();
+        await refreshVmSelfDebugHistory();
+    } catch (e) {
+        setStatus(fmt('status_vm_self_debug_history_archive_failed', 'Archive self-debug history failed: {error}', { error: String(e) }), 'status-danger');
+    }
+}
+
+async function clearVmSelfDebugHistory() {
+    const name = selectedVmName();
+    if (!name) {
+        setStatus(txt('status_vm_target_required', 'Please select a VM first'), 'status-danger');
+        return;
+    }
+    const runId = String(el('vm_self_debug_run_id')?.value || '').trim();
+    const confirmText = runId
+        ? fmt('confirm_vm_self_debug_history_clear_one', 'Clear self-debug history for run "{run_id}"?', { run_id: runId })
+        : txt('confirm_vm_self_debug_history_clear_all', 'Clear all self-debug history?');
+    if (!window.confirm(confirmText)) return;
+    try {
+        const data = await vmApi('/vm/self_debug/history/clear', 'POST', { name, run_id: runId });
+        const removed = Number(data?.removed || 0);
+        setStatus(fmt('status_vm_self_debug_history_cleared', 'Self-debug history cleared, removed={count}.', { count: removed }), 'status-warn');
+        await refreshVmSelfDebugHistory();
+    } catch (e) {
+        setStatus(fmt('status_vm_self_debug_history_clear_failed', 'Clear self-debug history failed: {error}', { error: String(e) }), 'status-danger');
+    }
+}
+
 async function refreshVmSelfDebugStrategyStats() {
     const name = selectedVmName();
     if (!name) {
@@ -927,6 +1012,7 @@ async function stopVmSelfDebugRun() {
         setStatus(txt('status_vm_self_debug_stop_ok', 'Self-debug stop requested.'), 'status-warn');
         await refreshVmExecQueue();
         await refreshVmSelfDebugRuns();
+        await refreshVmSelfDebugHistory();
         await refreshVmSelfDebugStrategyStats();
         await refreshVmSelfDebugRunDetail();
     } catch (e) {
@@ -1013,6 +1099,7 @@ async function pauseVmSelfDebugRun() {
         setStatus(txt('status_vm_self_debug_pause_ok', 'Self-debug run paused.'), 'status-warn');
         await refreshVmExecQueue();
         await refreshVmSelfDebugRuns();
+        await refreshVmSelfDebugHistory();
         await refreshVmSelfDebugRunDetail();
         await refreshVmSelfDebugContext();
     } catch (e) {
@@ -1036,6 +1123,7 @@ async function resumeVmSelfDebugRun() {
         setStatus(txt('status_vm_self_debug_resume_ok', 'Self-debug run resumed.'), 'status-warn');
         await refreshVmExecQueue();
         await refreshVmSelfDebugRuns();
+        await refreshVmSelfDebugHistory();
         await refreshVmSelfDebugRunDetail();
         await refreshVmSelfDebugContext();
     } catch (e) {
@@ -1404,6 +1492,9 @@ function bindVmEvents() {
     el('vm_self_debug_preview_btn')?.addEventListener('click', previewVmSelfDebugPlan);
     el('vm_self_debug_start_btn')?.addEventListener('click', startVmSelfDebugPlan);
     el('vm_self_debug_runs_refresh_btn')?.addEventListener('click', refreshVmSelfDebugRuns);
+    el('vm_self_debug_history_refresh_btn')?.addEventListener('click', refreshVmSelfDebugHistory);
+    el('vm_self_debug_history_archive_btn')?.addEventListener('click', archiveVmSelfDebugCompletedRuns);
+    el('vm_self_debug_history_clear_btn')?.addEventListener('click', clearVmSelfDebugHistory);
     el('vm_self_debug_stats_btn')?.addEventListener('click', refreshVmSelfDebugStrategyStats);
     el('vm_self_debug_detail_btn')?.addEventListener('click', refreshVmSelfDebugRunDetail);
     el('vm_self_debug_context_btn')?.addEventListener('click', refreshVmSelfDebugContext);
@@ -1422,6 +1513,7 @@ function bindVmEvents() {
         await refreshVmExecQueue();
         await refreshVmLogs();
         await refreshVmSelfDebugRuns();
+        await refreshVmSelfDebugHistory();
         await refreshVmSelfDebugStrategyStats();
         await refreshVmSelfDebugRunDetail();
         await refreshVmSelfDebugContext();
@@ -1460,6 +1552,7 @@ async function init(opts) {
     await refreshVmSnapshots();
     await refreshVmExecQueue();
     await refreshVmSelfDebugRuns();
+    await refreshVmSelfDebugHistory();
     await refreshVmSelfDebugStrategyStats();
     await loadVmSelfDebugStrategyRules();
     await refreshVmSelfDebugRunDetail();

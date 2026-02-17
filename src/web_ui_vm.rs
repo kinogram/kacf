@@ -1,5 +1,5 @@
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -23,7 +23,10 @@ use crate::web_ui_models::{
     VmLogsResponse, VmProvisionPayload, VmQueueCancelPayload, VmQueueQuery, VmQueueResponse,
     VmQueueStatsResponse, VmReadyQuery, VmReadyResponse, VmSelfDebugPlanPayload,
     VmSelfDebugPlanResponse, VmSelfDebugRunDetailQuery, VmSelfDebugRunDetailResponse,
-    VmSelfDebugContextResponse, VmSelfDebugRunSummary, VmSelfDebugRunTaskDetail,
+    VmSelfDebugContextResponse, VmSelfDebugHistoryArchivePayload,
+    VmSelfDebugHistoryArchiveResponse, VmSelfDebugHistoryClearPayload,
+    VmSelfDebugHistoryClearResponse, VmSelfDebugHistoryEntry, VmSelfDebugHistoryResponse,
+    VmSelfDebugRunSummary, VmSelfDebugRunTaskDetail,
     VmSelfDebugRunsQuery, VmSelfDebugRunsResponse, VmSelfDebugStopPayload,
     VmSelfDebugStrategyRulesResponse, VmSelfDebugStrategyRulesSavePayload, VmSelfDebugStrategyStat,
     VmSelfDebugStrategyStatsResponse, VmSnapshotEntry,
@@ -37,6 +40,7 @@ const VM_LOG_DIR: &str = "logs";
 const VM_STATE_FILE: &str = "vm_state.json";
 const VM_PROFILES_FILE: &str = "vm_exec_profiles.json";
 const VM_STRATEGY_RULES_FILE: &str = "vm_self_debug_strategy_rules.json";
+const VM_HISTORY_SUFFIX: &str = ".self_debug.history.json";
 
 fn now_unix() -> u64 {
     SystemTime::now()
@@ -99,6 +103,10 @@ fn vm_exec_queue_path(managed_root_dir: &str, vm_name: &str) -> PathBuf {
 
 fn vm_exec_worker_lock_path(managed_root_dir: &str, vm_name: &str) -> PathBuf {
     vm_runtime_dir(managed_root_dir).join(format!("{vm_name}.exec.worker.lock"))
+}
+
+fn vm_self_debug_history_path(managed_root_dir: &str, vm_name: &str) -> PathBuf {
+    vm_runtime_dir(managed_root_dir).join(format!("{vm_name}{VM_HISTORY_SUFFIX}"))
 }
 
 fn append_vm_log(managed_root_dir: &str, vm_name: &str, line: &str) {
@@ -437,6 +445,77 @@ fn collect_self_debug_runs(items: &[VmExecQueueItem]) -> Vec<VmSelfDebugRunSumma
     let mut out: Vec<VmSelfDebugRunSummary> = map.into_values().collect();
     out.sort_by(|a, b| b.updated_at_unix.cmp(&a.updated_at_unix).then_with(|| b.run_id.cmp(&a.run_id)));
     out
+}
+
+fn load_self_debug_history(managed_root_dir: &str, vm_name: &str) -> Vec<VmSelfDebugHistoryEntry> {
+    let path = vm_self_debug_history_path(managed_root_dir, vm_name);
+    let text = match fs::read_to_string(path) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    serde_json::from_str::<Vec<VmSelfDebugHistoryEntry>>(&text).unwrap_or_default()
+}
+
+fn save_self_debug_history(
+    managed_root_dir: &str,
+    vm_name: &str,
+    entries: &[VmSelfDebugHistoryEntry],
+) -> std::io::Result<()> {
+    let path = vm_self_debug_history_path(managed_root_dir, vm_name);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let text = serde_json::to_string_pretty(entries)?;
+    let tmp = path.with_extension("tmp");
+    fs::write(&tmp, text)?;
+    fs::rename(tmp, path)?;
+    Ok(())
+}
+
+fn upsert_history_entry(
+    history: &mut Vec<VmSelfDebugHistoryEntry>,
+    summary: VmSelfDebugRunSummary,
+    archived_at_unix: u64,
+) {
+    if let Some(existing) = history
+        .iter_mut()
+        .find(|x| x.summary.run_id == summary.run_id)
+    {
+        existing.summary = summary;
+        existing.archived_at_unix = archived_at_unix;
+        return;
+    }
+    history.push(VmSelfDebugHistoryEntry {
+        summary,
+        archived_at_unix,
+    });
+}
+
+fn archive_completed_self_debug_runs(
+    items: &mut Vec<VmExecQueueItem>,
+    history: &mut Vec<VmSelfDebugHistoryEntry>,
+    now: u64,
+) -> (usize, usize) {
+    let runs = collect_self_debug_runs(items);
+    let completed_run_ids: BTreeSet<String> = runs
+        .iter()
+        .filter(|r| r.pending == 0 && r.paused == 0 && r.running == 0 && !r.run_id.trim().is_empty())
+        .map(|r| r.run_id.clone())
+        .collect();
+    if completed_run_ids.is_empty() {
+        return (0, 0);
+    }
+    let archived_runs: Vec<VmSelfDebugRunSummary> = runs
+        .into_iter()
+        .filter(|r| completed_run_ids.contains(&r.run_id))
+        .collect();
+    for summary in archived_runs {
+        upsert_history_entry(history, summary, now);
+    }
+    let before = items.len();
+    items.retain(|x| !(is_self_debug_kind(&x.run_kind) && completed_run_ids.contains(&x.run_id)));
+    let removed_tasks = before.saturating_sub(items.len());
+    (completed_run_ids.len(), removed_tasks)
 }
 
 fn collect_self_debug_strategy_stats(items: &[VmExecQueueItem]) -> Vec<VmSelfDebugStrategyStat> {
@@ -3088,6 +3167,124 @@ pub(crate) async fn list_vm_self_debug_runs(
     HttpResponse::Ok().json(VmSelfDebugRunsResponse { name, runs })
 }
 
+pub(crate) async fn list_vm_self_debug_history(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+    query: web::Query<VmSelfDebugRunsQuery>,
+) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    let name = match sanitize_vm_name(&query.name) {
+        Some(v) => v,
+        None => return HttpResponse::BadRequest().body("invalid vm name"),
+    };
+    let _guard = lock_recover(&data.projects_lock, "projects_lock");
+    let mut history = load_self_debug_history(&ctx.managed_root_dir, &name);
+    history.sort_by(|a, b| {
+        b.archived_at_unix
+            .cmp(&a.archived_at_unix)
+            .then_with(|| b.summary.updated_at_unix.cmp(&a.summary.updated_at_unix))
+            .then_with(|| b.summary.run_id.cmp(&a.summary.run_id))
+    });
+    HttpResponse::Ok().json(VmSelfDebugHistoryResponse { name, history })
+}
+
+pub(crate) async fn archive_vm_self_debug_history(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+    body: web::Json<VmSelfDebugHistoryArchivePayload>,
+) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if !ctx.can_write {
+        return HttpResponse::Forbidden().body("read-only session");
+    }
+    let name = match sanitize_vm_name(&body.name) {
+        Some(v) => v,
+        None => return HttpResponse::BadRequest().body("invalid vm name"),
+    };
+    let _guard = lock_recover(&data.projects_lock, "projects_lock");
+    let mut items = load_exec_queue(&ctx.managed_root_dir, &name);
+    let mut history = load_self_debug_history(&ctx.managed_root_dir, &name);
+    let now = now_unix();
+    let (archived_runs, removed_tasks) = archive_completed_self_debug_runs(&mut items, &mut history, now);
+    history.sort_by(|a, b| {
+        b.archived_at_unix
+            .cmp(&a.archived_at_unix)
+            .then_with(|| b.summary.updated_at_unix.cmp(&a.summary.updated_at_unix))
+            .then_with(|| b.summary.run_id.cmp(&a.summary.run_id))
+    });
+    if let Err(e) = save_exec_queue(&ctx.managed_root_dir, &name, &items) {
+        return HttpResponse::InternalServerError().body(format!("save queue failed: {e}"));
+    }
+    if let Err(e) = save_self_debug_history(&ctx.managed_root_dir, &name, &history) {
+        return HttpResponse::InternalServerError().body(format!("save history failed: {e}"));
+    }
+    append_vm_log(
+        &ctx.managed_root_dir,
+        &name,
+        &format!(
+            "self-debug history archive_completed archived_runs={} removed_tasks={}",
+            archived_runs, removed_tasks
+        ),
+    );
+    HttpResponse::Ok().json(VmSelfDebugHistoryArchiveResponse {
+        name,
+        archived_runs,
+        removed_tasks,
+        history_total: history.len(),
+    })
+}
+
+pub(crate) async fn clear_vm_self_debug_history(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+    body: web::Json<VmSelfDebugHistoryClearPayload>,
+) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if !ctx.can_write {
+        return HttpResponse::Forbidden().body("read-only session");
+    }
+    let name = match sanitize_vm_name(&body.name) {
+        Some(v) => v,
+        None => return HttpResponse::BadRequest().body("invalid vm name"),
+    };
+    let _guard = lock_recover(&data.projects_lock, "projects_lock");
+    let mut history = load_self_debug_history(&ctx.managed_root_dir, &name);
+    let before = history.len();
+    let run_id = body.run_id.trim();
+    if run_id.is_empty() {
+        history.clear();
+    } else {
+        history.retain(|x| x.summary.run_id != run_id);
+    }
+    let removed = before.saturating_sub(history.len());
+    if let Err(e) = save_self_debug_history(&ctx.managed_root_dir, &name, &history) {
+        return HttpResponse::InternalServerError().body(format!("save history failed: {e}"));
+    }
+    append_vm_log(
+        &ctx.managed_root_dir,
+        &name,
+        &format!(
+            "self-debug history clear run_id={} removed={}",
+            if run_id.is_empty() { "*" } else { run_id },
+            removed
+        ),
+    );
+    HttpResponse::Ok().json(VmSelfDebugHistoryClearResponse {
+        name,
+        removed,
+        history_total: history.len(),
+    })
+}
+
 pub(crate) async fn get_vm_self_debug_run_detail(
     req: HttpRequest,
     data: web::Data<AppState>,
@@ -3923,8 +4120,8 @@ pub(crate) async fn delete_vm(
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_self_debug_runs, default_cpu, default_disk_gb, default_memory_mb,
-        enforce_self_debug_run_timeout, normalize_backend, queue_item_from_values,
+        archive_completed_self_debug_runs, collect_self_debug_runs, default_cpu, default_disk_gb,
+        default_memory_mb, enforce_self_debug_run_timeout, normalize_backend, queue_item_from_values,
         sanitize_self_debug_run_id, sanitize_vm_name, strategy_priority_boost_by_stats,
     };
 
@@ -4053,5 +4250,31 @@ mod tests {
         let hit = enforce_self_debug_run_timeout(&mut items, "sd-timeout", 131);
         assert_eq!(hit, Some(30));
         assert_eq!(items[1].status, "canceled");
+    }
+
+    #[test]
+    fn archive_completed_self_debug_runs_moves_done_run_to_history() {
+        let mut done = queue_item_from_values("echo done", 10, 0, 0, 0);
+        done.run_id = "sd-done".to_string();
+        done.run_kind = "self_debug".to_string();
+        done.status = "done".to_string();
+        done.created_at_unix = 100;
+        done.finished_at_unix = 110;
+
+        let mut pending = queue_item_from_values("echo pending", 10, 0, 0, 0);
+        pending.run_id = "sd-pending".to_string();
+        pending.run_kind = "self_debug".to_string();
+        pending.status = "pending".to_string();
+        pending.created_at_unix = 100;
+
+        let mut items = vec![done, pending];
+        let mut history = Vec::new();
+        let (runs, removed_tasks) = archive_completed_self_debug_runs(&mut items, &mut history, 200);
+        assert_eq!(runs, 1);
+        assert_eq!(removed_tasks, 1);
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].summary.run_id, "sd-done");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].run_id, "sd-pending");
     }
 }
