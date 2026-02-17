@@ -953,6 +953,20 @@ fn save_custom_profiles(
     Ok(())
 }
 
+fn is_queue_active_status(status: &str) -> bool {
+    matches!(status, "pending" | "running" | "paused")
+}
+
+fn queue_has_active_duplicate(items: &[VmExecQueueItem], command: &str) -> bool {
+    let target = command.trim();
+    if target.is_empty() {
+        return false;
+    }
+    items
+        .iter()
+        .any(|x| is_queue_active_status(&x.status) && x.command.trim() == target)
+}
+
 fn sanitize_custom_profile_name(raw: &str) -> Option<String> {
     let s = raw.trim();
     if s.len() < 8 || s.len() > 64 {
@@ -3009,6 +3023,9 @@ pub(crate) async fn enqueue_vm_exec(
         return HttpResponse::NotFound().body("vm not found");
     }
     let mut items = load_exec_queue(&ctx.managed_root_dir, &name);
+    if queue_has_active_duplicate(&items, cmd) {
+        return HttpResponse::Conflict().body("duplicate active command in queue");
+    }
     let queue_limit = vm_queue_limit_by_role(&ctx.role);
     if let Err(e) = ensure_queue_capacity(items.len(), 1, queue_limit) {
         return HttpResponse::TooManyRequests().body(e);
@@ -3067,6 +3084,7 @@ pub(crate) async fn enqueue_vm_exec_batch(
     }
     let mut items = load_exec_queue(&ctx.managed_root_dir, &name);
     let mut new_items: Vec<VmExecQueueItem> = Vec::new();
+    let mut seen_commands: BTreeSet<String> = BTreeSet::new();
     for task in &body.tasks {
         if let Some(item) = normalize_batch_task(
             task,
@@ -3075,12 +3093,22 @@ pub(crate) async fn enqueue_vm_exec_batch(
             default_priority,
             default_retry_max,
         ) {
+            let key = item.command.trim().to_string();
+            if key.is_empty() {
+                continue;
+            }
+            if queue_has_active_duplicate(&items, &key) {
+                continue;
+            }
+            if !seen_commands.insert(key) {
+                continue;
+            }
             new_items.push(item);
         }
     }
     let added = new_items.len();
     if added == 0 {
-        return HttpResponse::BadRequest().body("no valid command in tasks");
+        return HttpResponse::Conflict().body("all tasks are duplicate active commands");
     }
     let queue_limit = vm_queue_limit_by_role(&ctx.role);
     if let Err(e) = ensure_queue_capacity(items.len(), added, queue_limit) {
@@ -3274,6 +3302,7 @@ pub(crate) async fn enqueue_vm_exec_profile(
     }
     let mut items = load_exec_queue(&ctx.managed_root_dir, &name);
     let mut new_items: Vec<VmExecQueueItem> = Vec::new();
+    let mut seen_commands: BTreeSet<String> = BTreeSet::new();
     for task in &tasks {
         if let Some(item) = normalize_batch_task(
             task,
@@ -3282,12 +3311,22 @@ pub(crate) async fn enqueue_vm_exec_profile(
             default_priority,
             default_retry_max,
         ) {
+            let key = item.command.trim().to_string();
+            if key.is_empty() {
+                continue;
+            }
+            if queue_has_active_duplicate(&items, &key) {
+                continue;
+            }
+            if !seen_commands.insert(key) {
+                continue;
+            }
             new_items.push(item);
         }
     }
     let added = new_items.len();
     if added == 0 {
-        return HttpResponse::BadRequest().body("profile has no runnable command");
+        return HttpResponse::Conflict().body("profile has no new command to enqueue");
     }
     let queue_limit = vm_queue_limit_by_role(&ctx.role);
     if let Err(e) = ensure_queue_capacity(items.len(), added, queue_limit) {
@@ -4395,9 +4434,9 @@ mod tests {
 
     use super::{
         archive_completed_self_debug_runs, collect_self_debug_runs, default_cpu, default_disk_gb,
-        default_memory_mb, enforce_self_debug_run_timeout, ensure_queue_capacity, normalize_backend,
-        queue_item_from_values, load_exec_queue, now_unix, sanitize_self_debug_run_id,
-        sanitize_vm_name, save_exec_queue, save_vm_state, strategy_priority_boost_by_stats,
+        default_memory_mb, enforce_self_debug_run_timeout, ensure_queue_capacity, is_queue_active_status,
+        load_exec_queue, normalize_backend, now_unix, queue_has_active_duplicate,
+        queue_item_from_values, sanitize_self_debug_run_id, sanitize_vm_name, save_exec_queue, save_vm_state, strategy_priority_boost_by_stats,
         trim_history_entries, vm_instance_limit_by_role, vm_queue_limit_by_role,
         vm_running_limit_by_role,
         VmSelfDebugHistoryEntry,
@@ -4659,6 +4698,22 @@ mod tests {
         );
         assert!(ensure_queue_capacity(10, 5, 20).is_ok());
         assert!(ensure_queue_capacity(20, 1, 20).is_err());
+    }
+
+    #[test]
+    fn queue_active_status_and_duplicate_detection_work() {
+        assert!(is_queue_active_status("pending"));
+        assert!(is_queue_active_status("running"));
+        assert!(is_queue_active_status("paused"));
+        assert!(!is_queue_active_status("done"));
+
+        let mut done = queue_item_from_values("echo hi", 10, 0, 0, 0);
+        done.status = "done".to_string();
+        let mut pending = queue_item_from_values("echo hi", 10, 0, 0, 0);
+        pending.status = "pending".to_string();
+        let items = vec![done, pending];
+        assert!(queue_has_active_duplicate(&items, "echo hi"));
+        assert!(!queue_has_active_duplicate(&items, "echo bye"));
     }
 
     #[test]
