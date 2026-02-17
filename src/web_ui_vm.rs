@@ -4218,11 +4218,21 @@ pub(crate) async fn delete_vm(
 
 #[cfg(test)]
 mod tests {
+    use actix_web::{http::header, web, App};
+    use actix_web::test as awtest;
+    use crossbeam_channel::unbounded;
+    use serde_json::json;
+    use std::collections::VecDeque;
+    use std::fs;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::{Arc, Mutex};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
     use super::{
         archive_completed_self_debug_runs, collect_self_debug_runs, default_cpu, default_disk_gb,
         default_memory_mb, enforce_self_debug_run_timeout, normalize_backend, queue_item_from_values,
-        sanitize_self_debug_run_id, sanitize_vm_name, strategy_priority_boost_by_stats,
-        trim_history_entries, VmSelfDebugHistoryEntry,
+        load_exec_queue, now_unix, sanitize_self_debug_run_id, sanitize_vm_name, save_exec_queue,
+        save_vm_state, strategy_priority_boost_by_stats, trim_history_entries, VmSelfDebugHistoryEntry,
     };
 
     #[test]
@@ -4463,5 +4473,202 @@ mod tests {
         assert_eq!(history[0].failed_steps, 1);
         assert!(history[0].context_text.contains("run_id=sd-fail"));
         assert!(history[0].context_text.contains("key_failure_lines"));
+    }
+
+    #[actix_web::test]
+    async fn http_self_debug_history_flow_works_end_to_end() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let username = format!("vmhist_{unique}");
+        let vm_name = format!("vm_{unique}");
+        let managed_root = format!("autocoding_data/users/{}", username);
+
+        let tmp_auth_root = std::env::temp_dir().join(format!("kacf_auth_test_{unique}"));
+        let auth_paths = crate::auth::AuthSystemPaths::new(&tmp_auth_root);
+        let auth = crate::auth::AuthStore::new(auth_paths);
+        auth.ensure_dirs().expect("ensure auth dirs");
+        let user = auth
+            .create_user(
+                &username,
+                "vmhist",
+                &format!("{username}@example.com"),
+                crate::auth::AccountRole::User,
+                Some("pw".to_string()),
+                crate::auth::types::LoginOption::PasswordOnly,
+            )
+            .expect("create user");
+        let session = auth
+            .create_session_for_user(&user)
+            .expect("create session");
+
+        let mut state_store = crate::web_ui_models::VmStateStore::default();
+        let now = now_unix();
+        state_store.vms.insert(
+            vm_name.clone(),
+            crate::web_ui_models::VmInstance {
+                name: vm_name.clone(),
+                backend: "metadata-only".to_string(),
+                power_state: "stopped".to_string(),
+                cpu: 2,
+                memory_mb: 1024,
+                disk_gb: 10,
+                disk_path: "autocoding_data/dummy.qcow2".to_string(),
+                os_image: "linux".to_string(),
+                created_at_unix: now,
+                updated_at_unix: now,
+                last_message: String::new(),
+                process_id: None,
+                ssh_port: None,
+                ssh_user: "root".to_string(),
+            },
+        );
+        save_vm_state(&managed_root, &state_store).expect("save vm state");
+
+        let (tx_req, _rx_req) = unbounded::<crate::protocol::AgentRequest>();
+        let app_state = crate::web_ui::AppState {
+            tx_req,
+            events: Arc::new(Mutex::new(VecDeque::new())),
+            event_bytes: Arc::new(Mutex::new(0)),
+            next_event_id: Arc::new(Mutex::new(1)),
+            runtime: Arc::new(Mutex::new(crate::web_ui_models::RuntimeStatus::default())),
+            projects_lock: Arc::new(Mutex::new(())),
+            debug_client_logs: crate::web_ui_debug::DebugLogStore::new(),
+            stop_now: Arc::new(AtomicBool::new(false)),
+            auth: auth.clone(),
+        };
+        let app = awtest::init_service(
+            App::new()
+                .app_data(web::Data::new(app_state))
+                .route("/vm/self_debug/start", web::post().to(super::start_vm_self_debug_plan))
+                .route("/vm/self_debug/context", web::get().to(super::get_vm_self_debug_context))
+                .route("/vm/self_debug/history", web::get().to(super::list_vm_self_debug_history))
+                .route(
+                    "/vm/self_debug/history/detail",
+                    web::get().to(super::get_vm_self_debug_history_detail),
+                )
+                .route(
+                    "/vm/self_debug/history/archive_completed",
+                    web::post().to(super::archive_vm_self_debug_history),
+                )
+                .route(
+                    "/vm/self_debug/history/clear",
+                    web::post().to(super::clear_vm_self_debug_history),
+                ),
+        )
+        .await;
+
+        let cookie = format!("kacf_session={}", session.session_id);
+        let req = awtest::TestRequest::post()
+            .uri("/vm/self_debug/start")
+            .insert_header((header::COOKIE, cookie.clone()))
+            .set_json(json!({
+                "name": vm_name,
+                "fix_cmd": "echo fix",
+                "cycles": 1,
+                "max_task_budget": 3
+            }))
+            .to_request();
+        let start_resp: serde_json::Value = awtest::call_and_read_body_json(&app, req).await;
+        let run_id = start_resp
+            .get("run_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        assert!(!run_id.is_empty());
+
+        let mut items = load_exec_queue(&managed_root, &vm_name);
+        assert!(!items.is_empty());
+        items[0].status = "failed".to_string();
+        items[0].finished_at_unix = now_unix();
+        items[0].failure_category = "test_failure".to_string();
+        items[0].failure_key_lines = vec!["assertion failed".to_string()];
+        items[0].output_preview = "stderr:\nassertion failed".to_string();
+        items[0].message = "failed".to_string();
+        for item in items.iter_mut().skip(1) {
+            item.status = "done".to_string();
+            item.finished_at_unix = now_unix();
+        }
+        save_exec_queue(&managed_root, &vm_name, &items).expect("save queue");
+
+        let req = awtest::TestRequest::post()
+            .uri("/vm/self_debug/history/archive_completed")
+            .insert_header((header::COOKIE, cookie.clone()))
+            .set_json(json!({ "name": vm_name }))
+            .to_request();
+        let archive_resp: serde_json::Value = awtest::call_and_read_body_json(&app, req).await;
+        assert!(
+            archive_resp
+                .get("archived_runs")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0)
+                >= 1
+        );
+
+        let req = awtest::TestRequest::get()
+            .uri(&format!("/vm/self_debug/history?name={}", vm_name))
+            .insert_header((header::COOKIE, cookie.clone()))
+            .to_request();
+        let history_resp: serde_json::Value = awtest::call_and_read_body_json(&app, req).await;
+        let history = history_resp
+            .get("history")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        assert!(!history.is_empty());
+
+        let req = awtest::TestRequest::get()
+            .uri(&format!(
+                "/vm/self_debug/history/detail?name={}&run_id={}",
+                vm_name, run_id
+            ))
+            .insert_header((header::COOKIE, cookie.clone()))
+            .to_request();
+        let detail_resp: serde_json::Value = awtest::call_and_read_body_json(&app, req).await;
+        assert_eq!(
+            detail_resp
+                .get("entry")
+                .and_then(|e| e.get("summary"))
+                .and_then(|s| s.get("run_id"))
+                .and_then(|v| v.as_str())
+                .unwrap_or(""),
+            run_id
+        );
+
+        let req = awtest::TestRequest::get()
+            .uri(&format!(
+                "/vm/self_debug/context?name={}&run_id={}",
+                vm_name, run_id
+            ))
+            .insert_header((header::COOKIE, cookie.clone()))
+            .to_request();
+        let context_resp: serde_json::Value = awtest::call_and_read_body_json(&app, req).await;
+        let context_text = context_resp
+            .get("context_text")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        assert!(context_text.contains("run_id="));
+
+        let req = awtest::TestRequest::post()
+            .uri("/vm/self_debug/history/clear")
+            .insert_header((header::COOKIE, cookie))
+            .set_json(json!({ "name": vm_name, "run_id": run_id }))
+            .to_request();
+        let clear_resp: serde_json::Value = awtest::call_and_read_body_json(&app, req).await;
+        assert_eq!(
+            clear_resp
+                .get("removed")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0),
+            1
+        );
+
+        let _ = fs::remove_dir_all(
+            std::env::current_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                .join(managed_root),
+        );
+        let _ = fs::remove_dir_all(tmp_auth_root);
     }
 }
