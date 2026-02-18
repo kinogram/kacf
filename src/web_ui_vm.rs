@@ -24,6 +24,7 @@ use crate::web_ui_models::{
     VmExecProfileDetailResponse, VmExecProfilePreviewQuery, VmExecProfilePreviewResponse,
     VmExecProfilesResponse, VmExecQueueItem, VmExecResponse, VmInstance, VmLogQuery,
     VmLogsResponse, VmHealthAction, VmHealthIssue, VmHealthScanPayload, VmHealthScanResponse,
+    VmOpsCategoryCount, VmOpsSummaryResponse,
     VmPolicyConfig, VmPolicyRoleLimits, VmPolicyScheduler,
     VmProvisionPayload, VmQueueCancelPayload, VmQueueQuery, VmQueueResponse,
     VmQueueStatsResponse, VmReadyQuery, VmReadyResponse, VmSelfDebugPlanPayload,
@@ -415,6 +416,89 @@ fn queue_watchdog_recovery_stats(items: &[VmExecQueueItem]) -> (usize, u64) {
         last = last.max(item.finished_at_unix);
     }
     (total, last)
+}
+
+fn build_vm_ops_summary(managed_root_dir: &str, state: &VmStateStore, now: u64) -> VmOpsSummaryResponse {
+    let mut queue_total = 0usize;
+    let mut pending = 0usize;
+    let mut running = 0usize;
+    let mut done = 0usize;
+    let mut failed = 0usize;
+    let mut canceled = 0usize;
+    let mut pending_oldest_age_sec = 0u64;
+    let mut pending_age_sum = 0u64;
+    let mut pending_age_count = 0usize;
+    let mut watchdog_recovered_total = 0usize;
+    let mut failure_map: BTreeMap<String, usize> = BTreeMap::new();
+
+    for vm_name in state.vms.keys() {
+        let items = load_exec_queue(managed_root_dir, vm_name);
+        queue_total += items.len();
+        for item in &items {
+            match item.status.as_str() {
+                "pending" => {
+                    pending += 1;
+                    let age = now.saturating_sub(item.created_at_unix);
+                    pending_oldest_age_sec = pending_oldest_age_sec.max(age);
+                    pending_age_sum = pending_age_sum.saturating_add(age);
+                    pending_age_count += 1;
+                }
+                "running" => running += 1,
+                "done" => done += 1,
+                "failed" => {
+                    failed += 1;
+                    let cat = item.failure_category.trim();
+                    if !cat.is_empty() && cat != "none" {
+                        *failure_map.entry(cat.to_string()).or_insert(0) += 1;
+                    }
+                }
+                "canceled" => canceled += 1,
+                _ => {}
+            }
+        }
+        let (recovered, _) = queue_watchdog_recovery_stats(&items);
+        watchdog_recovered_total = watchdog_recovered_total.saturating_add(recovered);
+    }
+
+    let mut top_failure_categories: Vec<VmOpsCategoryCount> = failure_map
+        .into_iter()
+        .map(|(category, count)| VmOpsCategoryCount { category, count })
+        .collect();
+    top_failure_categories.sort_by(|a, b| {
+        b.count
+            .cmp(&a.count)
+            .then_with(|| a.category.cmp(&b.category))
+    });
+    top_failure_categories.truncate(5);
+
+    let traces = load_dispatch_trace(managed_root_dir);
+    let dispatch_events_total = traces.len();
+    let dispatch_selected_total: usize = traces.iter().map(|x| x.selected_vms.len()).sum();
+
+    VmOpsSummaryResponse {
+        vm_total: state.vms.len(),
+        vm_running: state
+            .vms
+            .values()
+            .filter(|x| x.power_state == "running")
+            .count(),
+        queue_total,
+        pending,
+        running,
+        done,
+        failed,
+        canceled,
+        pending_oldest_age_sec,
+        pending_avg_age_sec: if pending_age_count == 0 {
+            0.0
+        } else {
+            pending_age_sum as f64 / pending_age_count as f64
+        },
+        watchdog_recovered_total,
+        dispatch_events_total,
+        dispatch_selected_total,
+        top_failure_categories,
+    }
 }
 
 fn force_stop_vm_exec_process(managed_root_dir: &str, vm_name: &str) {
@@ -4653,6 +4737,23 @@ pub(crate) async fn get_vm_policy(
     HttpResponse::Ok().json(load_vm_policy_config(&ctx.managed_root_dir))
 }
 
+pub(crate) async fn get_vm_ops_summary(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    let _guard = lock_recover(&data.projects_lock, "projects_lock");
+    let mut state = load_vm_state(&ctx.managed_root_dir);
+    for vm in state.vms.values_mut() {
+        let _ = reconcile_vm_power_state(&ctx.managed_root_dir, vm);
+    }
+    let summary = build_vm_ops_summary(&ctx.managed_root_dir, &state, now_unix());
+    HttpResponse::Ok().json(summary)
+}
+
 pub(crate) async fn save_vm_policy(
     req: HttpRequest,
     data: web::Data<AppState>,
@@ -5075,7 +5176,7 @@ mod tests {
         save_exec_queue, save_vm_state, load_vm_state, select_dispatch_vm_candidates_with_score, load_dispatch_trace,
         append_dispatch_trace_entry, scan_vm_health_locked, VM_DISPATCH_TRACE_MAX_ENTRIES,
         load_vm_policy_config, save_vm_policy_config,
-        strategy_priority_boost_by_stats, queue_watchdog_recovery_stats,
+        strategy_priority_boost_by_stats, queue_watchdog_recovery_stats, build_vm_ops_summary,
         trim_history_entries, vm_instance_limit_by_role, vm_queue_limit_by_role,
         vm_running_limit_by_role, vm_exec_running_limit_by_role,
         VmSelfDebugHistoryEntry,
@@ -5610,6 +5711,73 @@ mod tests {
         assert!(loaded.admin.vm_instance_max >= loaded.user.vm_instance_max);
         assert_eq!(loaded.scheduler.priority_aging_step_sec, 1);
         assert_eq!(loaded.scheduler.priority_aging_max_boost, 0);
+    }
+
+    #[test]
+    fn vm_ops_summary_aggregates_queue_and_failures() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let managed_root = format!("autocoding_data/users/ops_summary_{unique}");
+        let now = now_unix();
+        let mut state = crate::web_ui_models::VmStateStore::default();
+        state.vms.insert(
+            "vm1".to_string(),
+            crate::web_ui_models::VmInstance {
+                name: "vm1".to_string(),
+                backend: "metadata-only".to_string(),
+                power_state: "running".to_string(),
+                cpu: 2,
+                memory_mb: 1024,
+                disk_gb: 10,
+                disk_path: "autocoding_data/dummy1.qcow2".to_string(),
+                os_image: "linux".to_string(),
+                created_at_unix: now,
+                updated_at_unix: now,
+                last_message: String::new(),
+                process_id: None,
+                ssh_port: None,
+                ssh_user: "root".to_string(),
+            },
+        );
+        state.vms.insert(
+            "vm2".to_string(),
+            crate::web_ui_models::VmInstance {
+                name: "vm2".to_string(),
+                backend: "metadata-only".to_string(),
+                power_state: "stopped".to_string(),
+                cpu: 2,
+                memory_mb: 1024,
+                disk_gb: 10,
+                disk_path: "autocoding_data/dummy2.qcow2".to_string(),
+                os_image: "linux".to_string(),
+                created_at_unix: now,
+                updated_at_unix: now,
+                last_message: String::new(),
+                process_id: None,
+                ssh_port: None,
+                ssh_user: "root".to_string(),
+            },
+        );
+        save_vm_state(&managed_root, &state).expect("save state");
+
+        let mut p = queue_item_from_values("echo p", 30, 0, 0, 0);
+        p.status = "pending".to_string();
+        p.created_at_unix = now.saturating_sub(10);
+        let mut f = queue_item_from_values("echo f", 30, 0, 0, 0);
+        f.status = "failed".to_string();
+        f.failure_category = "test_failure".to_string();
+        save_exec_queue(&managed_root, "vm1", &[p, f]).expect("save queue vm1");
+
+        let summary = build_vm_ops_summary(&managed_root, &state, now);
+        assert_eq!(summary.vm_total, 2);
+        assert_eq!(summary.vm_running, 1);
+        assert_eq!(summary.queue_total, 2);
+        assert_eq!(summary.pending, 1);
+        assert_eq!(summary.failed, 1);
+        assert_eq!(summary.top_failure_categories.len(), 1);
+        assert_eq!(summary.top_failure_categories[0].category, "test_failure");
     }
 
     #[test]

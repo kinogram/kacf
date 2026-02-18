@@ -613,6 +613,30 @@ pub(crate) struct VmPolicyConfig {
     pub(crate) scheduler: VmPolicyScheduler,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmOpsCategoryCount {
+    pub(crate) category: String,
+    pub(crate) count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmOpsSummaryResponse {
+    pub(crate) vm_total: usize,
+    pub(crate) vm_running: usize,
+    pub(crate) queue_total: usize,
+    pub(crate) pending: usize,
+    pub(crate) running: usize,
+    pub(crate) done: usize,
+    pub(crate) failed: usize,
+    pub(crate) canceled: usize,
+    pub(crate) pending_oldest_age_sec: u64,
+    pub(crate) pending_avg_age_sec: f64,
+    pub(crate) watchdog_recovered_total: usize,
+    pub(crate) dispatch_events_total: usize,
+    pub(crate) dispatch_selected_total: usize,
+    pub(crate) top_failure_categories: Vec<VmOpsCategoryCount>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct VmExecEnqueuePayload {
     pub(crate) name: String,

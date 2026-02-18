@@ -95,6 +95,12 @@ function setVmExecQueueStatsText(text) {
     node.textContent = text || '';
 }
 
+function setVmOpsSummaryText(text) {
+    const node = el('vm_ops_summary');
+    if (!node) return;
+    node.textContent = text || '';
+}
+
 function setVmExecDispatchTraceText(text) {
     const node = el('vm_exec_dispatch_trace');
     if (!node) return;
@@ -1397,6 +1403,7 @@ async function refreshVmExecQueue() {
     if (!name) {
         setVmExecQueueText(txt('vm_exec_queue_empty', 'No queued task.'));
         setVmExecQueueStatsText('');
+        setVmOpsSummaryText('');
         setVmExecDispatchTraceText('');
         setVmHealthReportText('');
         return;
@@ -1423,10 +1430,12 @@ async function refreshVmExecQueue() {
             setVmExecQueueText(lines.join('\n'));
         }
         await refreshVmExecQueueStats();
+        await refreshVmOpsSummary();
         await refreshVmExecDispatchTrace();
     } catch (e) {
         setVmExecQueueText(fmt('status_vm_exec_queue_failed', 'VM exec queue operation failed: {error}', { error: String(e) }));
         setVmExecQueueStatsText('');
+        setVmOpsSummaryText('');
         setVmExecDispatchTraceText('');
     }
 }
@@ -1490,6 +1499,31 @@ async function refreshVmExecDispatchTrace() {
         setVmExecDispatchTraceText(lines.join('\n'));
     } catch (_e) {
         setVmExecDispatchTraceText('');
+    }
+}
+
+async function refreshVmOpsSummary() {
+    try {
+        const s = await vmApi('/vm/ops/summary', 'GET');
+        const lines = [];
+        lines.push(
+            `OpsSummary vm=${Number(s?.vm_running || 0)}/${Number(s?.vm_total || 0)} queue=${Number(s?.queue_total || 0)} pending=${Number(s?.pending || 0)} running=${Number(s?.running || 0)} done=${Number(s?.done || 0)} failed=${Number(s?.failed || 0)} canceled=${Number(s?.canceled || 0)}`,
+        );
+        lines.push(
+            `Pending oldest=${Number(s?.pending_oldest_age_sec || 0)}s avg=${Number(s?.pending_avg_age_sec || 0).toFixed(1)}s watchdogRecovered=${Number(s?.watchdog_recovered_total || 0)}`,
+        );
+        lines.push(
+            `Dispatch events=${Number(s?.dispatch_events_total || 0)} selectedTotal=${Number(s?.dispatch_selected_total || 0)}`,
+        );
+        const top = Array.isArray(s?.top_failure_categories) ? s.top_failure_categories : [];
+        if (top.length) {
+            lines.push(
+                `TopFailure=${top.map((x) => `${String(x?.category || '-')}:${Number(x?.count || 0)}`).join(', ')}`,
+            );
+        }
+        setVmOpsSummaryText(lines.join('\n'));
+    } catch (_e) {
+        setVmOpsSummaryText('');
     }
 }
 
