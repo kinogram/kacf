@@ -591,6 +591,28 @@ pub(crate) struct VmHealthScanResponse {
     pub(crate) actions: Vec<VmHealthAction>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct VmPolicyRoleLimits {
+    pub(crate) vm_instance_max: usize,
+    pub(crate) vm_queue_max_items: usize,
+    pub(crate) vm_running_max: usize,
+    pub(crate) vm_exec_running_max: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct VmPolicyScheduler {
+    pub(crate) exec_hard_timeout_grace_sec: u64,
+    pub(crate) priority_aging_step_sec: u64,
+    pub(crate) priority_aging_max_boost: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct VmPolicyConfig {
+    pub(crate) user: VmPolicyRoleLimits,
+    pub(crate) admin: VmPolicyRoleLimits,
+    pub(crate) scheduler: VmPolicyScheduler,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct VmExecEnqueuePayload {
     pub(crate) name: String,

@@ -24,6 +24,7 @@ use crate::web_ui_models::{
     VmExecProfileDetailResponse, VmExecProfilePreviewQuery, VmExecProfilePreviewResponse,
     VmExecProfilesResponse, VmExecQueueItem, VmExecResponse, VmInstance, VmLogQuery,
     VmLogsResponse, VmHealthAction, VmHealthIssue, VmHealthScanPayload, VmHealthScanResponse,
+    VmPolicyConfig, VmPolicyRoleLimits, VmPolicyScheduler,
     VmProvisionPayload, VmQueueCancelPayload, VmQueueQuery, VmQueueResponse,
     VmQueueStatsResponse, VmReadyQuery, VmReadyResponse, VmSelfDebugPlanPayload,
     VmSelfDebugPlanResponse, VmSelfDebugRunDetailQuery, VmSelfDebugRunDetailResponse,
@@ -43,6 +44,7 @@ const VM_DISK_DIR: &str = "disks";
 const VM_RUNTIME_DIR: &str = "runtime";
 const VM_LOG_DIR: &str = "logs";
 const VM_STATE_FILE: &str = "vm_state.json";
+const VM_POLICY_FILE: &str = "vm_policy.json";
 const VM_PROFILES_FILE: &str = "vm_exec_profiles.json";
 const VM_STRATEGY_RULES_FILE: &str = "vm_self_debug_strategy_rules.json";
 const VM_HISTORY_SUFFIX: &str = ".self_debug.history.json";
@@ -78,6 +80,10 @@ fn vm_root_path(managed_root_dir: &str) -> PathBuf {
 
 fn vm_state_path(managed_root_dir: &str) -> PathBuf {
     vm_root_path(managed_root_dir).join(VM_STATE_FILE)
+}
+
+fn vm_policy_path(managed_root_dir: &str) -> PathBuf {
+    vm_root_path(managed_root_dir).join(VM_POLICY_FILE)
 }
 
 fn vm_disk_dir(managed_root_dir: &str) -> PathBuf {
@@ -132,32 +138,102 @@ fn vm_self_debug_history_path(managed_root_dir: &str, vm_name: &str) -> PathBuf 
     vm_runtime_dir(managed_root_dir).join(format!("{vm_name}{VM_HISTORY_SUFFIX}"))
 }
 
-fn vm_instance_limit_by_role(role: &AccountRole) -> usize {
-    match role {
-        AccountRole::Admin => VM_MAX_INSTANCES_ADMIN,
-        AccountRole::User | AccountRole::Guest => VM_MAX_INSTANCES_USER,
+fn default_vm_policy_config() -> VmPolicyConfig {
+    VmPolicyConfig {
+        user: VmPolicyRoleLimits {
+            vm_instance_max: VM_MAX_INSTANCES_USER,
+            vm_queue_max_items: VM_QUEUE_MAX_ITEMS_USER,
+            vm_running_max: VM_RUNNING_MAX_USER,
+            vm_exec_running_max: VM_EXEC_RUNNING_MAX_USER,
+        },
+        admin: VmPolicyRoleLimits {
+            vm_instance_max: VM_MAX_INSTANCES_ADMIN,
+            vm_queue_max_items: VM_QUEUE_MAX_ITEMS_ADMIN,
+            vm_running_max: VM_RUNNING_MAX_ADMIN,
+            vm_exec_running_max: VM_EXEC_RUNNING_MAX_ADMIN,
+        },
+        scheduler: VmPolicyScheduler {
+            exec_hard_timeout_grace_sec: VM_EXEC_HARD_TIMEOUT_GRACE_SEC,
+            priority_aging_step_sec: VM_PRIORITY_AGING_STEP_SEC,
+            priority_aging_max_boost: VM_PRIORITY_AGING_MAX_BOOST,
+        },
     }
 }
 
-fn vm_queue_limit_by_role(role: &AccountRole) -> usize {
+fn sanitize_vm_policy_config(mut cfg: VmPolicyConfig) -> VmPolicyConfig {
+    cfg.user.vm_instance_max = cfg.user.vm_instance_max.clamp(1, 64);
+    cfg.user.vm_queue_max_items = cfg.user.vm_queue_max_items.clamp(1, 20_000);
+    cfg.user.vm_running_max = cfg.user.vm_running_max.clamp(1, 32);
+    cfg.user.vm_exec_running_max = cfg.user.vm_exec_running_max.clamp(1, 64);
+
+    cfg.admin.vm_instance_max = cfg.admin.vm_instance_max.clamp(1, 256);
+    cfg.admin.vm_queue_max_items = cfg.admin.vm_queue_max_items.clamp(1, 100_000);
+    cfg.admin.vm_running_max = cfg.admin.vm_running_max.clamp(1, 128);
+    cfg.admin.vm_exec_running_max = cfg.admin.vm_exec_running_max.clamp(1, 256);
+
+    if cfg.admin.vm_instance_max < cfg.user.vm_instance_max {
+        cfg.admin.vm_instance_max = cfg.user.vm_instance_max;
+    }
+    if cfg.admin.vm_queue_max_items < cfg.user.vm_queue_max_items {
+        cfg.admin.vm_queue_max_items = cfg.user.vm_queue_max_items;
+    }
+    if cfg.admin.vm_running_max < cfg.user.vm_running_max {
+        cfg.admin.vm_running_max = cfg.user.vm_running_max;
+    }
+    if cfg.admin.vm_exec_running_max < cfg.user.vm_exec_running_max {
+        cfg.admin.vm_exec_running_max = cfg.user.vm_exec_running_max;
+    }
+
+    cfg.scheduler.exec_hard_timeout_grace_sec =
+        cfg.scheduler.exec_hard_timeout_grace_sec.clamp(0, 600);
+    cfg.scheduler.priority_aging_step_sec = cfg.scheduler.priority_aging_step_sec.clamp(1, 3600);
+    cfg.scheduler.priority_aging_max_boost = cfg.scheduler.priority_aging_max_boost.clamp(0, 100);
+    cfg
+}
+
+fn load_vm_policy_config(managed_root_dir: &str) -> VmPolicyConfig {
+    let path = vm_policy_path(managed_root_dir);
+    let raw = match fs::read_to_string(path) {
+        Ok(v) => v,
+        Err(_) => return default_vm_policy_config(),
+    };
+    let parsed = serde_json::from_str::<VmPolicyConfig>(&raw).unwrap_or_else(|_| default_vm_policy_config());
+    sanitize_vm_policy_config(parsed)
+}
+
+fn save_vm_policy_config(managed_root_dir: &str, cfg: &VmPolicyConfig) -> std::io::Result<()> {
+    let path = vm_policy_path(managed_root_dir);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let text = serde_json::to_string_pretty(&sanitize_vm_policy_config(cfg.clone()))?;
+    let tmp = path.with_extension("tmp");
+    fs::write(&tmp, text)?;
+    fs::rename(tmp, path)?;
+    Ok(())
+}
+
+fn vm_role_limits<'a>(cfg: &'a VmPolicyConfig, role: &AccountRole) -> &'a VmPolicyRoleLimits {
     match role {
-        AccountRole::Admin => VM_QUEUE_MAX_ITEMS_ADMIN,
-        AccountRole::User | AccountRole::Guest => VM_QUEUE_MAX_ITEMS_USER,
+        AccountRole::Admin => &cfg.admin,
+        AccountRole::User | AccountRole::Guest => &cfg.user,
     }
 }
 
-fn vm_running_limit_by_role(role: &AccountRole) -> usize {
-    match role {
-        AccountRole::Admin => VM_RUNNING_MAX_ADMIN,
-        AccountRole::User | AccountRole::Guest => VM_RUNNING_MAX_USER,
-    }
+fn vm_instance_limit_by_role(managed_root_dir: &str, role: &AccountRole) -> usize {
+    vm_role_limits(&load_vm_policy_config(managed_root_dir), role).vm_instance_max
 }
 
-fn vm_exec_running_limit_by_role(role: &AccountRole) -> usize {
-    match role {
-        AccountRole::Admin => VM_EXEC_RUNNING_MAX_ADMIN,
-        AccountRole::User | AccountRole::Guest => VM_EXEC_RUNNING_MAX_USER,
-    }
+fn vm_queue_limit_by_role(managed_root_dir: &str, role: &AccountRole) -> usize {
+    vm_role_limits(&load_vm_policy_config(managed_root_dir), role).vm_queue_max_items
+}
+
+fn vm_running_limit_by_role(managed_root_dir: &str, role: &AccountRole) -> usize {
+    vm_role_limits(&load_vm_policy_config(managed_root_dir), role).vm_running_max
+}
+
+fn vm_exec_running_limit_by_role(managed_root_dir: &str, role: &AccountRole) -> usize {
+    vm_role_limits(&load_vm_policy_config(managed_root_dir), role).vm_exec_running_max
 }
 
 fn ensure_queue_capacity(existing: usize, adding: usize, limit: usize) -> Result<(), String> {
@@ -289,7 +365,7 @@ fn effective_task_timeout_sec(item: &VmExecQueueItem) -> u64 {
     }
 }
 
-fn is_running_task_hard_timed_out(item: &VmExecQueueItem, now: u64) -> bool {
+fn is_running_task_hard_timed_out(item: &VmExecQueueItem, now: u64, grace_sec: u64) -> bool {
     if item.status != "running" || item.started_at_unix == 0 {
         return false;
     }
@@ -297,14 +373,18 @@ fn is_running_task_hard_timed_out(item: &VmExecQueueItem, now: u64) -> bool {
     let deadline = item
         .started_at_unix
         .saturating_add(timeout)
-        .saturating_add(VM_EXEC_HARD_TIMEOUT_GRACE_SEC);
+        .saturating_add(grace_sec);
     now > deadline
 }
 
-fn recover_stale_running_tasks_in_queue(items: &mut [VmExecQueueItem], now: u64) -> usize {
+fn recover_stale_running_tasks_in_queue(
+    items: &mut [VmExecQueueItem],
+    now: u64,
+    grace_sec: u64,
+) -> usize {
     let mut recovered = 0usize;
     for item in items.iter_mut() {
-        if !is_running_task_hard_timed_out(item, now) {
+        if !is_running_task_hard_timed_out(item, now, grace_sec) {
             continue;
         }
         let timeout = effective_task_timeout_sec(item);
@@ -314,7 +394,7 @@ fn recover_stale_running_tasks_in_queue(items: &mut [VmExecQueueItem], now: u64)
         item.next_run_after_unix = 0;
         item.message = format!(
             "watchdog hard-timeout recovered task (timeout={}s+{}s)",
-            timeout, VM_EXEC_HARD_TIMEOUT_GRACE_SEC
+            timeout, grace_sec
         );
         recovered += 1;
     }
@@ -354,9 +434,12 @@ fn recover_stale_running_tasks_all_vms(
     now: u64,
 ) -> usize {
     let mut total = 0usize;
+    let grace_sec = load_vm_policy_config(managed_root_dir)
+        .scheduler
+        .exec_hard_timeout_grace_sec;
     for vm_name in state.vms.keys() {
         let mut items = load_exec_queue(managed_root_dir, vm_name);
-        let recovered = recover_stale_running_tasks_in_queue(&mut items, now);
+        let recovered = recover_stale_running_tasks_in_queue(&mut items, now, grace_sec);
         if recovered == 0 {
             continue;
         }
@@ -374,7 +457,7 @@ fn recover_stale_running_tasks_all_vms(
             vm_name,
             &format!(
                 "exec watchdog recovered stale running tasks={} grace_sec={}",
-                recovered, VM_EXEC_HARD_TIMEOUT_GRACE_SEC
+                recovered, grace_sec
             ),
         );
         total += recovered;
@@ -1136,18 +1219,23 @@ fn queue_has_active_duplicate(items: &[VmExecQueueItem], command: &str) -> bool 
         .any(|x| is_queue_active_status(&x.status) && x.command.trim() == target)
 }
 
-fn priority_aging_boost(created_at_unix: u64, now: u64) -> i32 {
+fn priority_aging_boost(created_at_unix: u64, now: u64, step_sec: u64, max_boost: i32) -> i32 {
     if created_at_unix == 0 || now <= created_at_unix {
         return 0;
     }
     let waited = now.saturating_sub(created_at_unix);
-    let steps = (waited / VM_PRIORITY_AGING_STEP_SEC) as i32;
-    steps.clamp(0, VM_PRIORITY_AGING_MAX_BOOST)
+    let steps = (waited / step_sec.max(1)) as i32;
+    steps.clamp(0, max_boost.max(0))
 }
 
-fn effective_priority_with_aging(item: &VmExecQueueItem, now: u64) -> i32 {
+fn effective_priority_with_aging(
+    item: &VmExecQueueItem,
+    now: u64,
+    step_sec: u64,
+    max_boost: i32,
+) -> i32 {
     item.priority
-        .saturating_add(priority_aging_boost(item.created_at_unix, now))
+        .saturating_add(priority_aging_boost(item.created_at_unix, now, step_sec, max_boost))
         .clamp(-100, 100)
 }
 
@@ -1547,13 +1635,24 @@ fn run_next_vm_exec_core(
             return Ok(None);
         }
         let now = now_unix();
+        let scheduler = load_vm_policy_config(managed_root_dir).scheduler;
         let pending_idx = items
             .iter()
             .enumerate()
             .filter(|(_, x)| x.status == "pending" && now >= x.next_run_after_unix)
             .max_by(|(ia, a), (ib, b)| {
-                effective_priority_with_aging(a, now)
-                    .cmp(&effective_priority_with_aging(b, now))
+                effective_priority_with_aging(
+                    a,
+                    now,
+                    scheduler.priority_aging_step_sec,
+                    scheduler.priority_aging_max_boost,
+                )
+                .cmp(&effective_priority_with_aging(
+                    b,
+                    now,
+                    scheduler.priority_aging_step_sec,
+                    scheduler.priority_aging_max_boost,
+                ))
                     .then_with(|| b.created_at_unix.cmp(&a.created_at_unix))
                     .then_with(|| ib.cmp(ia))
             })
@@ -1978,6 +2077,7 @@ fn select_dispatch_vm_candidates_with_score(
     state: &VmStateStore,
     now: u64,
 ) -> Vec<DispatchCandidateScore> {
+    let scheduler = load_vm_policy_config(managed_root_dir).scheduler;
     let mut candidates: Vec<DispatchCandidateScore> = Vec::new();
     for vm_name in state.vms.keys() {
         let items = load_exec_queue(managed_root_dir, vm_name);
@@ -1992,8 +2092,12 @@ fn select_dispatch_vm_candidates_with_score(
                 continue;
             }
             best_base_priority = best_base_priority.max(item.priority);
-            best_effective_priority =
-                best_effective_priority.max(effective_priority_with_aging(item, now));
+            best_effective_priority = best_effective_priority.max(effective_priority_with_aging(
+                item,
+                now,
+                scheduler.priority_aging_step_sec,
+                scheduler.priority_aging_max_boost,
+            ));
             oldest_created = oldest_created.min(item.created_at_unix);
         }
         if best_effective_priority >= -100 {
@@ -2028,6 +2132,9 @@ fn scan_vm_health_locked(
     let mut issues: Vec<VmHealthIssue> = Vec::new();
     let mut actions: Vec<VmHealthAction> = Vec::new();
     let now = now_unix();
+    let grace_sec = load_vm_policy_config(managed_root_dir)
+        .scheduler
+        .exec_hard_timeout_grace_sec;
     for vm in state.vms.values_mut() {
         let vm_name = vm.name.clone();
         let before_power = vm.power_state.clone();
@@ -2052,7 +2159,7 @@ fn scan_vm_health_locked(
         let mut items = load_exec_queue(managed_root_dir, &vm_name);
         let stale_count = items
             .iter()
-            .filter(|x| is_running_task_hard_timed_out(x, now))
+            .filter(|x| is_running_task_hard_timed_out(x, now, grace_sec))
             .count();
         if stale_count > 0 {
             issues.push(VmHealthIssue {
@@ -2061,7 +2168,7 @@ fn scan_vm_health_locked(
                 message: format!("stale running exec tasks detected: {stale_count}"),
             });
             if self_heal {
-                let recovered = recover_stale_running_tasks_in_queue(&mut items, now);
+                let recovered = recover_stale_running_tasks_in_queue(&mut items, now, grace_sec);
                 if recovered > 0 {
                     force_stop_vm_exec_process(managed_root_dir, &vm_name);
                     let _ = save_exec_queue(managed_root_dir, &vm_name, &items);
@@ -3376,9 +3483,10 @@ pub(crate) async fn vm_exec_queue_stats(
         durations.iter().sum::<f64>() / durations.len() as f64
     };
     let running_total_all_vms = count_running_exec_tasks_all_vms(&ctx.managed_root_dir, &state);
-    let running_limit_all_vms = vm_exec_running_limit_by_role(&ctx.role);
+    let running_limit_all_vms = vm_exec_running_limit_by_role(&ctx.managed_root_dir, &ctx.role);
     let (watchdog_recovered_total, watchdog_last_recovered_unix) =
         queue_watchdog_recovery_stats(&items);
+    let scheduler = load_vm_policy_config(&ctx.managed_root_dir).scheduler;
     let now = now_unix();
     let oldest_pending_age_sec = items
         .iter()
@@ -3389,7 +3497,14 @@ pub(crate) async fn vm_exec_queue_stats(
     let top_pending_effective_priority = items
         .iter()
         .filter(|x| x.status == "pending" && now >= x.next_run_after_unix)
-        .map(|x| effective_priority_with_aging(x, now))
+        .map(|x| {
+            effective_priority_with_aging(
+                x,
+                now,
+                scheduler.priority_aging_step_sec,
+                scheduler.priority_aging_max_boost,
+            )
+        })
         .max()
         .unwrap_or(-100);
     HttpResponse::Ok().json(VmQueueStatsResponse {
@@ -3449,7 +3564,7 @@ pub(crate) async fn enqueue_vm_exec(
     if queue_has_active_duplicate(&items, cmd) {
         return HttpResponse::Conflict().body("duplicate active command in queue");
     }
-    let queue_limit = vm_queue_limit_by_role(&ctx.role);
+    let queue_limit = vm_queue_limit_by_role(&ctx.managed_root_dir, &ctx.role);
     if let Err(e) = ensure_queue_capacity(items.len(), 1, queue_limit) {
         return HttpResponse::TooManyRequests().body(e);
     }
@@ -3465,7 +3580,7 @@ pub(crate) async fn enqueue_vm_exec(
     }
     drop(_guard);
     append_vm_log(&ctx.managed_root_dir, &name, "exec task enqueued");
-    let running_limit = vm_exec_running_limit_by_role(&ctx.role);
+    let running_limit = vm_exec_running_limit_by_role(&ctx.managed_root_dir, &ctx.role);
     let _ = dispatch_vm_exec_workers(&ctx.managed_root_dir, data.projects_lock.clone(), running_limit);
     HttpResponse::Ok().json(VmQueueResponse { name, items })
 }
@@ -3531,7 +3646,7 @@ pub(crate) async fn enqueue_vm_exec_batch(
     if added == 0 {
         return HttpResponse::Conflict().body("all tasks are duplicate active commands");
     }
-    let queue_limit = vm_queue_limit_by_role(&ctx.role);
+    let queue_limit = vm_queue_limit_by_role(&ctx.managed_root_dir, &ctx.role);
     if let Err(e) = ensure_queue_capacity(items.len(), added, queue_limit) {
         return HttpResponse::TooManyRequests().body(e);
     }
@@ -3545,7 +3660,7 @@ pub(crate) async fn enqueue_vm_exec_batch(
         &name,
         &format!("exec batch enqueued tasks={added}"),
     );
-    let running_limit = vm_exec_running_limit_by_role(&ctx.role);
+    let running_limit = vm_exec_running_limit_by_role(&ctx.managed_root_dir, &ctx.role);
     let _ = dispatch_vm_exec_workers(&ctx.managed_root_dir, data.projects_lock.clone(), running_limit);
     HttpResponse::Ok().json(VmQueueResponse { name, items })
 }
@@ -3747,7 +3862,7 @@ pub(crate) async fn enqueue_vm_exec_profile(
     if added == 0 {
         return HttpResponse::Conflict().body("profile has no new command to enqueue");
     }
-    let queue_limit = vm_queue_limit_by_role(&ctx.role);
+    let queue_limit = vm_queue_limit_by_role(&ctx.managed_root_dir, &ctx.role);
     if let Err(e) = ensure_queue_capacity(items.len(), added, queue_limit) {
         return HttpResponse::TooManyRequests().body(e);
     }
@@ -3761,7 +3876,7 @@ pub(crate) async fn enqueue_vm_exec_profile(
         &name,
         &format!("exec profile enqueued profile={profile} tasks={added}"),
     );
-    let running_limit = vm_exec_running_limit_by_role(&ctx.role);
+    let running_limit = vm_exec_running_limit_by_role(&ctx.managed_root_dir, &ctx.role);
     let _ = dispatch_vm_exec_workers(&ctx.managed_root_dir, data.projects_lock.clone(), running_limit);
     HttpResponse::Ok().json(VmQueueResponse { name, items })
 }
@@ -3863,7 +3978,7 @@ pub(crate) async fn start_vm_self_debug_plan(
     if added == 0 {
         return HttpResponse::BadRequest().body("self-debug plan has no runnable command");
     }
-    let queue_limit = vm_queue_limit_by_role(&ctx.role);
+    let queue_limit = vm_queue_limit_by_role(&ctx.managed_root_dir, &ctx.role);
     if let Err(e) = ensure_queue_capacity(items.len(), added, queue_limit) {
         return HttpResponse::TooManyRequests().body(e);
     }
@@ -3886,7 +4001,7 @@ pub(crate) async fn start_vm_self_debug_plan(
             }
         ),
     );
-    let running_limit = vm_exec_running_limit_by_role(&ctx.role);
+    let running_limit = vm_exec_running_limit_by_role(&ctx.managed_root_dir, &ctx.role);
     let _ = dispatch_vm_exec_workers(&ctx.managed_root_dir, data.projects_lock.clone(), running_limit);
     HttpResponse::Ok().json(VmSelfDebugPlanResponse {
         name,
@@ -4360,7 +4475,7 @@ pub(crate) async fn resume_vm_self_debug_run(
     }
     drop(_guard);
     if matched > 0 {
-        let running_limit = vm_exec_running_limit_by_role(&ctx.role);
+        let running_limit = vm_exec_running_limit_by_role(&ctx.managed_root_dir, &ctx.role);
         let _ = dispatch_vm_exec_workers(&ctx.managed_root_dir, data.projects_lock.clone(), running_limit);
     }
     append_vm_log(
@@ -4443,7 +4558,7 @@ pub(crate) async fn run_next_vm_exec(
         None => return HttpResponse::BadRequest().body("invalid vm name"),
     };
 
-    let running_limit = vm_exec_running_limit_by_role(&ctx.role);
+    let running_limit = vm_exec_running_limit_by_role(&ctx.managed_root_dir, &ctx.role);
     match run_next_vm_exec_core(
         &ctx.managed_root_dir,
         &name,
@@ -4471,7 +4586,7 @@ pub(crate) async fn dispatch_vm_exec(
     if !ctx.can_write {
         return HttpResponse::Forbidden().body("read-only session");
     }
-    let running_limit = vm_exec_running_limit_by_role(&ctx.role);
+    let running_limit = vm_exec_running_limit_by_role(&ctx.managed_root_dir, &ctx.role);
     let started_workers =
         dispatch_vm_exec_workers(&ctx.managed_root_dir, data.projects_lock.clone(), running_limit);
     let running_total_all_vms = {
@@ -4525,6 +4640,37 @@ pub(crate) async fn scan_vm_health(
         issues,
         actions,
     })
+}
+
+pub(crate) async fn get_vm_policy(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    HttpResponse::Ok().json(load_vm_policy_config(&ctx.managed_root_dir))
+}
+
+pub(crate) async fn save_vm_policy(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+    body: web::Json<VmPolicyConfig>,
+) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if !ctx.can_write {
+        return HttpResponse::Forbidden().body("read-only session");
+    }
+    let _guard = lock_recover(&data.projects_lock, "projects_lock");
+    let cfg = sanitize_vm_policy_config(body.into_inner());
+    match save_vm_policy_config(&ctx.managed_root_dir, &cfg) {
+        Ok(_) => HttpResponse::Ok().json(cfg),
+        Err(e) => HttpResponse::InternalServerError().body(format!("save vm policy failed: {e}")),
+    }
 }
 
 pub(crate) async fn check_vm_ready(
@@ -4626,7 +4772,7 @@ pub(crate) async fn provision_vm(
     if state.vms.contains_key(&name) {
         return HttpResponse::Conflict().body("vm already exists");
     }
-    let vm_limit = vm_instance_limit_by_role(&ctx.role);
+    let vm_limit = vm_instance_limit_by_role(&ctx.managed_root_dir, &ctx.role);
     if state.vms.len() >= vm_limit {
         return HttpResponse::TooManyRequests()
             .body(format!("vm instance limit exceeded: limit={vm_limit}"));
@@ -4726,7 +4872,7 @@ pub(crate) async fn start_vm(
             vm: Some(current_vm),
         });
     }
-    let running_limit = vm_running_limit_by_role(&ctx.role);
+    let running_limit = vm_running_limit_by_role(&ctx.managed_root_dir, &ctx.role);
     let running_now = state
         .vms
         .values()
@@ -4783,7 +4929,7 @@ pub(crate) async fn start_vm(
     }
     drop(_guard);
     if effective {
-        let running_limit = vm_exec_running_limit_by_role(&ctx.role);
+        let running_limit = vm_exec_running_limit_by_role(&ctx.managed_root_dir, &ctx.role);
         let _ = dispatch_vm_exec_workers(&ctx.managed_root_dir, data.projects_lock.clone(), running_limit);
     }
     HttpResponse::Ok().json(VmActionResponse {
@@ -4928,6 +5074,7 @@ mod tests {
         recover_stale_running_tasks_in_queue, sanitize_self_debug_run_id, sanitize_vm_name,
         save_exec_queue, save_vm_state, load_vm_state, select_dispatch_vm_candidates_with_score, load_dispatch_trace,
         append_dispatch_trace_entry, scan_vm_health_locked, VM_DISPATCH_TRACE_MAX_ENTRIES,
+        load_vm_policy_config, save_vm_policy_config,
         strategy_priority_boost_by_stats, queue_watchdog_recovery_stats,
         trim_history_entries, vm_instance_limit_by_role, vm_queue_limit_by_role,
         vm_running_limit_by_role, vm_exec_running_limit_by_role,
@@ -5176,21 +5323,22 @@ mod tests {
 
     #[test]
     fn role_limits_and_capacity_checks_work() {
+        let root = "autocoding_data/test_role_limits";
         assert!(
-            vm_instance_limit_by_role(&crate::auth::AccountRole::Admin)
-                > vm_instance_limit_by_role(&crate::auth::AccountRole::User)
+            vm_instance_limit_by_role(root, &crate::auth::AccountRole::Admin)
+                > vm_instance_limit_by_role(root, &crate::auth::AccountRole::User)
         );
         assert!(
-            vm_queue_limit_by_role(&crate::auth::AccountRole::Admin)
-                > vm_queue_limit_by_role(&crate::auth::AccountRole::User)
+            vm_queue_limit_by_role(root, &crate::auth::AccountRole::Admin)
+                > vm_queue_limit_by_role(root, &crate::auth::AccountRole::User)
         );
         assert!(
-            vm_running_limit_by_role(&crate::auth::AccountRole::Admin)
-                > vm_running_limit_by_role(&crate::auth::AccountRole::User)
+            vm_running_limit_by_role(root, &crate::auth::AccountRole::Admin)
+                > vm_running_limit_by_role(root, &crate::auth::AccountRole::User)
         );
         assert!(
-            vm_exec_running_limit_by_role(&crate::auth::AccountRole::Admin)
-                > vm_exec_running_limit_by_role(&crate::auth::AccountRole::User)
+            vm_exec_running_limit_by_role(root, &crate::auth::AccountRole::Admin)
+                > vm_exec_running_limit_by_role(root, &crate::auth::AccountRole::User)
         );
         assert!(ensure_queue_capacity(10, 5, 20).is_ok());
         assert!(ensure_queue_capacity(20, 1, 20).is_err());
@@ -5223,9 +5371,9 @@ mod tests {
         fresh.started_at_unix = 130;
 
         let mut items = vec![running, fresh];
-        assert!(is_running_task_hard_timed_out(&items[0], 126));
-        assert!(!is_running_task_hard_timed_out(&items[1], 126));
-        let recovered = recover_stale_running_tasks_in_queue(&mut items, 126);
+        assert!(is_running_task_hard_timed_out(&items[0], 126, 15));
+        assert!(!is_running_task_hard_timed_out(&items[1], 126, 15));
+        let recovered = recover_stale_running_tasks_in_queue(&mut items, 126, 15);
         assert_eq!(recovered, 1);
         assert_eq!(items[0].status, "failed");
         assert_eq!(items[0].exit_code, -1);
@@ -5305,10 +5453,10 @@ mod tests {
 
     #[test]
     fn priority_aging_boost_is_bounded() {
-        assert_eq!(priority_aging_boost(100, 100), 0);
-        assert_eq!(priority_aging_boost(100, 159), 0);
-        assert_eq!(priority_aging_boost(100, 160), 1);
-        assert_eq!(priority_aging_boost(100, 100 + 3600), 20);
+        assert_eq!(priority_aging_boost(100, 100, 60, 20), 0);
+        assert_eq!(priority_aging_boost(100, 159, 60, 20), 0);
+        assert_eq!(priority_aging_boost(100, 160, 60, 20), 1);
+        assert_eq!(priority_aging_boost(100, 100 + 3600, 60, 20), 20);
     }
 
     #[test]
@@ -5428,6 +5576,40 @@ mod tests {
         assert!(!actions.is_empty());
         let items = load_exec_queue(&managed_root, &vm_name);
         assert_eq!(items[0].status, "failed");
+    }
+
+    #[test]
+    fn vm_policy_config_persist_and_clamp() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let managed_root = format!("autocoding_data/users/policy_cfg_{unique}");
+        let cfg = crate::web_ui_models::VmPolicyConfig {
+            user: crate::web_ui_models::VmPolicyRoleLimits {
+                vm_instance_max: 0,
+                vm_queue_max_items: 0,
+                vm_running_max: 0,
+                vm_exec_running_max: 0,
+            },
+            admin: crate::web_ui_models::VmPolicyRoleLimits {
+                vm_instance_max: 1,
+                vm_queue_max_items: 1,
+                vm_running_max: 1,
+                vm_exec_running_max: 1,
+            },
+            scheduler: crate::web_ui_models::VmPolicyScheduler {
+                exec_hard_timeout_grace_sec: 999_999,
+                priority_aging_step_sec: 0,
+                priority_aging_max_boost: -1,
+            },
+        };
+        save_vm_policy_config(&managed_root, &cfg).expect("save policy");
+        let loaded = load_vm_policy_config(&managed_root);
+        assert_eq!(loaded.user.vm_instance_max, 1);
+        assert!(loaded.admin.vm_instance_max >= loaded.user.vm_instance_max);
+        assert_eq!(loaded.scheduler.priority_aging_step_sec, 1);
+        assert_eq!(loaded.scheduler.priority_aging_max_boost, 0);
     }
 
     #[test]
