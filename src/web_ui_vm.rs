@@ -23,6 +23,7 @@ use crate::web_ui_models::{
     VmExecEnqueueProfilePayload, VmExecPayload, VmExecProfileDetailQuery,
     VmExecProfileDetailResponse, VmExecProfilePreviewQuery, VmExecProfilePreviewResponse,
     VmExecProfilesResponse, VmExecQueueItem, VmExecResponse, VmInstance, VmLogQuery,
+    VmAuditEvent, VmAuditQuery, VmAuditResponse,
     VmLogsResponse, VmHealthAction, VmHealthIssue, VmHealthScanPayload, VmHealthScanResponse,
     VmOpsCategoryCount, VmOpsFaultInjectPayload, VmOpsFaultInjectResponse, VmOpsSummaryResponse,
     VmPolicyConfig, VmPolicyRoleLimits, VmPolicyScheduler,
@@ -52,6 +53,8 @@ const VM_HISTORY_SUFFIX: &str = ".self_debug.history.json";
 const VM_HISTORY_MAX_ENTRIES: usize = 200;
 const VM_DISPATCH_TRACE_FILE: &str = "vm_exec_dispatch.trace.json";
 const VM_DISPATCH_TRACE_MAX_ENTRIES: usize = 120;
+const VM_AUDIT_FILE: &str = "vm_audit.events.json";
+const VM_AUDIT_MAX_ENTRIES: usize = 500;
 const VM_MAX_INSTANCES_USER: usize = 4;
 const VM_MAX_INSTANCES_ADMIN: usize = 16;
 const VM_QUEUE_MAX_ITEMS_USER: usize = 400;
@@ -109,6 +112,10 @@ fn vm_strategy_rules_path(managed_root_dir: &str) -> PathBuf {
 
 fn vm_dispatch_trace_path(managed_root_dir: &str) -> PathBuf {
     vm_runtime_dir(managed_root_dir).join(VM_DISPATCH_TRACE_FILE)
+}
+
+fn vm_audit_path(managed_root_dir: &str) -> PathBuf {
+    vm_runtime_dir(managed_root_dir).join(VM_AUDIT_FILE)
 }
 
 fn vm_pid_path(managed_root_dir: &str, vm_name: &str) -> PathBuf {
@@ -265,6 +272,14 @@ fn append_vm_log(managed_root_dir: &str, vm_name: &str, line: &str) {
         .and_then(|mut f| std::io::Write::write_all(&mut f, stamped.as_bytes()));
 }
 
+fn role_name(role: &AccountRole) -> &'static str {
+    match role {
+        AccountRole::Admin => "admin",
+        AccountRole::User => "user",
+        AccountRole::Guest => "guest",
+    }
+}
+
 fn tail_text(raw: &str, max_chars: usize) -> String {
     if max_chars == 0 {
         return String::new();
@@ -343,6 +358,37 @@ fn append_dispatch_trace_entry(managed_root_dir: &str, entry: VmExecDispatchTrac
         entries.drain(0..drop_count);
     }
     let _ = save_dispatch_trace(managed_root_dir, &entries);
+}
+
+fn load_vm_audit_events(managed_root_dir: &str) -> Vec<VmAuditEvent> {
+    let path = vm_audit_path(managed_root_dir);
+    let text = match fs::read_to_string(path) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    serde_json::from_str::<Vec<VmAuditEvent>>(&text).unwrap_or_default()
+}
+
+fn save_vm_audit_events(managed_root_dir: &str, events: &[VmAuditEvent]) -> std::io::Result<()> {
+    let path = vm_audit_path(managed_root_dir);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let text = serde_json::to_string_pretty(events)?;
+    let tmp = path.with_extension("tmp");
+    fs::write(&tmp, text)?;
+    fs::rename(tmp, path)?;
+    Ok(())
+}
+
+fn append_vm_audit_event(managed_root_dir: &str, event: VmAuditEvent) {
+    let mut events = load_vm_audit_events(managed_root_dir);
+    events.push(event);
+    if events.len() > VM_AUDIT_MAX_ENTRIES {
+        let drop_count = events.len().saturating_sub(VM_AUDIT_MAX_ENTRIES);
+        events.drain(0..drop_count);
+    }
+    let _ = save_vm_audit_events(managed_root_dir, &events);
 }
 
 fn count_running_exec_tasks_all_vms(managed_root_dir: &str, state: &VmStateStore) -> usize {
@@ -4678,6 +4724,21 @@ pub(crate) async fn dispatch_vm_exec(
         let state = load_vm_state(&ctx.managed_root_dir);
         count_running_exec_tasks_all_vms(&ctx.managed_root_dir, &state)
     };
+    append_vm_audit_event(
+        &ctx.managed_root_dir,
+        VmAuditEvent {
+            created_at_unix: now_unix(),
+            actor: ctx.username.clone().unwrap_or_else(|| "guest".to_string()),
+            role: role_name(&ctx.role).to_string(),
+            action: "dispatch_vm_exec".to_string(),
+            target: "all_vms".to_string(),
+            outcome: "ok".to_string(),
+            detail: format!(
+                "started_workers={} running_total={} running_limit={}",
+                started_workers, running_total_all_vms, running_limit
+            ),
+        },
+    );
     HttpResponse::Ok().json(VmExecDispatchResponse {
         started_workers,
         running_total_all_vms,
@@ -4719,6 +4780,24 @@ pub(crate) async fn scan_vm_health(
     let scanned = state.vms.len();
     let (issues, actions) = scan_vm_health_locked(&ctx.managed_root_dir, &mut state, self_heal);
     let _ = save_vm_state(&ctx.managed_root_dir, &state);
+    append_vm_audit_event(
+        &ctx.managed_root_dir,
+        VmAuditEvent {
+            created_at_unix: now_unix(),
+            actor: ctx.username.clone().unwrap_or_else(|| "guest".to_string()),
+            role: role_name(&ctx.role).to_string(),
+            action: "scan_vm_health".to_string(),
+            target: "all_vms".to_string(),
+            outcome: "ok".to_string(),
+            detail: format!(
+                "self_heal={} scanned={} issues={} actions={}",
+                self_heal,
+                scanned,
+                issues.len(),
+                actions.len()
+            ),
+        },
+    );
     HttpResponse::Ok().json(VmHealthScanResponse {
         scanned,
         issues,
@@ -4752,6 +4831,22 @@ pub(crate) async fn get_vm_ops_summary(
     }
     let summary = build_vm_ops_summary(&ctx.managed_root_dir, &state, now_unix());
     HttpResponse::Ok().json(summary)
+}
+
+pub(crate) async fn get_vm_audit_events(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+    query: web::Query<VmAuditQuery>,
+) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    let limit = query.limit.unwrap_or(50).clamp(1, 200);
+    let mut events = load_vm_audit_events(&ctx.managed_root_dir);
+    events.reverse();
+    events.truncate(limit);
+    HttpResponse::Ok().json(VmAuditResponse { events })
 }
 
 pub(crate) async fn inject_vm_ops_fault(
@@ -4817,6 +4912,18 @@ pub(crate) async fn inject_vm_ops_fault(
         &name,
         &format!("fault injected mode={} count={} age_sec={}", mode, count, age_sec),
     );
+    append_vm_audit_event(
+        &ctx.managed_root_dir,
+        VmAuditEvent {
+            created_at_unix: now_unix(),
+            actor: ctx.username.clone().unwrap_or_else(|| "guest".to_string()),
+            role: role_name(&ctx.role).to_string(),
+            action: "inject_vm_ops_fault".to_string(),
+            target: name.clone(),
+            outcome: "ok".to_string(),
+            detail: format!("mode={} count={} age_sec={}", mode, count, age_sec),
+        },
+    );
     HttpResponse::Ok().json(VmOpsFaultInjectResponse {
         name,
         mode,
@@ -4840,7 +4947,21 @@ pub(crate) async fn save_vm_policy(
     let _guard = lock_recover(&data.projects_lock, "projects_lock");
     let cfg = sanitize_vm_policy_config(body.into_inner());
     match save_vm_policy_config(&ctx.managed_root_dir, &cfg) {
-        Ok(_) => HttpResponse::Ok().json(cfg),
+        Ok(_) => {
+            append_vm_audit_event(
+                &ctx.managed_root_dir,
+                VmAuditEvent {
+                    created_at_unix: now_unix(),
+                    actor: ctx.username.clone().unwrap_or_else(|| "guest".to_string()),
+                    role: role_name(&ctx.role).to_string(),
+                    action: "save_vm_policy".to_string(),
+                    target: "vm_policy".to_string(),
+                    outcome: "ok".to_string(),
+                    detail: "vm policy updated".to_string(),
+                },
+            );
+            HttpResponse::Ok().json(cfg)
+        }
         Err(e) => HttpResponse::InternalServerError().body(format!("save vm policy failed: {e}")),
     }
 }
@@ -5248,6 +5369,7 @@ mod tests {
         append_dispatch_trace_entry, scan_vm_health_locked, VM_DISPATCH_TRACE_MAX_ENTRIES,
         load_vm_policy_config, save_vm_policy_config,
         strategy_priority_boost_by_stats, queue_watchdog_recovery_stats, build_vm_ops_summary,
+        append_vm_audit_event, load_vm_audit_events, VM_AUDIT_MAX_ENTRIES,
         trim_history_entries, vm_instance_limit_by_role, vm_queue_limit_by_role,
         vm_running_limit_by_role, vm_exec_running_limit_by_role,
         VmSelfDebugHistoryEntry,
@@ -5905,6 +6027,32 @@ mod tests {
         let after = load_exec_queue(&managed_root, vm_name);
         assert_eq!(after.iter().filter(|x| x.status == "pending").count(), 1);
         assert_eq!(after.iter().filter(|x| x.status == "running").count(), 1);
+    }
+
+    #[test]
+    fn vm_audit_ring_buffer_caps_size() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let managed_root = format!("autocoding_data/users/audit_ring_{unique}");
+        for i in 0..(VM_AUDIT_MAX_ENTRIES + 9) {
+            append_vm_audit_event(
+                &managed_root,
+                crate::web_ui_models::VmAuditEvent {
+                    created_at_unix: i as u64,
+                    actor: "tester".to_string(),
+                    role: "admin".to_string(),
+                    action: "test".to_string(),
+                    target: "x".to_string(),
+                    outcome: "ok".to_string(),
+                    detail: String::new(),
+                },
+            );
+        }
+        let events = load_vm_audit_events(&managed_root);
+        assert_eq!(events.len(), VM_AUDIT_MAX_ENTRIES);
+        assert_eq!(events[0].created_at_unix, 9);
     }
 
     #[test]

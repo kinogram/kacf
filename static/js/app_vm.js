@@ -101,6 +101,12 @@ function setVmOpsSummaryText(text) {
     node.textContent = text || '';
 }
 
+function setVmAuditEventsText(text) {
+    const node = el('vm_audit_events');
+    if (!node) return;
+    node.textContent = text || '';
+}
+
 function setVmExecDispatchTraceText(text) {
     const node = el('vm_exec_dispatch_trace');
     if (!node) return;
@@ -1404,6 +1410,7 @@ async function refreshVmExecQueue() {
         setVmExecQueueText(txt('vm_exec_queue_empty', 'No queued task.'));
         setVmExecQueueStatsText('');
         setVmOpsSummaryText('');
+        setVmAuditEventsText('');
         setVmExecDispatchTraceText('');
         setVmHealthReportText('');
         return;
@@ -1431,11 +1438,13 @@ async function refreshVmExecQueue() {
         }
         await refreshVmExecQueueStats();
         await refreshVmOpsSummary();
+        await refreshVmAuditEvents();
         await refreshVmExecDispatchTrace();
     } catch (e) {
         setVmExecQueueText(fmt('status_vm_exec_queue_failed', 'VM exec queue operation failed: {error}', { error: String(e) }));
         setVmExecQueueStatsText('');
         setVmOpsSummaryText('');
+        setVmAuditEventsText('');
         setVmExecDispatchTraceText('');
     }
 }
@@ -1524,6 +1533,26 @@ async function refreshVmOpsSummary() {
         setVmOpsSummaryText(lines.join('\n'));
     } catch (_e) {
         setVmOpsSummaryText('');
+    }
+}
+
+async function refreshVmAuditEvents() {
+    try {
+        const data = await vmApi('/vm/audit/events?limit=20', 'GET');
+        const events = Array.isArray(data?.events) ? data.events : [];
+        if (!events.length) {
+            setVmAuditEventsText('Audit: empty');
+            return;
+        }
+        const lines = ['Audit (latest first):'];
+        events.forEach((e, idx) => {
+            lines.push(
+                `#${idx + 1} t=${Number(e?.created_at_unix || 0)} actor=${String(e?.actor || '-')} role=${String(e?.role || '-')} action=${String(e?.action || '-')} target=${String(e?.target || '-')} outcome=${String(e?.outcome || '-')} detail=${String(e?.detail || '')}`,
+            );
+        });
+        setVmAuditEventsText(lines.join('\n'));
+    } catch (_e) {
+        setVmAuditEventsText('');
     }
 }
 

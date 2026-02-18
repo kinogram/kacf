@@ -655,6 +655,28 @@ pub(crate) struct VmOpsFaultInjectResponse {
     pub(crate) queue_total: usize,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct VmAuditEvent {
+    pub(crate) created_at_unix: u64,
+    pub(crate) actor: String,
+    pub(crate) role: String,
+    pub(crate) action: String,
+    pub(crate) target: String,
+    pub(crate) outcome: String,
+    pub(crate) detail: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VmAuditQuery {
+    #[serde(default)]
+    pub(crate) limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmAuditResponse {
+    pub(crate) events: Vec<VmAuditEvent>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct VmExecEnqueuePayload {
     pub(crate) name: String,

@@ -1022,6 +1022,7 @@ pub async fn run_web_server(
             .route("/vm/policy", web::post().to(web_ui_vm::save_vm_policy))
             .route("/vm/ops/summary", web::get().to(web_ui_vm::get_vm_ops_summary))
             .route("/vm/ops/fault_inject", web::post().to(web_ui_vm::inject_vm_ops_fault))
+            .route("/vm/audit/events", web::get().to(web_ui_vm::get_vm_audit_events))
             .route("/vm/ready", web::get().to(web_ui_vm::check_vm_ready))
             .route("/vm/provision", web::post().to(web_ui_vm::provision_vm))
             .route("/vm/start", web::post().to(web_ui_vm::start_vm))
