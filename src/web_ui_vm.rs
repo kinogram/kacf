@@ -24,7 +24,7 @@ use crate::web_ui_models::{
     VmExecProfileDetailResponse, VmExecProfilePreviewQuery, VmExecProfilePreviewResponse,
     VmExecProfilesResponse, VmExecQueueItem, VmExecResponse, VmInstance, VmLogQuery,
     VmLogsResponse, VmHealthAction, VmHealthIssue, VmHealthScanPayload, VmHealthScanResponse,
-    VmOpsCategoryCount, VmOpsSummaryResponse,
+    VmOpsCategoryCount, VmOpsFaultInjectPayload, VmOpsFaultInjectResponse, VmOpsSummaryResponse,
     VmPolicyConfig, VmPolicyRoleLimits, VmPolicyScheduler,
     VmProvisionPayload, VmQueueCancelPayload, VmQueueQuery, VmQueueResponse,
     VmQueueStatsResponse, VmReadyQuery, VmReadyResponse, VmSelfDebugPlanPayload,
@@ -4754,6 +4754,77 @@ pub(crate) async fn get_vm_ops_summary(
     HttpResponse::Ok().json(summary)
 }
 
+pub(crate) async fn inject_vm_ops_fault(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+    body: web::Json<VmOpsFaultInjectPayload>,
+) -> impl Responder {
+    let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if !ctx.can_write {
+        return HttpResponse::Forbidden().body("read-only session");
+    }
+    let name = match sanitize_vm_name(&body.name) {
+        Some(v) => v,
+        None => return HttpResponse::BadRequest().body("invalid vm name"),
+    };
+    let mode = body.mode.trim().to_ascii_lowercase();
+    let count = body.count.clamp(1, 1000);
+    let age_sec = body.age_sec.clamp(0, 86_400);
+
+    let _guard = lock_recover(&data.projects_lock, "projects_lock");
+    let state = load_vm_state(&ctx.managed_root_dir);
+    if !state.vms.contains_key(&name) {
+        return HttpResponse::NotFound().body("vm not found");
+    }
+    let mut items = load_exec_queue(&ctx.managed_root_dir, &name);
+    let scheduler = load_vm_policy_config(&ctx.managed_root_dir).scheduler;
+    let now = now_unix();
+    for i in 0..count {
+        let mut item = queue_item_from_values(
+            &format!("echo KACF_FAULT_INJECT_{mode}_{i}"),
+            30,
+            0,
+            0,
+            0,
+        );
+        match mode.as_str() {
+            "stale_running_task" => {
+                item.status = "running".to_string();
+                item.started_at_unix = now
+                    .saturating_sub(30)
+                    .saturating_sub(scheduler.exec_hard_timeout_grace_sec)
+                    .saturating_sub(age_sec);
+                item.message = "fault-inject stale running task".to_string();
+            }
+            "pending_pressure" => {
+                item.status = "pending".to_string();
+                item.created_at_unix = now.saturating_sub(age_sec);
+                item.priority = -20;
+                item.message = "fault-inject pending pressure".to_string();
+            }
+            _ => return HttpResponse::BadRequest().body("mode must be stale_running_task|pending_pressure"),
+        }
+        items.push(item);
+    }
+    if let Err(e) = save_exec_queue(&ctx.managed_root_dir, &name, &items) {
+        return HttpResponse::InternalServerError().body(format!("save queue failed: {e}"));
+    }
+    append_vm_log(
+        &ctx.managed_root_dir,
+        &name,
+        &format!("fault injected mode={} count={} age_sec={}", mode, count, age_sec),
+    );
+    HttpResponse::Ok().json(VmOpsFaultInjectResponse {
+        name,
+        mode,
+        injected: count,
+        queue_total: items.len(),
+    })
+}
+
 pub(crate) async fn save_vm_policy(
     req: HttpRequest,
     data: web::Data<AppState>,
@@ -5778,6 +5849,62 @@ mod tests {
         assert_eq!(summary.failed, 1);
         assert_eq!(summary.top_failure_categories.len(), 1);
         assert_eq!(summary.top_failure_categories[0].category, "test_failure");
+    }
+
+    #[test]
+    fn fault_inject_modes_append_expected_tasks() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let managed_root = format!("autocoding_data/users/fault_inject_{unique}");
+        let now = now_unix();
+        let vm_name = "vm-fault";
+        let mut state = crate::web_ui_models::VmStateStore::default();
+        state.vms.insert(
+            vm_name.to_string(),
+            crate::web_ui_models::VmInstance {
+                name: vm_name.to_string(),
+                backend: "metadata-only".to_string(),
+                power_state: "stopped".to_string(),
+                cpu: 2,
+                memory_mb: 1024,
+                disk_gb: 10,
+                disk_path: "autocoding_data/dummy.qcow2".to_string(),
+                os_image: "linux".to_string(),
+                created_at_unix: now,
+                updated_at_unix: now,
+                last_message: String::new(),
+                process_id: None,
+                ssh_port: None,
+                ssh_user: "root".to_string(),
+            },
+        );
+        save_vm_state(&managed_root, &state).expect("save state");
+
+        // pending_pressure equivalent
+        let mut items = load_exec_queue(&managed_root, vm_name);
+        let mut p = queue_item_from_values("echo pending", 30, 0, 0, 0);
+        p.status = "pending".to_string();
+        p.created_at_unix = now.saturating_sub(300);
+        items.push(p);
+        save_exec_queue(&managed_root, vm_name, &items).expect("save queue pending");
+
+        // stale_running_task equivalent
+        let policy = load_vm_policy_config(&managed_root);
+        let mut items2 = load_exec_queue(&managed_root, vm_name);
+        let mut r = queue_item_from_values("echo stale", 30, 0, 0, 0);
+        r.status = "running".to_string();
+        r.started_at_unix = now
+            .saturating_sub(30)
+            .saturating_sub(policy.scheduler.exec_hard_timeout_grace_sec)
+            .saturating_sub(120);
+        items2.push(r);
+        save_exec_queue(&managed_root, vm_name, &items2).expect("save queue stale");
+
+        let after = load_exec_queue(&managed_root, vm_name);
+        assert_eq!(after.iter().filter(|x| x.status == "pending").count(), 1);
+        assert_eq!(after.iter().filter(|x| x.status == "running").count(), 1);
     }
 
     #[test]

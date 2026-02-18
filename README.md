@@ -120,6 +120,11 @@ bash scripts/release_check.sh
 
 # 指标门禁
 bash scripts/metrics_gate.sh
+
+# VM 压测与故障注入（需要先获取 kacf_session）
+KACF_BASE_URL=http://127.0.0.1:8080 \
+KACF_SESSION=<your_session_cookie_value> \
+bash scripts/vm_ops_stress.sh --vm <vm_name> --rounds 10 --inject 50 --age 180
 ```
 
 ## 许可证

@@ -638,6 +638,24 @@ pub(crate) struct VmOpsSummaryResponse {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub(crate) struct VmOpsFaultInjectPayload {
+    pub(crate) name: String,
+    pub(crate) mode: String,
+    #[serde(default)]
+    pub(crate) count: usize,
+    #[serde(default)]
+    pub(crate) age_sec: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VmOpsFaultInjectResponse {
+    pub(crate) name: String,
+    pub(crate) mode: String,
+    pub(crate) injected: usize,
+    pub(crate) queue_total: usize,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub(crate) struct VmExecEnqueuePayload {
     pub(crate) name: String,
     pub(crate) command: String,
