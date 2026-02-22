@@ -75,11 +75,9 @@ function renderAccountMenu() {
     if (menuTitle) menuTitle.textContent = fmt('account_menu_greeting', '{name}, hello!', { name });
     if (menuBody) menuBody.textContent = txt('account_menu_body', '');
 
-    const isAdmin = !!(me && me.is_admin);
     const isGuest = !!(me && me.guest);
     if (topAdminBtn) {
-        topAdminBtn.style.display = isAdmin ? '' : 'none';
-        setIconButton(topAdminBtn, 'shield', txt('btn_admin_panel', 'Admin Panel'));
+        topAdminBtn.style.display = 'none';
     }
 
     if (manageBtn) manageBtn.textContent = txt('account_menu_manage', 'Manage your KACF account');
@@ -111,7 +109,6 @@ function renderAccountMenu() {
     } catch (_e) {}
 
     if (manageBtn) manageBtn.onclick = () => window.open('/account', '_blank', 'noopener');
-    if (topAdminBtn) topAdminBtn.onclick = () => window.open('/admin', '_blank', 'noopener');
     if (switchBtn) switchBtn.onclick = () => { location.href = '/login?switch=1'; };
     if (logoutBtn) logoutBtn.onclick = async () => {
         await fetch('/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
@@ -142,10 +139,7 @@ function renderAccountMenu() {
             menu.addEventListener('click', (e) => e.stopPropagation());
         }
     }
-    if (topAdminBtn && !topAdminBtn.dataset.adminWired) {
-        topAdminBtn.dataset.adminWired = '1';
-        topAdminBtn.addEventListener('click', (e) => e.stopPropagation());
-    }
+    if (topAdminBtn) topAdminBtn.onclick = null;
 }
 
 async function ensureAuthForApp() {
