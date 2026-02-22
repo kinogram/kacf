@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
-use serde::Serialize;
 use serde::Deserialize;
+use serde::Serialize;
 
 use crate::auth::session::{build_clear_session_cookie, build_session_cookie, read_session_cookie};
 use crate::auth::store::AuthStore;
@@ -43,7 +43,7 @@ fn data_root() -> PathBuf {
         .join("autocoding_data")
 }
 
-fn resolve_store(req: &HttpRequest) -> AuthStore {
+fn resolve_store(_req: &HttpRequest) -> AuthStore {
     // Store is created per request but internally uses file locks; lightweight.
     let paths = crate::auth::store::AuthSystemPaths::new(&data_root());
     let store = AuthStore::new(paths);
@@ -81,7 +81,10 @@ pub(crate) async fn bootstrap_status(req: HttpRequest) -> impl Responder {
     }))
 }
 
-pub(crate) async fn bootstrap_admin(req: HttpRequest, body: web::Json<BootstrapAdminPayload>) -> impl Responder {
+pub(crate) async fn bootstrap_admin(
+    req: HttpRequest,
+    body: web::Json<BootstrapAdminPayload>,
+) -> impl Responder {
     let store = resolve_store(&req);
     if store.has_any_user() {
         return HttpResponse::BadRequest().body("bootstrap already completed");
@@ -219,7 +222,10 @@ pub(crate) async fn login(req: HttpRequest, body: web::Json<LoginPayload>) -> im
     }
 }
 
-pub(crate) async fn verify_email_code(req: HttpRequest, body: web::Json<VerifyEmailCodePayload>) -> impl Responder {
+pub(crate) async fn verify_email_code(
+    req: HttpRequest,
+    body: web::Json<VerifyEmailCodePayload>,
+) -> impl Responder {
     let store = resolve_store(&req);
     let s = store.read_admin_settings();
     if !s.login_enabled {
@@ -332,7 +338,10 @@ pub(crate) async fn auth_me(req: HttpRequest) -> impl Responder {
     HttpResponse::Ok().json(resp)
 }
 
-fn require_admin(req: &HttpRequest, store: &AuthStore) -> Result<crate::auth::UserRecord, HttpResponse> {
+fn require_admin(
+    req: &HttpRequest,
+    store: &AuthStore,
+) -> Result<crate::auth::UserRecord, HttpResponse> {
     let sid = read_session_cookie(req).unwrap_or_default();
     let Some(sess) = store.resolve_session(&sid) else {
         return Err(HttpResponse::Unauthorized().body("not logged in"));
@@ -357,7 +366,10 @@ pub(crate) async fn admin_get_settings(req: HttpRequest) -> impl Responder {
     HttpResponse::Ok().json(store.read_admin_settings())
 }
 
-pub(crate) async fn admin_put_settings(req: HttpRequest, body: web::Json<crate::auth::types::AdminSettings>) -> impl Responder {
+pub(crate) async fn admin_put_settings(
+    req: HttpRequest,
+    body: web::Json<crate::auth::types::AdminSettings>,
+) -> impl Responder {
     let store = resolve_store(&req);
     let admin = match require_admin(&req, &store) {
         Ok(v) => v,
@@ -390,7 +402,10 @@ pub(crate) struct AdminCreateUserPayload {
     pub(crate) password: String,
 }
 
-pub(crate) async fn admin_create_user(req: HttpRequest, body: web::Json<AdminCreateUserPayload>) -> impl Responder {
+pub(crate) async fn admin_create_user(
+    req: HttpRequest,
+    body: web::Json<AdminCreateUserPayload>,
+) -> impl Responder {
     let store = resolve_store(&req);
     let admin = match require_admin(&req, &store) {
         Ok(v) => v,
@@ -405,8 +420,19 @@ pub(crate) async fn admin_create_user(req: HttpRequest, body: web::Json<AdminCre
     if !email_allowed(&p.email) {
         return HttpResponse::BadRequest().body("email not allowed");
     }
-    let pw = if p.password.trim().is_empty() { None } else { Some(p.password) };
-    let u = match store.create_user(&p.username, &p.nickname, &p.email, role, pw, LoginOption::PasswordOnly) {
+    let pw = if p.password.trim().is_empty() {
+        None
+    } else {
+        Some(p.password)
+    };
+    let u = match store.create_user(
+        &p.username,
+        &p.nickname,
+        &p.email,
+        role,
+        pw,
+        LoginOption::PasswordOnly,
+    ) {
         Ok(v) => v,
         Err(e) => return HttpResponse::BadRequest().body(e),
     };
@@ -448,7 +474,11 @@ pub(crate) struct AdminBanPayload {
     pub(crate) banned: bool,
 }
 
-pub(crate) async fn admin_set_banned(req: HttpRequest, path: web::Path<String>, body: web::Json<AdminBanPayload>) -> impl Responder {
+pub(crate) async fn admin_set_banned(
+    req: HttpRequest,
+    path: web::Path<String>,
+    body: web::Json<AdminBanPayload>,
+) -> impl Responder {
     let store = resolve_store(&req);
     let admin = match require_admin(&req, &store) {
         Ok(v) => v,
@@ -567,7 +597,10 @@ pub(crate) async fn admin_audit_tail(
     if require_admin(&req, &store).is_err() {
         return HttpResponse::Forbidden().body("admin only");
     }
-    let n: usize = query.get("tail").and_then(|v| v.parse().ok()).unwrap_or(200);
+    let n: usize = query
+        .get("tail")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(200);
     let n = n.clamp(1, 2000);
     let content = std::fs::read_to_string(&store.paths().audit_log).unwrap_or_default();
     let lines: Vec<&str> = content.lines().collect();
@@ -586,7 +619,10 @@ pub(crate) struct AccountProfilePayload {
     pub(crate) nickname: String,
 }
 
-pub(crate) async fn account_update_profile(req: HttpRequest, body: web::Json<AccountProfilePayload>) -> impl Responder {
+pub(crate) async fn account_update_profile(
+    req: HttpRequest,
+    body: web::Json<AccountProfilePayload>,
+) -> impl Responder {
     let store = resolve_store(&req);
     let sid = read_session_cookie(&req).unwrap_or_default();
     let Some(sess) = store.resolve_session(&sid) else {
@@ -627,7 +663,10 @@ pub(crate) struct AccountChangePasswordPayload {
     pub(crate) current_email_code: Option<String>,
 }
 
-pub(crate) async fn account_change_password(req: HttpRequest, body: web::Json<AccountChangePasswordPayload>) -> impl Responder {
+pub(crate) async fn account_change_password(
+    req: HttpRequest,
+    body: web::Json<AccountChangePasswordPayload>,
+) -> impl Responder {
     let store = resolve_store(&req);
     let sid = read_session_cookie(&req).unwrap_or_default();
     let Some(sess) = store.resolve_session(&sid) else {
@@ -772,7 +811,10 @@ pub(crate) struct AccountUsernamePayload {
     pub(crate) current_email_code: Option<String>,
 }
 
-pub(crate) async fn account_change_username(req: HttpRequest, body: web::Json<AccountUsernamePayload>) -> impl Responder {
+pub(crate) async fn account_change_username(
+    req: HttpRequest,
+    body: web::Json<AccountUsernamePayload>,
+) -> impl Responder {
     let store = resolve_store(&req);
     let sid = read_session_cookie(&req).unwrap_or_default();
     let Some(sess) = store.resolve_session(&sid) else {
@@ -827,7 +869,10 @@ pub(crate) struct AccountRequestNewEmailCodePayload {
     pub(crate) new_email: String,
 }
 
-pub(crate) async fn account_request_new_email_code(req: HttpRequest, body: web::Json<AccountRequestNewEmailCodePayload>) -> impl Responder {
+pub(crate) async fn account_request_new_email_code(
+    req: HttpRequest,
+    body: web::Json<AccountRequestNewEmailCodePayload>,
+) -> impl Responder {
     let store = resolve_store(&req);
     let sid = read_session_cookie(&req).unwrap_or_default();
     let Some(sess) = store.resolve_session(&sid) else {
@@ -869,7 +914,10 @@ pub(crate) struct AccountConfirmEmailChangePayload {
     pub(crate) current_email_code: Option<String>,
 }
 
-pub(crate) async fn account_confirm_email_change(req: HttpRequest, body: web::Json<AccountConfirmEmailChangePayload>) -> impl Responder {
+pub(crate) async fn account_confirm_email_change(
+    req: HttpRequest,
+    body: web::Json<AccountConfirmEmailChangePayload>,
+) -> impl Responder {
     let store = resolve_store(&req);
     let sid = read_session_cookie(&req).unwrap_or_default();
     let Some(sess) = store.resolve_session(&sid) else {
@@ -929,7 +977,10 @@ pub(crate) struct AccountChangeLoginOptionPayload {
     pub(crate) new_password: Option<String>,
 }
 
-pub(crate) async fn account_change_login_option(req: HttpRequest, body: web::Json<AccountChangeLoginOptionPayload>) -> impl Responder {
+pub(crate) async fn account_change_login_option(
+    req: HttpRequest,
+    body: web::Json<AccountChangeLoginOptionPayload>,
+) -> impl Responder {
     let store = resolve_store(&req);
     let sid = read_session_cookie(&req).unwrap_or_default();
     let Some(sess) = store.resolve_session(&sid) else {

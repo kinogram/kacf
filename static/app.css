@@ -107,10 +107,13 @@ table.table thead th {
 
 .account-menu {
     position: fixed;
-    top: calc(var(--topbar-h, 56px) + 10px);
+    top: calc(var(--topbar-h, 56px) + 8px);
     right: 14px;
     width: min(420px, calc(100vw - 24px));
-    z-index: 50;
+    max-height: calc(100dvh - (var(--topbar-h, 56px) + 20px));
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    z-index: 1700;
     background: var(--card);
     border: 1px solid var(--line);
     border-radius: 14px;
@@ -312,6 +315,30 @@ table.table thead th {
             background: #fbfdff;
             color: var(--text);
             font-size: 15px;
+        }
+        input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            padding: 0;
+            margin: 0 8px 0 0;
+            border-radius: 4px;
+            vertical-align: middle;
+            flex: 0 0 auto;
+        }
+        label > input[type="checkbox"] + span,
+        label > input[type="checkbox"] + strong,
+        label > input[type="checkbox"] + em {
+            vertical-align: middle;
+        }
+        .checkbox-row {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            min-height: 36px;
+        }
+        .checkbox-row > label {
+            margin: 0;
+            font-weight: 600;
         }
         textarea {
             min-height: 92px;

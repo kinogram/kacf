@@ -21,7 +21,10 @@ pub(crate) enum LoginOption {
 
 impl LoginOption {
     pub(crate) fn requires_password(&self) -> bool {
-        matches!(self, LoginOption::PasswordOnly | LoginOption::PasswordEmail2fa)
+        matches!(
+            self,
+            LoginOption::PasswordOnly | LoginOption::PasswordEmail2fa
+        )
     }
 
     pub(crate) fn requires_email_code(&self) -> bool {

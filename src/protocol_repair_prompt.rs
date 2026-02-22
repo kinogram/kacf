@@ -6,6 +6,8 @@ pub(crate) fn build_repair_prompt(
     consecutive_eval_failures: u32,
     consecutive_same_failure: u32,
     diff_for_feedback: &str,
+    self_debug_snapshot: &str,
+    strategy: &crate::protocol_failure::RepairStrategy,
 ) -> String {
     let repeated_hint = if consecutive_same_failure >= 2 {
         "检测到同类错误重复出现。你必须先写出根因，再给出最小修复，并补充/修正测试以防回归。"
@@ -45,6 +47,14 @@ stdout:\n{stdout}\n\
 \n\
 stderr:\n{stderr}\n\
 \n\
+Self-Debug 快照:\n{debug_snapshot}\n\
+\n\
+按错误类别的修复策略:\n\
+- 根因焦点: {root_cause_focus}\n\
+- 改动范围: {patch_scope}\n\
+- 测试要求: {test_focus}\n\
+- 额外检查: {extra_checks}\n\
+\n\
 修复要求:\n\
 1) {repeated}\n\
 2) 先修复导致失败的直接原因，再处理次要问题。\n\
@@ -66,6 +76,15 @@ stderr:\n{stderr}\n\
         },
         stdout = crate::protocol_patch::truncate(&result.stdout, 8000),
         stderr = crate::protocol_patch::truncate(&result.stderr, 8000),
+        debug_snapshot = if self_debug_snapshot.trim().is_empty() {
+            "（无）"
+        } else {
+            self_debug_snapshot
+        },
+        root_cause_focus = strategy.root_cause_focus,
+        patch_scope = strategy.patch_scope,
+        test_focus = strategy.test_focus,
+        extra_checks = strategy.extra_checks,
         repeated = repeated_hint,
         strictness = strictness_hint,
     )

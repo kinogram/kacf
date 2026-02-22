@@ -5,7 +5,7 @@ window.KACF = window.KACF || {};
 window.KACF.auth = window.KACF.auth || {};
 
 let authMe = null;
-let guestMode = false;
+let authGuestMode = false;
 const PROJECT_LINKS = {
     githubRepo: 'https://github.com',
     developerHome: 'https://example.com',
@@ -24,14 +24,14 @@ async function fetchAuthMe() {
 }
 
 function setGuestMode(on) {
-    guestMode = !!on;
+    authGuestMode = !!on;
     try {
-        window.KACF.auth.guest = guestMode;
+        window.KACF.auth.guest = authGuestMode;
     } catch (_e) {}
 }
 
 function isGuestMode() {
-    return !!guestMode;
+    return !!authGuestMode;
 }
 
 function setWorkspaceRootForUser(username) {

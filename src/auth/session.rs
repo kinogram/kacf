@@ -4,7 +4,8 @@ use actix_web::HttpRequest;
 pub(crate) const SESSION_COOKIE_NAME: &str = "kacf_session";
 
 pub(crate) fn read_session_cookie(req: &HttpRequest) -> Option<String> {
-    req.cookie(SESSION_COOKIE_NAME).map(|c| c.value().to_string())
+    req.cookie(SESSION_COOKIE_NAME)
+        .map(|c| c.value().to_string())
 }
 
 pub(crate) fn build_session_cookie(session_id: &str) -> Cookie<'static> {
@@ -25,4 +26,3 @@ pub(crate) fn build_clear_session_cookie() -> Cookie<'static> {
         .max_age(Duration::seconds(0))
         .finish()
 }
-

@@ -2,19 +2,21 @@ use actix_web::{HttpRequest, HttpResponse};
 use std::fs;
 
 use crate::auth;
-use crate::auth::{AccountRole, SessionRecord, UserRecord};
+use crate::auth::{AccountRole, SessionRecord};
 use crate::web_ui::AppState;
 
 #[derive(Debug, Clone)]
 pub(crate) struct WebUserCtx {
     pub(crate) role: AccountRole,
     pub(crate) username: Option<String>,
-    pub(crate) user: Option<UserRecord>,
     pub(crate) managed_root_dir: String, // relative path for store helpers
     pub(crate) can_write: bool,
 }
 
-pub(crate) fn require_session(req: &HttpRequest, data: &AppState) -> Result<SessionRecord, HttpResponse> {
+pub(crate) fn require_session(
+    req: &HttpRequest,
+    data: &AppState,
+) -> Result<SessionRecord, HttpResponse> {
     let sid = auth::session::read_session_cookie(req).unwrap_or_default();
     if sid.is_empty() {
         return Err(HttpResponse::Unauthorized().body("not logged in"));
@@ -24,13 +26,15 @@ pub(crate) fn require_session(req: &HttpRequest, data: &AppState) -> Result<Sess
         .ok_or_else(|| HttpResponse::Unauthorized().body("invalid session"))
 }
 
-pub(crate) fn user_ctx_for_request(req: &HttpRequest, data: &AppState) -> Result<WebUserCtx, HttpResponse> {
+pub(crate) fn user_ctx_for_request(
+    req: &HttpRequest,
+    data: &AppState,
+) -> Result<WebUserCtx, HttpResponse> {
     let sess = require_session(req, data)?;
     match sess.role {
         AccountRole::Guest => Ok(WebUserCtx {
             role: AccountRole::Guest,
             username: None,
-            user: None,
             managed_root_dir: "autocoding_data/guest".to_string(),
             can_write: false,
         }),
@@ -48,7 +52,6 @@ pub(crate) fn user_ctx_for_request(req: &HttpRequest, data: &AppState) -> Result
             Ok(WebUserCtx {
                 role: user.role,
                 username: Some(username),
-                user: Some(user),
                 managed_root_dir: root,
                 can_write: true,
             })

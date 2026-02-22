@@ -110,7 +110,6 @@ function defaultBucketUiState() {
         run_state: 'idle',
         run_text: txt('run_idle', ''),
         diagnostics_text: txt('diagnostics_none', ''),
-        diff_text: '',
         clarify_questions: [],
     };
 }
@@ -119,41 +118,16 @@ function readBucketUiState(bucket) {
     const all = loadProjectUiStateMap();
     const raw = all[bucket];
     if (!raw || typeof raw !== 'object') return defaultBucketUiState();
-    const merged = { ...defaultBucketUiState(), ...raw };
-    merged.diff_text = sanitizeDiffText(merged.diff_text || '');
-    return merged;
+    return { ...defaultBucketUiState(), ...raw };
 }
 
 function writeBucketUiState(bucket, patch) {
     const all = loadProjectUiStateMap();
     const next = { ...readBucketUiState(bucket), ...(patch || {}) };
-    next.diff_text = sanitizeDiffText(next.diff_text || '');
     all[bucket] = next;
     touchBucket(uiStateBucketTouchedAt, bucket);
     pruneUiStateBuckets();
     saveProjectUiStateMap(all);
-}
-
-function renderDiffPanel(diffText) {
-    const safe = sanitizeDiffText(diffText || '');
-    const section = document.getElementById('diff_section');
-    const diffElem = document.getElementById('diff');
-    if (!safe) {
-        section.style.display = 'none';
-        diffElem.innerHTML = '';
-        return;
-    }
-    const lines = safe.split('\n');
-    diffElem.innerHTML = lines.map(line => {
-        if (line.startsWith('+') && !line.startsWith('+++')) {
-            return `<div class="diff-line-add">${escapeHtml(line)}</div>`;
-        }
-        if (line.startsWith('-') && !line.startsWith('---')) {
-            return `<div class="diff-line-del">${escapeHtml(line)}</div>`;
-        }
-        return `<div class="diff-line-other">${escapeHtml(line)}</div>`;
-    }).join('');
-    section.style.display = 'block';
 }
 
 function normalizeClarifyQuestions(questions) {
@@ -311,14 +285,14 @@ function renderUiForViewBucket() {
     const bar = document.getElementById('runbar');
     bar.dataset.state = normalized.run_state || 'idle';
     const runText = fmt('runbar_line', '', { state: normalized.run_text || txt('run_idle', '') });
-    const runEl = document.getElementById('runbar_text');
-    if (typeof setTopbarHintText === 'function') {
-        setTopbarHintText(runEl, runText);
-    } else if (runEl) {
-        runEl.textContent = runText;
+    if (typeof setTopbarPart === 'function') {
+        setTopbarPart('run', runText);
+    } else {
+        const el = document.getElementById('topbar_line_text');
+        if (el && typeof setTopbarHintText === 'function') setTopbarHintText(el, runText);
+        else if (el) el.textContent = runText;
     }
     document.getElementById('diagnostics').textContent = normalized.diagnostics_text || txt('diagnostics_none', '');
-    renderDiffPanel(normalized.diff_text || '');
     const shouldShowClarify = shouldAllowClarifyInteraction() && Array.isArray(normalized.clarify_questions) && normalized.clarify_questions.length > 0;
     renderClarifyQuestions(shouldShowClarify ? (normalized.clarify_questions || []) : [], bucket, false);
 }
@@ -336,7 +310,6 @@ window.KACF.uiCache = {
     defaultBucketUiState,
     readBucketUiState,
     writeBucketUiState,
-    renderDiffPanel,
     normalizeClarifyQuestions,
     snapshotClarifyAnswers,
     renderClarifyQuestions,

@@ -1,5 +1,4 @@
-const DEFAULT_LOG_MAX_CHARS: usize = 50_000;
-const DEFAULT_DIFF_MAX_CHARS: usize = 50_000;
+const DEFAULT_LOG_MAX_CHARS: usize = 20_000;
 
 fn truncate_tail_chars(input: &str, max_chars: usize) -> String {
     if max_chars == 0 {
@@ -29,10 +28,6 @@ fn sanitize_log_bucket(raw: &str, max_chars: usize) -> String {
     }
 }
 
-fn sanitize_diff_text(raw: &str, max_chars: usize) -> String {
-    truncate_tail_chars(raw, max_chars)
-}
-
 pub(crate) fn apply_ui_cache_patch(
     payload: &mut crate::web_ui::UiCachePayload,
     patch: crate::web_ui::UiCachePatch,
@@ -46,16 +41,11 @@ pub(crate) fn apply_ui_cache_patch(
     if let Some(v) = patch.global_options {
         payload.global_options = Some(v);
     }
-    let (log_max_chars, diff_max_chars) = payload
+    let log_max_chars = payload
         .global_options
         .as_ref()
-        .map(|g| {
-            (
-                parse_limit(&g.log_max_chars, DEFAULT_LOG_MAX_CHARS),
-                parse_limit(&g.diff_max_chars, DEFAULT_DIFF_MAX_CHARS),
-            )
-        })
-        .unwrap_or((DEFAULT_LOG_MAX_CHARS, DEFAULT_DIFF_MAX_CHARS));
+        .map(|g| parse_limit(&g.log_max_chars, DEFAULT_LOG_MAX_CHARS))
+        .unwrap_or(DEFAULT_LOG_MAX_CHARS);
     if let Some(v) = patch.project_logs {
         payload.project_logs = v
             .into_iter()
@@ -63,20 +53,7 @@ pub(crate) fn apply_ui_cache_patch(
             .collect();
     }
     if let Some(v) = patch.project_ui_state {
-        payload.project_ui_state = v
-            .into_iter()
-            .map(|(k, mut val)| {
-                if let Some(obj) = val.as_object_mut() {
-                    if let Some(raw) = obj.get("diff_text").and_then(|x| x.as_str()) {
-                        obj.insert(
-                            "diff_text".to_string(),
-                            serde_json::Value::String(sanitize_diff_text(raw, diff_max_chars)),
-                        );
-                    }
-                }
-                (k, val)
-            })
-            .collect();
+        payload.project_ui_state = v;
     }
 }
 
@@ -84,7 +61,6 @@ pub(crate) fn apply_ui_cache_patch(
 mod tests {
     use super::apply_ui_cache_patch;
     use crate::web_ui::{GlobalOptions, UiCachePatch, UiCachePayload};
-    use serde_json::json;
     use std::collections::BTreeMap;
 
     #[test]
@@ -99,7 +75,7 @@ mod tests {
             &mut payload,
             UiCachePatch {
                 global_options: Some(GlobalOptions {
-                    log_max_chars: "50000".to_string(),
+                    log_max_chars: "20000".to_string(),
                     ..GlobalOptions::default()
                 }),
                 project_logs: Some(logs),
@@ -111,37 +87,6 @@ mod tests {
             .get("project:a")
             .cloned()
             .unwrap_or_default();
-        assert!(out.chars().count() <= 50_001);
-    }
-
-    #[test]
-    fn patch_sanitizes_diff_text_in_ui_state() {
-        let mut payload = UiCachePayload::default();
-        let mut ui_state = BTreeMap::new();
-        ui_state.insert(
-            "project:a".to_string(),
-            json!({
-                "status_text": "ok",
-                "diff_text": "A".repeat(140_000),
-            }),
-        );
-        apply_ui_cache_patch(
-            &mut payload,
-            UiCachePatch {
-                global_options: Some(GlobalOptions {
-                    diff_max_chars: "50000".to_string(),
-                    ..GlobalOptions::default()
-                }),
-                project_ui_state: Some(ui_state),
-                ..UiCachePatch::default()
-            },
-        );
-        let out = payload
-            .project_ui_state
-            .get("project:a")
-            .and_then(|v| v.get("diff_text"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        assert!(out.chars().count() <= 50_000);
+        assert!(out.chars().count() <= 20_001);
     }
 }

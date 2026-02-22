@@ -6,6 +6,7 @@ Cargo.lock
 .idea/
 .workspace
 autocoding_data/
+.worktrees/
 *.rs.bk
 *.dSYM/
 *.swp

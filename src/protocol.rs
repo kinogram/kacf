@@ -9,7 +9,7 @@ use crate::protocol_repair_prompt;
 use crate::protocol_stream;
 use crate::protocol_system_prompt;
 use crate::protocol_wait::{self, ClarifyWaitOutcome};
-use crate::{deepseek_api, git_utils, runner, workspace};
+use crate::{deepseek_api, git_utils, runner, self_debug, workspace};
 use crate::{protocol_failure, protocol_patch};
 use crate::{protocol_history, protocol_session_state};
 use std::sync::{atomic::AtomicBool, Arc};
@@ -473,6 +473,19 @@ async fn run_session(
                         repair.last_failure_signature = digest.signature.clone();
                         repair.last_failure_severity = severity;
                         repair.last_failure_category = digest.category.to_string();
+                        let debug_packet = self_debug::build_debug_packet(
+                            &cfg.workspace,
+                            digest.category,
+                            &digest.signature,
+                            &digest.key_lines,
+                            &verify.stdout,
+                            &verify.stderr,
+                        );
+                        let strategy = repair_strategy_for(
+                            digest.category,
+                            repair.consecutive_eval_failures,
+                            repair.consecutive_same_failure,
+                        );
                         messages.push(deepseek_api::ChatMessage::assistant(patch_history.clone()));
                         let repair_prompt = protocol_repair_prompt::build_repair_prompt(
                             &cfg.eval_cmd,
@@ -482,6 +495,8 @@ async fn run_session(
                             repair.consecutive_eval_failures,
                             repair.consecutive_same_failure,
                             &diff_for_feedback,
+                            &debug_packet,
+                            &strategy,
                         );
                         messages.push(deepseek_api::ChatMessage::user(format!(
                             "你上一次补丁在主评测通过，但在回归复测失败。请优先修复不稳定/漏测问题。\n{}",
@@ -591,6 +606,19 @@ async fn run_session(
                         repair.consecutive_same_failure,
                         digest.signature
                     )));
+                    let debug_packet = self_debug::build_debug_packet(
+                        &cfg.workspace,
+                        digest.category,
+                        &digest.signature,
+                        &digest.key_lines,
+                        &result.stdout,
+                        &result.stderr,
+                    );
+                    let strategy = repair_strategy_for(
+                        digest.category,
+                        repair.consecutive_eval_failures,
+                        repair.consecutive_same_failure,
+                    );
                     messages.push(deepseek_api::ChatMessage::assistant(patch_history));
                     messages.push(deepseek_api::ChatMessage::user(
                         protocol_repair_prompt::build_repair_prompt(
@@ -601,6 +629,8 @@ async fn run_session(
                             repair.consecutive_eval_failures,
                             repair.consecutive_same_failure,
                             &diff_for_feedback,
+                            &debug_packet,
+                            &strategy,
                         ),
                     ));
                     if should_auto_revert(&repair, &digest, previous_severity, iter) {
@@ -620,6 +650,24 @@ async fn run_session(
                             ));
                         }
                         repair.last_auto_revert_iter = iter;
+                    }
+                    if let Some(abort_reason) = should_abort_after_failure(&repair, &digest, iter) {
+                        let _ =
+                            tx_evt.send(AgentEvent::Log(format!("[Retry-Policy] {abort_reason}")));
+                        protocol_session_state::save_session_state(
+                            &cfg.workspace,
+                            &build_session_state(
+                                cfg,
+                                &messages,
+                                iter,
+                                "terminated_by_retry_policy",
+                            ),
+                        );
+                        let _ = tx_evt.send(AgentEvent::Done {
+                            success: false,
+                            message: format!("自动终止：{abort_reason}"),
+                        });
+                        return Ok(());
                     }
                     // 保存状态后继续下一轮迭代
                     protocol_session_state::save_session_state(
@@ -708,6 +756,18 @@ fn category_changed_worse(previous: &str, current: &str) -> bool {
     protocol_failure::category_changed_worse(previous, current)
 }
 
+fn repair_strategy_for(
+    category: &str,
+    consecutive_eval_failures: u32,
+    consecutive_same_failure: u32,
+) -> protocol_failure::RepairStrategy {
+    protocol_failure::repair_strategy_for(
+        category,
+        consecutive_eval_failures,
+        consecutive_same_failure,
+    )
+}
+
 fn should_auto_revert(
     repair: &RepairHeuristics,
     digest: &FailureDigest,
@@ -730,6 +790,30 @@ fn should_auto_revert(
         && severity_now >= previous_severity.saturating_add(min_delta);
     let signature_gate = protocol_auto_revert::auto_revert_signature_allowed(&digest.signature);
     (repeated_gate || worsened_gate) && severity_gate && signature_gate
+}
+
+fn should_abort_after_failure(
+    repair: &RepairHeuristics,
+    digest: &FailureDigest,
+    iter: u32,
+) -> Option<String> {
+    let severe = failure_severity(digest.category) >= 3;
+    if repair.consecutive_same_failure >= 8 {
+        return Some("同一失败签名连续出现 >= 8 次，避免无效重试".to_string());
+    }
+    if severe && repair.consecutive_same_failure >= 5 {
+        return Some("高严重度错误（编译/崩溃）连续重复 >= 5 次".to_string());
+    }
+    if digest.category == "timeout"
+        && repair.consecutive_eval_failures >= 6
+        && repair.consecutive_same_failure >= 4
+    {
+        return Some("超时错误持续重复，疑似评测脚本或运行流程卡死".to_string());
+    }
+    if iter >= 24 && repair.consecutive_eval_failures >= 10 {
+        return Some("后期迭代仍连续失败过多，已触发保护性终止".to_string());
+    }
+    None
 }
 
 fn validate_patch_payload(summary: &str, diff: &str) -> Result<()> {
@@ -794,13 +878,18 @@ fn build_session_state(
 
 #[cfg(test)]
 mod tests {
-    use super::{category_changed_worse, failure_severity, validate_patch_payload};
+    use super::{
+        category_changed_worse, failure_severity, should_abort_after_failure,
+        validate_patch_payload,
+    };
     use crate::deepseek_api::ChatMessage;
     use crate::protocol_auto_revert::{
         auto_revert_min_severity, auto_revert_on_repeat, auto_revert_repeat_count,
         auto_revert_signature_allowed,
     };
+    use crate::protocol_failure::FailureDigest;
     use crate::protocol_history::{compact_assistant_text, trim_message_history_for_speed};
+    use crate::protocol_models::RepairHeuristics;
 
     #[test]
     fn trim_history_keeps_system_and_recent_messages() {
@@ -872,5 +961,21 @@ mod tests {
         assert_eq!(auto_revert_repeat_count(), 4);
         assert_eq!(auto_revert_min_severity(), 3);
         std::env::remove_var("AUTOCODING_AUTO_REVERT_PROFILE");
+    }
+
+    #[test]
+    fn retry_policy_aborts_on_repeated_severe_failure() {
+        let repair = RepairHeuristics {
+            consecutive_eval_failures: 6,
+            consecutive_same_failure: 5,
+            ..Default::default()
+        };
+        let digest = FailureDigest {
+            category: "compile_error",
+            signature: "error[E0308]: mismatched types".to_string(),
+            key_lines: vec![],
+        };
+        let decision = should_abort_after_failure(&repair, &digest, 12);
+        assert!(decision.is_some());
     }
 }

@@ -125,7 +125,12 @@ impl AuthStore {
         Ok(())
     }
 
-    pub(crate) fn create_email_code(&self, purpose: &str, key: &str, ttl_secs: u64) -> Result<String, String> {
+    pub(crate) fn create_email_code(
+        &self,
+        purpose: &str,
+        key: &str,
+        ttl_secs: u64,
+    ) -> Result<String, String> {
         let p = purpose.trim();
         let k = key.trim();
         if p.is_empty() || k.is_empty() {
@@ -141,9 +146,11 @@ impl AuthStore {
             created_at_unix: now,
         };
         let _g = self.lock.lock().unwrap();
-        let mut db: ChallengesDb = read_json_or_default(&self.paths.challenges_db).unwrap_or_default();
+        let mut db: ChallengesDb =
+            read_json_or_default(&self.paths.challenges_db).unwrap_or_default();
         // Replace any previous active challenge with same purpose+key.
-        db.items.retain(|x| !(x.purpose == entry.purpose && x.key == entry.key));
+        db.items
+            .retain(|x| !(x.purpose == entry.purpose && x.key == entry.key));
         db.items.push(entry);
         // prune expired and cap
         db.items.retain(|x| x.expires_at_unix > now);
@@ -165,7 +172,8 @@ impl AuthStore {
         }
         let now = now_unix();
         let _g = self.lock.lock().unwrap();
-        let mut db: ChallengesDb = read_json_or_default(&self.paths.challenges_db).unwrap_or_default();
+        let mut db: ChallengesDb =
+            read_json_or_default(&self.paths.challenges_db).unwrap_or_default();
         let mut ok = false;
         db.items.retain(|x| {
             if x.expires_at_unix <= now {
@@ -263,7 +271,8 @@ impl AuthStore {
         atomic_write(&self.paths.users_db, json)?;
         // Drop all sessions for the user when banning.
         if banned {
-            let mut sdb: SessionsDb = read_json_or_default(&self.paths.sessions_db).unwrap_or_default();
+            let mut sdb: SessionsDb =
+                read_json_or_default(&self.paths.sessions_db).unwrap_or_default();
             sdb.sessions.retain(|s| s.username.as_deref() != Some(u));
             let sjson = serde_json::to_string_pretty(&sdb)?;
             atomic_write(&self.paths.sessions_db, sjson)?;
@@ -293,7 +302,11 @@ impl AuthStore {
         Ok(())
     }
 
-    pub(crate) fn rename_user(&self, old_username: &str, new_username: &str) -> Result<UserRecord, String> {
+    pub(crate) fn rename_user(
+        &self,
+        old_username: &str,
+        new_username: &str,
+    ) -> Result<UserRecord, String> {
         let old_u = old_username.trim();
         let new_u = new_username.trim();
         if old_u.is_empty() || new_u.is_empty() {
@@ -334,7 +347,8 @@ impl AuthStore {
 
         // Drop all sessions for old username (force re-login).
         let mut sdb: SessionsDb = read_json_or_default(&self.paths.sessions_db).unwrap_or_default();
-        sdb.sessions.retain(|s| s.username.as_deref() != Some(old_u));
+        sdb.sessions
+            .retain(|s| s.username.as_deref() != Some(old_u));
         let sjson = serde_json::to_string_pretty(&sdb).map_err(|e| e.to_string())?;
         atomic_write(&self.paths.sessions_db, sjson).map_err(|e| e.to_string())?;
 
@@ -397,7 +411,10 @@ impl AuthStore {
         self.paths.per_user_root_dir.join(username)
     }
 
-    pub(crate) fn create_session_for_user(&self, user: &UserRecord) -> Result<SessionRecord, String> {
+    pub(crate) fn create_session_for_user(
+        &self,
+        user: &UserRecord,
+    ) -> Result<SessionRecord, String> {
         let _g = self.lock.lock().unwrap();
         let mut db: SessionsDb = read_json_or_default(&self.paths.sessions_db).unwrap_or_default();
         let now = now_unix();
@@ -517,13 +534,15 @@ fn append_line(path: &Path, line: &str) -> std::io::Result<()> {
 
 fn read_json_or_default<T: for<'de> Deserialize<'de> + Default>(path: &Path) -> Option<T> {
     let content = fs::read_to_string(path).ok()?;
-    serde_json::from_str::<T>(&content).ok().or_else(|| Some(T::default()))
+    serde_json::from_str::<T>(&content)
+        .ok()
+        .or_else(|| Some(T::default()))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{AuthStore, AuthSystemPaths};
     use super::nickname_reserved;
+    use super::{AuthStore, AuthSystemPaths};
     use crate::auth::types::{AccountRole, LoginOption};
 
     #[test]
