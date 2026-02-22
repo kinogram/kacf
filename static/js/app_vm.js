@@ -29,6 +29,7 @@ let vmRefreshTimer = null;
 let vmLogRefreshTimer = null;
 let vmQueueRefreshTimer = null;
 let vmExecProfiles = [];
+let vmPolicy = null;
 
 function el(id) {
     return document.getElementById(id);
@@ -339,6 +340,30 @@ function renderVmList(vms) {
     node.textContent = lines.join('\n');
 }
 
+async function refreshVmPolicy() {
+    try {
+        vmPolicy = await vmApi('/vm/policy', 'GET');
+    } catch (_e) {
+        vmPolicy = null;
+    }
+}
+
+function vmRoleFromUi() {
+    if (vmGuestMode) return 'user';
+    return vmReadonly ? 'user' : 'admin';
+}
+
+function renderVmQuotaSummary(vms) {
+    const role = vmRoleFromUi();
+    const limits = vmPolicy && vmPolicy[role] ? vmPolicy[role] : null;
+    const items = Array.isArray(vms) ? vms : [];
+    const vmCount = items.length;
+    const diskTotal = items.reduce((acc, vm) => acc + Number(vm?.disk_gb || 0), 0);
+    const diskCap = role === 'admin' ? 64 : 12;
+    if (!limits) return '';
+    return `quota(role=${role}): vm ${vmCount}/${limits.vm_instance_max}, run ${limits.vm_running_max}, exec ${limits.vm_exec_running_max}, queue ${limits.vm_queue_max_items}, disk ${diskTotal}GB/${diskCap}GB`;
+}
+
 async function vmApi(path, method, payload) {
     const resp = await fetch(path, {
         method,
@@ -355,13 +380,19 @@ async function vmApi(path, method, payload) {
 async function refreshVmStatus() {
     try {
         const data = await vmApi('/vm/status', 'GET');
+        await refreshVmPolicy();
         vmReadonly = !!data.readonly;
         setVmReadOnlyByContext();
         renderCapabilities(data.capabilities || []);
         renderVmTargetList(data.vms || []);
         renderVmList(data.vms || []);
         renderVmExecProfiles();
-        setVmStatusLine(txt('status_vm_synced', 'VM status synchronized'));
+        const quotaLine = renderVmQuotaSummary(data.vms || []);
+        setVmStatusLine(
+            quotaLine
+                ? `${txt('status_vm_synced', 'VM status synchronized')} | ${quotaLine}`
+                : txt('status_vm_synced', 'VM status synchronized')
+        );
         await refreshVmSnapshots();
         await refreshVmLogs();
     } catch (e) {
