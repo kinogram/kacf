@@ -582,7 +582,7 @@ function setHiddenById(id, hidden) {
 
 function applyNoviceUi(me, isGuest) {
     setHiddenById('advanced_git_section', true);
-    setHiddenById('advanced_unattended_section', true);
+    setHiddenById('advanced_unattended_section', false);
     setHiddenById('label_project_name', true);
     setHiddenById('project_name', true);
     setHiddenById('project_save_btn', true);
