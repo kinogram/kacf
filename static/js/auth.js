@@ -78,6 +78,26 @@
         return el ? String(el.value || '').trim() : '';
     }
 
+    function queryParam(name) {
+        try {
+            const u = new URL(window.location.href);
+            return String(u.searchParams.get(name) || '').trim();
+        } catch (_e) {
+            return '';
+        }
+    }
+
+    async function redirectIfAlreadyLoggedIn() {
+        // Keep /login?switch=1 for account switching; otherwise skip login UI if already authenticated.
+        if (queryParam('switch') === '1') return;
+        const resp = await fetch('/auth/me', { cache: 'no-store' });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (data && data.logged_in) {
+            location.href = '/';
+        }
+    }
+
     function setTab(active) {
         const loginTab = document.getElementById('tab_login');
         const regTab = document.getElementById('tab_register');
@@ -238,6 +258,7 @@
 
     (async function main() {
         try {
+            await redirectIfAlreadyLoggedIn();
             await initCopyAndUi();
             await checkBootstrap();
             wireEvents();
