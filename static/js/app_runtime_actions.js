@@ -577,6 +577,8 @@ function applyNoviceUi(me, isGuest) {
     const isAdmin = !!(me && me.is_admin);
     setHiddenById('advanced_git_section', true);
     setHiddenById('advanced_unattended_section', true);
+    setHiddenById('label_project_name', true);
+    setHiddenById('project_name', true);
     setHiddenById('project_save_btn', true);
     setHiddenById('project_load_btn', true);
     setHiddenById('project_delete_btn', true);
