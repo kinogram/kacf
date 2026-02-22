@@ -581,7 +581,6 @@ function setHiddenById(id, hidden) {
 }
 
 function applyNoviceUi(me, isGuest) {
-    const isAdmin = !!(me && me.is_admin);
     setHiddenById('advanced_git_section', true);
     setHiddenById('advanced_unattended_section', true);
     setHiddenById('label_project_name', true);
@@ -590,11 +589,11 @@ function applyNoviceUi(me, isGuest) {
     setHiddenById('project_load_btn', true);
     setHiddenById('project_delete_btn', true);
     setHiddenById('open_global_config_btn', false);
-    setHiddenById('diagnostics', !isAdmin);
-    setHiddenById('metrics_text', !isAdmin);
-    setHiddenById('digest_dist_text', !isAdmin);
-    setHiddenById('root_top_text', !isAdmin);
-    setHiddenById('vm_card', isGuest || !isAdmin);
+    setHiddenById('diagnostics', false);
+    setHiddenById('metrics_text', false);
+    setHiddenById('digest_dist_text', false);
+    setHiddenById('root_top_text', false);
+    setHiddenById('vm_card', isGuest);
 }
 
 function autoOpenLatestProject() {

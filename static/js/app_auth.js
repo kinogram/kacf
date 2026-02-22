@@ -63,7 +63,6 @@ function renderAccountMenu() {
     const menuTitle = document.getElementById('account_menu_title');
     const menuBody = document.getElementById('account_menu_body');
     const manageBtn = document.getElementById('account_manage_btn');
-    const adminBtn = document.getElementById('account_admin_panel_btn');
     const switchBtn = document.getElementById('account_switch_btn');
     const logoutBtn = document.getElementById('account_logout_btn');
     const exitGuestBtn = document.getElementById('account_exit_guest_btn');
@@ -92,10 +91,8 @@ function renderAccountMenu() {
     if (thanksBtn) thanksBtn.textContent = txt('account_menu_thanks', 'Donation thanks list');
     if (exitGuestBtn) exitGuestBtn.textContent = txt('account_menu_exit_guest', 'Exit guest mode');
 
-    if (adminBtn) {
-        adminBtn.style.display = isAdmin ? '' : 'none';
-        adminBtn.textContent = txt('account_menu_admin_panel', 'Open Administrator panel');
-    }
+    const adminBtn = document.getElementById('account_admin_panel_btn');
+    if (adminBtn) adminBtn.style.display = 'none';
 
     if (exitGuestBtn) exitGuestBtn.style.display = isGuest ? '' : 'none';
     if (manageBtn) manageBtn.style.display = isGuest ? 'none' : '';
@@ -104,7 +101,6 @@ function renderAccountMenu() {
 
     try {
         if (manageBtn) setButtonWithIcon(manageBtn, 'user', manageBtn.textContent);
-        if (adminBtn && isAdmin) setButtonWithIcon(adminBtn, 'shield', adminBtn.textContent);
         if (switchBtn) setButtonWithIcon(switchBtn, 'chevron-right', switchBtn.textContent);
         if (logoutBtn && !isGuest) setButtonWithIcon(logoutBtn, 'x', logoutBtn.textContent);
         if (exitGuestBtn && isGuest) setButtonWithIcon(exitGuestBtn, 'x', exitGuestBtn.textContent);
@@ -115,7 +111,6 @@ function renderAccountMenu() {
     } catch (_e) {}
 
     if (manageBtn) manageBtn.onclick = () => window.open('/account', '_blank', 'noopener');
-    if (adminBtn) adminBtn.onclick = () => window.open('/admin', '_blank', 'noopener');
     if (topAdminBtn) topAdminBtn.onclick = () => window.open('/admin', '_blank', 'noopener');
     if (switchBtn) switchBtn.onclick = () => { location.href = '/login?switch=1'; };
     if (logoutBtn) logoutBtn.onclick = async () => {
