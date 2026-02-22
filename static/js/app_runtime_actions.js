@@ -6,14 +6,12 @@ function assertRuntimeActionDependencies() {
             'txt',
             'fmt',
             'isReadOnlyView',
-            'goToRunningProjectView',
             'currentLogBucket',
             'viewLogBucket',
             'setRunActionButtons',
             'setRunningProjectIndicator',
             'setProjectControlsDisabled',
             'applyReadOnlyMode',
-            'updateGoRunningProjectButton',
             'autoFillProjectNameFromGoal',
             'applySharedConfigToInputs',
             'initLanguagePack',
@@ -104,14 +102,12 @@ const {
     txt,
     fmt,
     isReadOnlyView,
-    goToRunningProjectView,
     currentLogBucket,
     viewLogBucket,
     setRunActionButtons,
     setRunningProjectIndicator,
     setProjectControlsDisabled,
     applyReadOnlyMode,
-    updateGoRunningProjectButton,
     autoFillProjectNameFromGoal,
     applySharedConfigToInputs,
     initLanguagePack,
@@ -156,7 +152,6 @@ const {
 } = window.KACF.runtimeState;
 const {
     ensureWorkspaceForCurrentProject,
-    saveCurrentProject,
     refreshProjectsFromServer,
     renderProjectSelector,
     loadSelectedProject,
@@ -698,7 +693,6 @@ async function init() {
     setRunningProjectIndicator(txt('running_project_none', ''));
     setProjectControlsDisabled(false);
     applyReadOnlyMode();
-    updateGoRunningProjectButton();
     setRunActionButtons(false);
     document.getElementById('revert_btn').disabled = true;
     setRunState('idle', txt('run_idle', ''));

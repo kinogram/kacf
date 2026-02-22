@@ -90,8 +90,6 @@ const BACKEND_COMM_BUTTON_IDS = [
     'clarify_submit_btn',
     'view_diff_btn',
     'project_new_btn',
-    'project_save_btn',
-    'project_load_btn',
     'project_delete_btn',
     'open_global_config_btn',
     'save_global_config_btn',
@@ -99,8 +97,6 @@ const BACKEND_COMM_BUTTON_IDS = [
 const PROJECT_CONTROL_IDS = [
     'project_name',
     'project_new_btn',
-    'project_save_btn',
-    'project_load_btn',
     'project_delete_btn',
 ];
 const CONFIG_EDIT_IDS = [
@@ -912,43 +908,6 @@ function applyReadOnlyMode() {
         );
         offlineBanner.style.display = backendOffline ? 'block' : 'none';
     }
-    updateGoRunningProjectButton();
-}
-
-function updateGoRunningProjectButton() {
-    const btn = document.getElementById('go_running_project_btn');
-    if (!btn) return;
-    if (!runSessionActive || !activeRunLogBucket) {
-        btn.disabled = true;
-        btn.title = txt('status_no_running_project', '');
-        return;
-    }
-    if (!activeRunLogBucket.startsWith('project:')) {
-        btn.disabled = true;
-        btn.title = txt('status_running_not_saved_project', '');
-        return;
-    }
-    const id = activeRunLogBucket.slice('project:'.length);
-    const exists = loadProjects().some(x => x.id === id);
-    btn.disabled = !exists;
-    btn.title = exists ? txt('go_running_title_ok', '') : txt('go_running_title_missing', '');
-}
-
-function goToRunningProjectView() {
-    if (!runSessionActive || !activeRunLogBucket) {
-        setStatus(txt('status_no_running_project', ''), 'status-danger');
-        return;
-    }
-    if (!activeRunLogBucket.startsWith('project:')) {
-        setStatus(txt('status_running_not_saved_project', ''), 'status-danger');
-        return;
-    }
-    const id = activeRunLogBucket.slice('project:'.length);
-    const sel = document.getElementById('project_selector');
-    if (!sel) return;
-    sel.value = id;
-    syncProjectNameFromSelection();
-    setStatus(fmt('status_go_running_ok', '', { name: activeRunProjectLabel || id }), 'status-warn');
 }
 
 function currentProjectLabel() {
@@ -1035,8 +994,6 @@ window.KACF.state = {
     setOfflineInputLock,
     isReadOnlyView,
     applyReadOnlyMode,
-    updateGoRunningProjectButton,
-    goToRunningProjectView,
     currentProjectLabel,
     adHocLogBucketFromForm,
     viewLogBucket,
