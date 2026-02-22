@@ -1,18 +1,14 @@
 use std::collections::HashMap;
-use std::num::NonZeroU32;
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
-use governor::clock::DefaultClock;
-use governor::state::keyed::DashMapStateStore;
-use governor::{Quota, RateLimiter};
 use serde::Deserialize;
 use serde::Serialize;
 
 use crate::auth::session::{build_clear_session_cookie, build_session_cookie, read_session_cookie};
 use crate::auth::store::{AuthStore, EmailCodeConsumeResult, EmailCodeIssueResult};
-use crate::auth::types::{AccountRole, AuthMeResponse, LoginOption};
+use crate::auth::types::{AccountRole, AdminSettings, AuthMeResponse, LoginOption};
 
 #[derive(Deserialize)]
 pub(crate) struct BootstrapAdminPayload {
@@ -56,88 +52,67 @@ fn resolve_store(_req: &HttpRequest) -> AuthStore {
     store
 }
 
-const EMAIL_CODE_TTL_SECS: u64 = 10 * 60;
-const EMAIL_CODE_RESEND_COOLDOWN_SECS: u64 = 60;
-
-type KeyLimiter = RateLimiter<String, DashMapStateStore<String>, DefaultClock>;
-
-fn parse_u32_env(name: &str, default: u32, min: u32, max: u32) -> u32 {
-    std::env::var(name)
-        .ok()
-        .and_then(|v| v.trim().parse::<u32>().ok())
-        .unwrap_or(default)
-        .clamp(min, max)
+#[derive(Default)]
+struct SimpleLimiter {
+    hits: HashMap<String, Vec<u64>>,
 }
 
-fn issue_limiter() -> &'static KeyLimiter {
-    static LIM: OnceLock<KeyLimiter> = OnceLock::new();
-    LIM.get_or_init(|| {
-        let per_min = parse_u32_env("AUTOCODING_EMAIL_ISSUE_PER_MIN", 3, 1, 60);
-        let quota = Quota::per_minute(
-            NonZeroU32::new(per_min).expect("AUTOCODING_EMAIL_ISSUE_PER_MIN must be > 0"),
-        );
-        RateLimiter::keyed(quota)
-    })
+fn now_unix() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
-fn verify_limiter() -> &'static KeyLimiter {
-    static LIM: OnceLock<KeyLimiter> = OnceLock::new();
-    LIM.get_or_init(|| {
-        let per_min = parse_u32_env("AUTOCODING_EMAIL_VERIFY_PER_MIN", 12, 1, 240);
-        let quota = Quota::per_minute(
-            NonZeroU32::new(per_min).expect("AUTOCODING_EMAIL_VERIFY_PER_MIN must be > 0"),
-        );
-        RateLimiter::keyed(quota)
-    })
+fn email_limiter() -> &'static Mutex<SimpleLimiter> {
+    static LIM: OnceLock<Mutex<SimpleLimiter>> = OnceLock::new();
+    LIM.get_or_init(|| Mutex::new(SimpleLimiter::default()))
 }
 
-fn check_issue_quota(scope: &str, key: &str) -> Result<(), HttpResponse> {
+fn check_window_limit(scope: &str, key: &str, max_per_min: u32) -> Result<(), HttpResponse> {
+    let allow = max_per_min.clamp(1, 240) as usize;
     let composed = format!("{scope}:{key}");
-    if issue_limiter().check_key(&composed).is_err() {
-        return Err(HttpResponse::TooManyRequests().body("too many code requests, try later"));
+    let now = now_unix();
+    let mut guard = email_limiter().lock().unwrap();
+    let entry = guard.hits.entry(composed).or_default();
+    entry.retain(|t| now.saturating_sub(*t) < 60);
+    if entry.len() >= allow {
+        return Err(HttpResponse::TooManyRequests().body("too many attempts, try later"));
     }
+    entry.push(now);
     Ok(())
-}
-
-fn check_verify_quota(scope: &str, key: &str) -> Result<(), HttpResponse> {
-    let composed = format!("{scope}:{key}");
-    if verify_limiter().check_key(&composed).is_err() {
-        return Err(HttpResponse::TooManyRequests().body("too many verify attempts, try later"));
-    }
-    Ok(())
-}
-
-fn should_expose_dev_code() -> bool {
-    match std::env::var("AUTOCODING_AUTH_DEV_CODE") {
-        Ok(v) => {
-            let t = v.trim().to_ascii_lowercase();
-            t == "1" || t == "true" || t == "yes" || t == "on"
-        }
-        Err(_) => false,
-    }
 }
 
 fn issue_email_code(
     store: &AuthStore,
+    settings: &AdminSettings,
     purpose: &str,
     key: &str,
 ) -> Result<(String, EmailCodeIssueResult), String> {
     store.create_email_code_with_policy(
         purpose,
         key,
-        EMAIL_CODE_TTL_SECS,
-        EMAIL_CODE_RESEND_COOLDOWN_SECS,
+        settings.email_code_ttl_secs.clamp(30, 1800),
+        settings.email_code_resend_cooldown_secs.clamp(10, 3600),
     )
 }
 
 async fn send_email_code_or_fail(
+    settings: &AdminSettings,
     to_email: &str,
     scenario: &str,
     code: &str,
 ) -> Result<(), HttpResponse> {
-    crate::auth::email::send_verification_code(to_email, scenario, code, EMAIL_CODE_TTL_SECS)
-        .await
-        .map_err(|e| HttpResponse::InternalServerError().body(e))
+    crate::auth::email::send_verification_code(
+        settings,
+        to_email,
+        scenario,
+        code,
+        settings.email_code_ttl_secs.clamp(30, 1800),
+    )
+    .await
+    .map_err(|e| HttpResponse::InternalServerError().body(e))
 }
 
 fn email_allowed(email: &str) -> bool {
@@ -278,15 +253,16 @@ pub(crate) async fn login(req: HttpRequest, body: web::Json<LoginPayload>) -> im
                 .json(serde_json::json!({"ok": true}))
         }
         LoginOption::EmailOnly => {
-            if let Err(resp) = check_issue_quota("login_issue", &user.username) {
+            if let Err(resp) = check_window_limit("login_issue", &user.username, s.email_issue_per_min)
+            {
                 return resp;
             }
-            let (code, issue) = match issue_email_code(&store, "login", &user.username) {
+            let (code, issue) = match issue_email_code(&store, &s, "login", &user.username) {
                 Ok(v) => v,
                 Err(e) => return HttpResponse::InternalServerError().body(e),
             };
             if let EmailCodeIssueResult::Issued = issue {
-                if let Err(resp) = send_email_code_or_fail(&user.email, "login", &code).await {
+                if let Err(resp) = send_email_code_or_fail(&s, &user.email, "login", &code).await {
                     return resp;
                 }
             }
@@ -308,7 +284,7 @@ pub(crate) async fn login(req: HttpRequest, body: web::Json<LoginPayload>) -> im
             if let EmailCodeIssueResult::Throttled { retry_after_secs } = issue {
                 payload["retry_after_secs"] = serde_json::json!(retry_after_secs);
             }
-            if should_expose_dev_code() {
+            if s.email_code_dev_mode {
                 payload["dev_code"] = serde_json::json!(code);
             }
             HttpResponse::Conflict().json(serde_json::json!({
@@ -324,15 +300,16 @@ pub(crate) async fn login(req: HttpRequest, body: web::Json<LoginPayload>) -> im
             if !ok {
                 return HttpResponse::Unauthorized().body("invalid credentials");
             }
-            if let Err(resp) = check_issue_quota("login_issue", &user.username) {
+            if let Err(resp) = check_window_limit("login_issue", &user.username, s.email_issue_per_min)
+            {
                 return resp;
             }
-            let (code, issue) = match issue_email_code(&store, "login", &user.username) {
+            let (code, issue) = match issue_email_code(&store, &s, "login", &user.username) {
                 Ok(v) => v,
                 Err(e) => return HttpResponse::InternalServerError().body(e),
             };
             if let EmailCodeIssueResult::Issued = issue {
-                if let Err(resp) = send_email_code_or_fail(&user.email, "login", &code).await {
+                if let Err(resp) = send_email_code_or_fail(&s, &user.email, "login", &code).await {
                     return resp;
                 }
             }
@@ -354,7 +331,7 @@ pub(crate) async fn login(req: HttpRequest, body: web::Json<LoginPayload>) -> im
             if let EmailCodeIssueResult::Throttled { retry_after_secs } = issue {
                 payload["retry_after_secs"] = serde_json::json!(retry_after_secs);
             }
-            if should_expose_dev_code() {
+            if s.email_code_dev_mode {
                 payload["dev_code"] = serde_json::json!(code);
             }
             HttpResponse::Conflict().json(serde_json::json!({
@@ -399,7 +376,7 @@ pub(crate) async fn verify_email_code(
     if code_raw.len() != 6 || !code_raw.chars().all(|c| c.is_ascii_digit()) {
         return HttpResponse::BadRequest().body("code must be 6 digits");
     }
-    if let Err(resp) = check_verify_quota("login_verify", &user.username) {
+    if let Err(resp) = check_window_limit("login_verify", &user.username, s.email_verify_per_min) {
         return resp;
     }
     match store.consume_email_code_detailed("login", &user.username, code_raw) {
@@ -535,7 +512,18 @@ pub(crate) async fn admin_put_settings(
         Ok(v) => v,
         Err(resp) => return resp,
     };
-    let next = body.into_inner();
+    let mut next = body.into_inner();
+    next.email_code_ttl_secs = next.email_code_ttl_secs.clamp(30, 1800);
+    next.email_code_resend_cooldown_secs = next.email_code_resend_cooldown_secs.clamp(10, 3600);
+    next.email_issue_per_min = next.email_issue_per_min.clamp(1, 240);
+    next.email_verify_per_min = next.email_verify_per_min.clamp(1, 240);
+    next.smtp_port = next.smtp_port.clamp(1, 65535);
+    next.smtp_host = next.smtp_host.trim().to_string();
+    next.smtp_from = next.smtp_from.trim().to_string();
+    next.smtp_username = next.smtp_username.trim().to_string();
+    if next.smtp_from.is_empty() {
+        next.smtp_from = "noreply@localhost".to_string();
+    }
     if let Err(e) = store.write_admin_settings(&next) {
         return HttpResponse::InternalServerError().body(format!("save settings failed: {}", e));
     }
@@ -828,6 +816,7 @@ pub(crate) async fn account_change_password(
     body: web::Json<AccountChangePasswordPayload>,
 ) -> impl Responder {
     let store = resolve_store(&req);
+    let settings = store.read_admin_settings();
     let sid = read_session_cookie(&req).unwrap_or_default();
     let Some(sess) = store.resolve_session(&sid) else {
         return HttpResponse::Unauthorized().body("not logged in");
@@ -854,6 +843,7 @@ pub(crate) async fn account_change_password(
     if let Err(e) = verify_identity(
         &user,
         &store,
+        &settings,
         Some(&old_pw),
         p.current_email_code.as_deref(),
     ) {
@@ -917,6 +907,7 @@ fn username_allowed(username: &str) -> bool {
 fn verify_identity(
     user: &crate::auth::UserRecord,
     store: &AuthStore,
+    settings: &AdminSettings,
     old_password: Option<&str>,
     current_email_code: Option<&str>,
 ) -> Result<(), String> {
@@ -931,9 +922,12 @@ fn verify_identity(
         if code.len() != 6 || !code.chars().all(|c| c.is_ascii_digit()) {
             return Err("current email code must be 6 digits".to_string());
         }
-        if verify_limiter()
-            .check_key(&format!("verify_current_email:{}", user.username))
-            .is_err()
+        if check_window_limit(
+            "verify_current_email",
+            &user.username,
+            settings.email_verify_per_min,
+        )
+        .is_err()
         {
             return Err("too many verify attempts, try later".to_string());
         }
@@ -955,6 +949,7 @@ fn verify_identity(
 
 pub(crate) async fn account_request_current_email_code(req: HttpRequest) -> impl Responder {
     let store = resolve_store(&req);
+    let settings = store.read_admin_settings();
     let sid = read_session_cookie(&req).unwrap_or_default();
     let Some(sess) = store.resolve_session(&sid) else {
         return HttpResponse::Unauthorized().body("not logged in");
@@ -972,16 +967,21 @@ pub(crate) async fn account_request_current_email_code(req: HttpRequest) -> impl
     if user.banned {
         return HttpResponse::Forbidden().body("account banned");
     }
-    if let Err(resp) = check_issue_quota("verify_current_email_issue", &user.username) {
+    if let Err(resp) = check_window_limit(
+        "verify_current_email_issue",
+        &user.username,
+        settings.email_issue_per_min,
+    ) {
         return resp;
     }
-    let (code, issue) = match issue_email_code(&store, "verify_current_email", &user.username) {
+    let (code, issue) =
+        match issue_email_code(&store, &settings, "verify_current_email", &user.username) {
         Ok(v) => v,
         Err(e) => return HttpResponse::InternalServerError().body(e),
     };
     if let EmailCodeIssueResult::Issued = issue {
         if let Err(resp) =
-            send_email_code_or_fail(&user.email, "verify_current_email", &code).await
+            send_email_code_or_fail(&settings, &user.email, "verify_current_email", &code).await
         {
             return resp;
         }
@@ -1001,7 +1001,7 @@ pub(crate) async fn account_request_current_email_code(req: HttpRequest) -> impl
     if let EmailCodeIssueResult::Throttled { retry_after_secs } = issue {
         payload["retry_after_secs"] = serde_json::json!(retry_after_secs);
     }
-    if should_expose_dev_code() {
+    if settings.email_code_dev_mode {
         payload["dev_code"] = serde_json::json!(code);
     }
     HttpResponse::Ok().json(payload)
@@ -1019,6 +1019,7 @@ pub(crate) async fn account_change_username(
     body: web::Json<AccountUsernamePayload>,
 ) -> impl Responder {
     let store = resolve_store(&req);
+    let settings = store.read_admin_settings();
     let sid = read_session_cookie(&req).unwrap_or_default();
     let Some(sess) = store.resolve_session(&sid) else {
         return HttpResponse::Unauthorized().body("not logged in");
@@ -1044,6 +1045,7 @@ pub(crate) async fn account_change_username(
     if let Err(e) = verify_identity(
         &user,
         &store,
+        &settings,
         p.old_password.as_deref(),
         p.current_email_code.as_deref(),
     ) {
@@ -1077,6 +1079,7 @@ pub(crate) async fn account_request_new_email_code(
     body: web::Json<AccountRequestNewEmailCodePayload>,
 ) -> impl Responder {
     let store = resolve_store(&req);
+    let settings = store.read_admin_settings();
     let sid = read_session_cookie(&req).unwrap_or_default();
     let Some(sess) = store.resolve_session(&sid) else {
         return HttpResponse::Unauthorized().body("not logged in");
@@ -1098,16 +1101,22 @@ pub(crate) async fn account_request_new_email_code(
     if !email_allowed(&new_email) {
         return HttpResponse::BadRequest().body("email not allowed");
     }
-    if let Err(resp) = check_issue_quota("verify_new_email_issue", &user.username) {
+    if let Err(resp) = check_window_limit(
+        "verify_new_email_issue",
+        &user.username,
+        settings.email_issue_per_min,
+    ) {
         return resp;
     }
     let key = format!("{}:{}", user.username, new_email);
-    let (code, issue) = match issue_email_code(&store, "verify_new_email", &key) {
+    let (code, issue) = match issue_email_code(&store, &settings, "verify_new_email", &key) {
         Ok(v) => v,
         Err(e) => return HttpResponse::InternalServerError().body(e),
     };
     if let EmailCodeIssueResult::Issued = issue {
-        if let Err(resp) = send_email_code_or_fail(&new_email, "verify_new_email", &code).await {
+        if let Err(resp) =
+            send_email_code_or_fail(&settings, &new_email, "verify_new_email", &code).await
+        {
             return resp;
         }
     }
@@ -1126,7 +1135,7 @@ pub(crate) async fn account_request_new_email_code(
     if let EmailCodeIssueResult::Throttled { retry_after_secs } = issue {
         payload["retry_after_secs"] = serde_json::json!(retry_after_secs);
     }
-    if should_expose_dev_code() {
+    if settings.email_code_dev_mode {
         payload["dev_code"] = serde_json::json!(code);
     }
     HttpResponse::Ok().json(payload)
@@ -1145,6 +1154,7 @@ pub(crate) async fn account_confirm_email_change(
     body: web::Json<AccountConfirmEmailChangePayload>,
 ) -> impl Responder {
     let store = resolve_store(&req);
+    let settings = store.read_admin_settings();
     let sid = read_session_cookie(&req).unwrap_or_default();
     let Some(sess) = store.resolve_session(&sid) else {
         return HttpResponse::Unauthorized().body("not logged in");
@@ -1166,6 +1176,7 @@ pub(crate) async fn account_confirm_email_change(
     if let Err(e) = verify_identity(
         &user,
         &store,
+        &settings,
         p.old_password.as_deref(),
         p.current_email_code.as_deref(),
     ) {
@@ -1180,7 +1191,11 @@ pub(crate) async fn account_confirm_email_change(
     if new_code.len() != 6 || !new_code.chars().all(|c| c.is_ascii_digit()) {
         return HttpResponse::BadRequest().body("new email code must be 6 digits");
     }
-    if let Err(resp) = check_verify_quota("verify_new_email", &user.username) {
+    if let Err(resp) = check_window_limit(
+        "verify_new_email",
+        &user.username,
+        settings.email_verify_per_min,
+    ) {
         return resp;
     }
     match store.consume_email_code_detailed("verify_new_email", &key, new_code) {
@@ -1225,6 +1240,7 @@ pub(crate) async fn account_change_login_option(
     body: web::Json<AccountChangeLoginOptionPayload>,
 ) -> impl Responder {
     let store = resolve_store(&req);
+    let settings = store.read_admin_settings();
     let sid = read_session_cookie(&req).unwrap_or_default();
     let Some(sess) = store.resolve_session(&sid) else {
         return HttpResponse::Unauthorized().body("not logged in");
@@ -1246,6 +1262,7 @@ pub(crate) async fn account_change_login_option(
     if let Err(e) = verify_identity(
         &user,
         &store,
+        &settings,
         p.old_password.as_deref(),
         p.current_email_code.as_deref(),
     ) {

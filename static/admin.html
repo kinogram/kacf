@@ -44,6 +44,66 @@
             <div class="hint" id="admin_settings_hint"></div>
 
             <hr style="border:none;border-top:1px solid var(--line);margin:14px 0;">
+            <h3 class="title" id="admin_email_settings_title">Email Verification</h3>
+            <div class="row three">
+                <div>
+                    <label><input type="checkbox" id="admin_toggle_email_dev_mode"> <span id="label_admin_toggle_email_dev_mode">Show dev code in response</span></label>
+                </div>
+                <div>
+                    <label for="admin_email_ttl_secs" id="label_admin_email_ttl_secs">Code TTL (secs)</label>
+                    <input id="admin_email_ttl_secs" type="number" min="30" max="1800" step="1">
+                </div>
+                <div>
+                    <label for="admin_email_cooldown_secs" id="label_admin_email_cooldown_secs">Resend cooldown (secs)</label>
+                    <input id="admin_email_cooldown_secs" type="number" min="10" max="3600" step="1">
+                </div>
+            </div>
+            <div class="row two">
+                <div>
+                    <label for="admin_email_issue_per_min" id="label_admin_email_issue_per_min">Issue limit per minute</label>
+                    <input id="admin_email_issue_per_min" type="number" min="1" max="240" step="1">
+                </div>
+                <div>
+                    <label for="admin_email_verify_per_min" id="label_admin_email_verify_per_min">Verify limit per minute</label>
+                    <input id="admin_email_verify_per_min" type="number" min="1" max="240" step="1">
+                </div>
+            </div>
+
+            <h3 class="title" id="admin_smtp_title" style="margin-top:10px;">SMTP</h3>
+            <div class="row three">
+                <div>
+                    <label><input type="checkbox" id="admin_toggle_smtp_enabled"> <span id="label_admin_toggle_smtp_enabled">Enable SMTP send</span></label>
+                </div>
+                <div>
+                    <label><input type="checkbox" id="admin_toggle_smtp_starttls"> <span id="label_admin_toggle_smtp_starttls">Use STARTTLS</span></label>
+                </div>
+                <div>
+                    <label for="admin_smtp_port" id="label_admin_smtp_port">SMTP port</label>
+                    <input id="admin_smtp_port" type="number" min="1" max="65535" step="1">
+                </div>
+            </div>
+            <div class="row two">
+                <div>
+                    <label for="admin_smtp_host" id="label_admin_smtp_host">SMTP host</label>
+                    <input id="admin_smtp_host" type="text" placeholder="smtp.example.com">
+                </div>
+                <div>
+                    <label for="admin_smtp_from" id="label_admin_smtp_from">From email</label>
+                    <input id="admin_smtp_from" type="email" placeholder="noreply@example.com">
+                </div>
+            </div>
+            <div class="row two">
+                <div>
+                    <label for="admin_smtp_username" id="label_admin_smtp_username">SMTP username</label>
+                    <input id="admin_smtp_username" type="text">
+                </div>
+                <div>
+                    <label for="admin_smtp_password" id="label_admin_smtp_password">SMTP password</label>
+                    <input id="admin_smtp_password" type="password">
+                </div>
+            </div>
+
+            <hr style="border:none;border-top:1px solid var(--line);margin:14px 0;">
 
             <h2 class="title" id="admin_users_title"></h2>
             <div class="row three">

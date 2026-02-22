@@ -60,6 +60,30 @@ pub(crate) struct AdminSettings {
     pub(crate) login_enabled: bool,
     #[serde(default = "default_true")]
     pub(crate) non_admin_login_enabled: bool,
+    #[serde(default)]
+    pub(crate) email_code_dev_mode: bool,
+    #[serde(default = "default_email_code_ttl_secs")]
+    pub(crate) email_code_ttl_secs: u64,
+    #[serde(default = "default_email_code_resend_cooldown_secs")]
+    pub(crate) email_code_resend_cooldown_secs: u64,
+    #[serde(default = "default_email_issue_per_min")]
+    pub(crate) email_issue_per_min: u32,
+    #[serde(default = "default_email_verify_per_min")]
+    pub(crate) email_verify_per_min: u32,
+    #[serde(default)]
+    pub(crate) smtp_enabled: bool,
+    #[serde(default)]
+    pub(crate) smtp_host: String,
+    #[serde(default = "default_smtp_port")]
+    pub(crate) smtp_port: u16,
+    #[serde(default)]
+    pub(crate) smtp_username: String,
+    #[serde(default)]
+    pub(crate) smtp_password: String,
+    #[serde(default = "default_smtp_from")]
+    pub(crate) smtp_from: String,
+    #[serde(default = "default_true")]
+    pub(crate) smtp_starttls: bool,
 }
 
 impl Default for AdminSettings {
@@ -69,12 +93,48 @@ impl Default for AdminSettings {
             guest_enabled: true,
             login_enabled: true,
             non_admin_login_enabled: true,
+            email_code_dev_mode: false,
+            email_code_ttl_secs: default_email_code_ttl_secs(),
+            email_code_resend_cooldown_secs: default_email_code_resend_cooldown_secs(),
+            email_issue_per_min: default_email_issue_per_min(),
+            email_verify_per_min: default_email_verify_per_min(),
+            smtp_enabled: false,
+            smtp_host: String::new(),
+            smtp_port: default_smtp_port(),
+            smtp_username: String::new(),
+            smtp_password: String::new(),
+            smtp_from: default_smtp_from(),
+            smtp_starttls: true,
         }
     }
 }
 
 fn default_true() -> bool {
     true
+}
+
+fn default_email_code_ttl_secs() -> u64 {
+    600
+}
+
+fn default_email_code_resend_cooldown_secs() -> u64 {
+    60
+}
+
+fn default_email_issue_per_min() -> u32 {
+    3
+}
+
+fn default_email_verify_per_min() -> u32 {
+    12
+}
+
+fn default_smtp_port() -> u16 {
+    587
+}
+
+fn default_smtp_from() -> String {
+    "noreply@localhost".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

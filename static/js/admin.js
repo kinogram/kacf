@@ -157,6 +157,18 @@
             document.getElementById('admin_toggle_registration').checked = !!s.data.registration_enabled;
             document.getElementById('admin_toggle_guest').checked = !!s.data.guest_enabled;
             document.getElementById('admin_toggle_non_admin_login').checked = !!s.data.non_admin_login_enabled;
+            document.getElementById('admin_toggle_email_dev_mode').checked = !!s.data.email_code_dev_mode;
+            document.getElementById('admin_email_ttl_secs').value = String(s.data.email_code_ttl_secs || 600);
+            document.getElementById('admin_email_cooldown_secs').value = String(s.data.email_code_resend_cooldown_secs || 60);
+            document.getElementById('admin_email_issue_per_min').value = String(s.data.email_issue_per_min || 3);
+            document.getElementById('admin_email_verify_per_min').value = String(s.data.email_verify_per_min || 12);
+            document.getElementById('admin_toggle_smtp_enabled').checked = !!s.data.smtp_enabled;
+            document.getElementById('admin_toggle_smtp_starttls').checked = !!s.data.smtp_starttls;
+            document.getElementById('admin_smtp_host').value = String(s.data.smtp_host || '');
+            document.getElementById('admin_smtp_port').value = String(s.data.smtp_port || 587);
+            document.getElementById('admin_smtp_username').value = String(s.data.smtp_username || '');
+            document.getElementById('admin_smtp_password').value = String(s.data.smtp_password || '');
+            document.getElementById('admin_smtp_from').value = String(s.data.smtp_from || 'noreply@localhost');
         }
         const u = await getJson('/admin/api/users');
         if (u.ok && Array.isArray(u.data)) {
@@ -189,6 +201,20 @@
         setText('label_admin_toggle_guest', txt('admin_toggle_guest', 'Enable guest mode'));
         setText('label_admin_toggle_non_admin_login', txt('admin_toggle_non_admin_login', 'Enable non-admin login'));
         setText('admin_save_settings_btn', txt('btn_save', 'Save'));
+        setText('admin_email_settings_title', txt('admin_email_settings_title', 'Email verification'));
+        setText('label_admin_toggle_email_dev_mode', txt('label_admin_toggle_email_dev_mode', 'Show dev code in response (dev only)'));
+        setText('label_admin_email_ttl_secs', txt('label_admin_email_ttl_secs', 'Code TTL (secs)'));
+        setText('label_admin_email_cooldown_secs', txt('label_admin_email_cooldown_secs', 'Resend cooldown (secs)'));
+        setText('label_admin_email_issue_per_min', txt('label_admin_email_issue_per_min', 'Issue limit per minute'));
+        setText('label_admin_email_verify_per_min', txt('label_admin_email_verify_per_min', 'Verify limit per minute'));
+        setText('admin_smtp_title', txt('admin_smtp_title', 'SMTP'));
+        setText('label_admin_toggle_smtp_enabled', txt('label_admin_toggle_smtp_enabled', 'Enable SMTP send'));
+        setText('label_admin_toggle_smtp_starttls', txt('label_admin_toggle_smtp_starttls', 'Use STARTTLS'));
+        setText('label_admin_smtp_host', txt('label_admin_smtp_host', 'SMTP host'));
+        setText('label_admin_smtp_port', txt('label_admin_smtp_port', 'SMTP port'));
+        setText('label_admin_smtp_username', txt('label_admin_smtp_username', 'SMTP username'));
+        setText('label_admin_smtp_password', txt('label_admin_smtp_password', 'SMTP password'));
+        setText('label_admin_smtp_from', txt('label_admin_smtp_from', 'From email'));
         setText('admin_users_title', txt('admin_users_title', 'Users'));
         setText('label_admin_new_username', txt('label_admin_new_username', 'Username'));
         setText('label_admin_new_email', txt('label_admin_new_email', 'Email'));
@@ -224,6 +250,18 @@
                 registration_enabled: !!document.getElementById('admin_toggle_registration').checked,
                 guest_enabled: !!document.getElementById('admin_toggle_guest').checked,
                 non_admin_login_enabled: !!document.getElementById('admin_toggle_non_admin_login').checked,
+                email_code_dev_mode: !!document.getElementById('admin_toggle_email_dev_mode').checked,
+                email_code_ttl_secs: parseInt(readVal('admin_email_ttl_secs'), 10) || 600,
+                email_code_resend_cooldown_secs: parseInt(readVal('admin_email_cooldown_secs'), 10) || 60,
+                email_issue_per_min: parseInt(readVal('admin_email_issue_per_min'), 10) || 3,
+                email_verify_per_min: parseInt(readVal('admin_email_verify_per_min'), 10) || 12,
+                smtp_enabled: !!document.getElementById('admin_toggle_smtp_enabled').checked,
+                smtp_starttls: !!document.getElementById('admin_toggle_smtp_starttls').checked,
+                smtp_host: readVal('admin_smtp_host'),
+                smtp_port: parseInt(readVal('admin_smtp_port'), 10) || 587,
+                smtp_username: readVal('admin_smtp_username'),
+                smtp_password: readVal('admin_smtp_password'),
+                smtp_from: readVal('admin_smtp_from'),
             };
             const r = await postJson('/admin/api/settings', body);
             if (!r.ok) {
