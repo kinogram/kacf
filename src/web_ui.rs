@@ -43,10 +43,18 @@ use crate::web_ui_vm;
 /// Index HTML page embedded at compile time.
 const INDEX_HTML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/index.html"));
 const DIFF_HTML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/diff.html"));
+const WELCOME_HTML: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/static/welcome.html"
+));
 const APP_CSS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/app.css"));
 const DIFF_JS: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/static/js/diff_view.js"
+));
+const WELCOME_JS: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/static/js/welcome.js"
 ));
 const APP_JS: &str = concat!(
     include_str!(concat!(
@@ -655,12 +663,12 @@ async fn stream_events(
 }
 
 async fn index_page(req: HttpRequest, data: web::Data<AppState>) -> impl Responder {
-    // If there's no valid session cookie, send the user to /login.
+    // If there's no valid session cookie, send the user to /welcome first.
     let sid = auth::session::read_session_cookie(&req).unwrap_or_default();
     let ok = data.auth.resolve_session(&sid).is_some();
     if !ok {
         return HttpResponse::Found()
-            .insert_header(("Location", "/login"))
+            .insert_header(("Location", "/welcome"))
             .finish();
     }
     HttpResponse::Ok()
@@ -674,7 +682,7 @@ async fn diff_page(req: HttpRequest, data: web::Data<AppState>) -> impl Responde
     let ok = data.auth.resolve_session(&sid).is_some();
     if !ok {
         return HttpResponse::Found()
-            .insert_header(("Location", "/login"))
+            .insert_header(("Location", "/welcome"))
             .finish();
     }
     HttpResponse::Ok()
@@ -695,6 +703,20 @@ async fn app_js() -> impl Responder {
         .insert_header(("Cache-Control", "no-store"))
         .content_type("application/javascript; charset=utf-8")
         .body(APP_JS)
+}
+
+async fn welcome_page() -> impl Responder {
+    HttpResponse::Ok()
+        .insert_header(("Cache-Control", "no-store"))
+        .content_type("text/html; charset=utf-8")
+        .body(WELCOME_HTML)
+}
+
+async fn welcome_js() -> impl Responder {
+    HttpResponse::Ok()
+        .insert_header(("Cache-Control", "no-store"))
+        .content_type("application/javascript; charset=utf-8")
+        .body(WELCOME_JS)
 }
 
 async fn diff_js() -> impl Responder {
@@ -860,12 +882,14 @@ pub async fn run_web_server(
         App::new()
             .app_data(web::Data::new(state.clone()))
             .route("/", web::get().to(index_page))
+            .route("/welcome", web::get().to(welcome_page))
             .route("/diff", web::get().to(diff_page))
             .route("/login", web::get().to(auth::login_page))
             .route("/account", web::get().to(auth::account_page))
             .route("/admin", web::get().to(auth::admin_page))
             .route("/assets/app.css", web::get().to(app_css))
             .route("/assets/app.js", web::get().to(app_js))
+            .route("/assets/welcome.js", web::get().to(welcome_js))
             .route("/assets/diff.js", web::get().to(diff_js))
             .route("/assets/auth.js", web::get().to(auth::auth_js))
             .route("/assets/account.js", web::get().to(auth::account_js))

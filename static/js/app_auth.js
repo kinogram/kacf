@@ -153,7 +153,7 @@ async function ensureAuthForApp() {
     authMe = me;
     window.KACF.auth.me = me;
     if (!me || !me.logged_in) {
-        location.href = '/login';
+        location.href = '/welcome';
         return null;
     }
     if (me.guest) {
