@@ -56,7 +56,6 @@ function assertRuntimeActionDependencies() {
 	        ],
         projects: [
             'ensureWorkspaceForCurrentProject',
-            'saveCurrentProject',
             'refreshProjectsFromServer',
             'renderProjectSelector',
             'loadSelectedProject',
@@ -398,13 +397,6 @@ function renderDiff(diffText) {
     // Diff is shown in a dedicated diff tab; do not persist it into ui_cache.
     // Persisting diff content makes /ui_cache huge and can freeze the main UI.
     void diffText;
-}
-
-function escapeHtml(text) {
-    return text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
 }
 
 function hasProjectDraftContext() {
