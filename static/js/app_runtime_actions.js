@@ -578,6 +578,11 @@ function applyNoviceUi(me, isGuest) {
     setHiddenById('project_save_btn', true);
     setHiddenById('project_load_btn', true);
     setHiddenById('project_delete_btn', true);
+    setHiddenById('open_global_config_btn', !isAdmin);
+    setHiddenById('diagnostics', !isAdmin);
+    setHiddenById('metrics_text', !isAdmin);
+    setHiddenById('digest_dist_text', !isAdmin);
+    setHiddenById('root_top_text', !isAdmin);
     setHiddenById('vm_card', isGuest || !isAdmin);
 }
 
