@@ -1,29 +1,14 @@
 let logDisplayMode = 'simple';
 
-function isAdminViewer() {
-    try {
-        return !!(window.KACF && window.KACF.auth && window.KACF.auth.me && window.KACF.auth.me.is_admin);
-    } catch (_e) {
-        return false;
-    }
-}
-
 function loadLogDisplayMode() {
-    try {
-        const saved = localStorage.getItem('kacf_log_mode');
-        if (saved === 'raw' || saved === 'simple') {
-            logDisplayMode = saved;
-            return;
-        }
-    } catch (_e) {}
-    logDisplayMode = isAdminViewer() ? 'raw' : 'simple';
+    logDisplayMode = 'simple';
 }
 
 function saveLogDisplayMode(mode) {
-    if (mode !== 'raw' && mode !== 'simple') return;
-    logDisplayMode = mode;
+    if (mode !== 'simple') return;
+    logDisplayMode = 'simple';
     try {
-        localStorage.setItem('kacf_log_mode', mode);
+        localStorage.setItem('kacf_log_mode', 'simple');
     } catch (_e) {}
 }
 
@@ -37,7 +22,7 @@ function setLogDisplayMode(mode) {
 }
 
 function cycleLogDisplayMode() {
-    setLogDisplayMode(logDisplayMode === 'simple' ? 'raw' : 'simple');
+    setLogDisplayMode('simple');
     return logDisplayMode;
 }
 
@@ -65,7 +50,6 @@ function humanizeLogLine(rawLine) {
 }
 
 function renderLogForViewer(raw) {
-    if (logDisplayMode === 'raw') return raw;
     const lines = String(raw || '').split('\n');
     const out = [];
     let last = '';

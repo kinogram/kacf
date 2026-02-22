@@ -143,8 +143,6 @@ const {
     setRunState,
     appendLog,
     renderCurrentLogView,
-    getLogDisplayMode,
-    cycleLogDisplayMode,
 } = window.KACF.logPipeline;
 const {
     stopAfterMinutesSetting,
@@ -486,13 +484,6 @@ function bindEvents() {
     document.getElementById('export_log_btn').addEventListener('click', exportLogs);
     document.getElementById('export_snapshot_btn').addEventListener('click', exportSnapshot);
     document.getElementById('export_report_btn').addEventListener('click', exportReleaseReport);
-    const logModeBtn = document.getElementById('log_mode_toggle');
-    if (logModeBtn) {
-        logModeBtn.addEventListener('click', () => {
-            cycleLogDisplayMode();
-            updateLogModeToggleLabel();
-        });
-    }
     document.getElementById('view_diff_btn').addEventListener('click', () => {
         const bucket = currentLogBucket();
         const url = `/diff?bucket=${encodeURIComponent(bucket)}`;
@@ -581,17 +572,6 @@ function bindEvents() {
             }
         }
     });
-}
-
-function updateLogModeToggleLabel() {
-    const btn = document.getElementById('log_mode_toggle');
-    if (!btn) return;
-    const mode = getLogDisplayMode();
-    if (mode === 'raw') {
-        btn.textContent = '日志: 原始';
-    } else {
-        btn.textContent = '日志: 简单';
-    }
 }
 
 function setHiddenById(id, hidden) {
@@ -753,7 +733,6 @@ async function init() {
         // Guest mode: read-only with sample content, no backend realtime channels.
         renderGuestDemo();
         bindEvents();
-        updateLogModeToggleLabel();
         setProjectControlsDisabled(true);
         setConfigInputsDisabled(true);
         applyReadOnlyMode();
@@ -764,7 +743,6 @@ async function init() {
     await refreshProjectsFromServer();
     renderProjectSelector('');
     bindEvents();
-    updateLogModeToggleLabel();
     bindAutoSave();
     setProjectDraftState();
     setRunningProjectIndicator(txt('running_project_none', ''));
