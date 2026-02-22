@@ -589,9 +589,9 @@ async function execInVm() {
         const lines = [];
         lines.push(`ok=${!!res.ok} exit=${Number(res.exit_code)}`);
         lines.push(`message=${res.message || ''}`);
-        lines.push('--- stdout ---');
+        lines.push(txt('vm_exec_stdout_sep', ''));
         lines.push(String(res.stdout || ''));
-        lines.push('--- stderr ---');
+        lines.push(txt('vm_exec_stderr_sep', ''));
         lines.push(String(res.stderr || ''));
         setVmExecOutput(lines.join('\n'));
         if (res.ok) {
@@ -1037,7 +1037,7 @@ function parseStrategyRulesText(raw) {
     if (!text) return {};
     const parsed = JSON.parse(text);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        throw new Error('rules must be a JSON object');
+        throw new Error(txt('status_vm_self_debug_rules_invalid_json', ''));
     }
     return parsed;
 }
@@ -1313,9 +1313,9 @@ async function runNextVmExec() {
         const lines = [];
         lines.push(`ok=${!!res.ok} exit=${Number(res.exit_code)}`);
         lines.push(`message=${res.message || ''}`);
-        lines.push('--- stdout ---');
+        lines.push(txt('vm_exec_stdout_sep', ''));
         lines.push(String(res.stdout || ''));
-        lines.push('--- stderr ---');
+        lines.push(txt('vm_exec_stderr_sep', ''));
         lines.push(String(res.stderr || ''));
         setVmExecOutput(lines.join('\n'));
         await refreshVmExecQueue();
@@ -1383,9 +1383,9 @@ async function bootstrapVm() {
         const lines = [];
         lines.push(`ok=${!!res.ok} exit=${Number(res.exit_code)}`);
         lines.push(`message=${res.message || ''}`);
-        lines.push('--- stdout ---');
+        lines.push(txt('vm_exec_stdout_sep', ''));
         lines.push(String(res.stdout || ''));
-        lines.push('--- stderr ---');
+        lines.push(txt('vm_exec_stderr_sep', ''));
         lines.push(String(res.stderr || ''));
         setVmExecOutput(lines.join('\n'));
         if (res.ok) {
@@ -1516,10 +1516,10 @@ async function refreshVmExecDispatchTrace() {
         const data = await vmApi('/vm/exec/dispatch/trace?limit=12', 'GET');
         const entries = Array.isArray(data?.entries) ? data.entries : [];
         if (!entries.length) {
-            setVmExecDispatchTraceText('DispatchTrace: empty');
+            setVmExecDispatchTraceText(txt('vm_exec_dispatch_trace_empty', ''));
             return;
         }
-        const lines = ['DispatchTrace (latest first):'];
+        const lines = [txt('vm_exec_dispatch_trace_title', '')];
         entries.forEach((entry, idx) => {
             const ts = Number(entry?.created_at_unix || 0);
             const runningBefore = Number(entry?.running_total_before || 0);
@@ -1572,10 +1572,10 @@ async function refreshVmAuditEvents() {
         const data = await vmApi('/vm/audit/events?limit=20', 'GET');
         const events = Array.isArray(data?.events) ? data.events : [];
         if (!events.length) {
-            setVmAuditEventsText('Audit: empty');
+            setVmAuditEventsText(txt('vm_audit_events_empty', ''));
             return;
         }
-        const lines = ['Audit (latest first):'];
+        const lines = [txt('vm_audit_events_title', '')];
         events.forEach((e, idx) => {
             lines.push(
                 `#${idx + 1} t=${Number(e?.created_at_unix || 0)} actor=${String(e?.actor || '-')} role=${String(e?.role || '-')} action=${String(e?.action || '-')} target=${String(e?.target || '-')} outcome=${String(e?.outcome || '-')} detail=${String(e?.detail || '')}`,
@@ -1590,7 +1590,7 @@ async function refreshVmAuditEvents() {
 async function scanVmHealth() {
     const selfHeal = !!el('vm_health_self_heal')?.checked;
     if (selfHeal && isReadOnlyView()) {
-        setStatus('Read-only session cannot run self-heal.', 'status-danger');
+        setStatus(txt('status_vm_health_self_heal_readonly', ''), 'status-danger');
         return;
     }
     try {
@@ -1598,21 +1598,28 @@ async function scanVmHealth() {
         const issues = Array.isArray(data?.issues) ? data.issues : [];
         const actions = Array.isArray(data?.actions) ? data.actions : [];
         const lines = [];
-        lines.push(`HealthScan scanned=${Number(data?.scanned || 0)} issues=${issues.length} actions=${actions.length}`);
+        lines.push(fmt('vm_health_report_summary', '', {
+            scanned: Number(data?.scanned || 0),
+            issues: issues.length,
+            actions: actions.length,
+        }));
         if (issues.length) {
-            lines.push('Issues:');
+            lines.push(txt('vm_health_report_issues_title', ''));
             issues.slice(0, 20).forEach((x) => {
                 lines.push(`  - [${String(x?.severity || 'warn')}] ${String(x?.vm_name || '-')} :: ${String(x?.message || '')}`);
             });
         }
         if (actions.length) {
-            lines.push('Actions:');
+            lines.push(txt('vm_health_report_actions_title', ''));
             actions.slice(0, 20).forEach((x) => {
                 lines.push(`  - ${String(x?.vm_name || '-')} :: ${String(x?.action || '')} :: ${String(x?.detail || '')}`);
             });
         }
         setVmHealthReportText(lines.join('\n'));
-        setStatus(`Health scan done: issues=${issues.length} actions=${actions.length}`, issues.length ? 'status-warn' : 'status-ok');
+        setStatus(fmt('status_vm_health_scan_done', '', {
+            issues: issues.length,
+            actions: actions.length,
+        }), issues.length ? 'status-warn' : 'status-ok');
         await refreshVmExecQueue();
         await refreshVmStatus();
     } catch (e) {
@@ -1795,7 +1802,7 @@ async function init(opts) {
     await loadVmSelfDebugStrategyRules();
     await refreshVmSelfDebugRunDetail();
     await refreshVmSelfDebugContext();
-    setVmHealthReportText('HealthScan: click "Health Scan" to run.');
+    setVmHealthReportText(txt('vm_health_report_init', ''));
 }
 
 window.KACF = window.KACF || {};

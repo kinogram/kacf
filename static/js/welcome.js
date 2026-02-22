@@ -1,5 +1,79 @@
 (() => {
     const README_URL = '/assets/welcome_intro.md';
+    let COPY = {};
+
+    function txt(k, fb) {
+        const v = COPY && typeof COPY === 'object' ? COPY[k] : null;
+        return typeof v === 'string' ? v : (fb || '');
+    }
+
+    function setText(id, value) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value;
+    }
+
+    function normalizeLanguageCode(code) {
+        const s = String(code || '').trim();
+        if (!s) return '';
+        if (s.toLowerCase() === 'zh-cn') return 'zh-CN';
+        if (s.toLowerCase() === 'en') return 'en';
+        return s;
+    }
+
+    async function fetchLanguages() {
+        const resp = await fetch('/assets/languages/list', { cache: 'no-store' });
+        if (!resp.ok) throw new Error(`languages failed: ${resp.status}`);
+        const data = await resp.json();
+        const langs = Array.isArray(data.languages) ? data.languages : [];
+        return langs.map(normalizeLanguageCode).filter(Boolean);
+    }
+
+    function choosePreferredLanguage(langs) {
+        const items = Array.isArray(langs) ? langs : [];
+        if (!items.length) return '';
+        if (items.length === 1) return items[0];
+        const navList = Array.isArray(navigator.languages) && navigator.languages.length
+            ? navigator.languages
+            : [navigator.language || ''];
+        const isZh = navList.some(x => (x || '').toLowerCase().startsWith('zh'));
+        if (isZh) {
+            if (items.includes('zh-CN')) return 'zh-CN';
+            const anyZh = items.find(x => x.toLowerCase().startsWith('zh'));
+            if (anyZh) return anyZh;
+        }
+        if (items.includes('en')) return 'en';
+        return items[0];
+    }
+
+    async function loadCopy(lang) {
+        const code = normalizeLanguageCode(lang);
+        const resp = await fetch(`/assets/languages/${encodeURIComponent(code)}.json`, { cache: 'no-store' });
+        if (!resp.ok) return false;
+        const data = await resp.json();
+        if (!data || typeof data !== 'object') return false;
+        COPY = data;
+        document.documentElement.lang = code || 'en';
+        return true;
+    }
+
+    async function initCopyAndUi() {
+        let langs = ['en'];
+        try {
+            const fetched = await fetchLanguages();
+            if (fetched.length) langs = fetched;
+        } catch (_e) {}
+        const picked = choosePreferredLanguage(langs);
+        await loadCopy(picked || langs[0] || 'en');
+
+        document.title = txt('welcome_page_title', document.title);
+        setText('welcome_kicker', txt('welcome_kicker', 'KINOGRAM'));
+        setText('welcome_title', txt('welcome_title', 'KACF'));
+        setText('welcome_subtitle', txt('welcome_subtitle', 'Describe your idea in one sentence, and KACF builds runnable software automatically.'));
+        setText('enter_program_btn', txt('welcome_enter_program', 'Enter Program'));
+        setText('open_github_btn', txt('welcome_open_github', 'Open GitHub Repository'));
+        setText('welcome_intro_title', txt('welcome_intro_title', 'Project Introduction'));
+        setText('welcome_readme', txt('welcome_intro_loading', 'Loading local introduction...'));
+    }
 
     function escapeHtml(text) {
         return String(text || '')
@@ -85,7 +159,7 @@
             const data = await resp.json();
             if (data && data.logged_in) {
                 btn.href = '/';
-                btn.textContent = '进入工作台';
+                btn.textContent = txt('welcome_enter_workspace', 'Enter Workspace');
             }
         } catch (_e) {}
     }
@@ -99,11 +173,12 @@
             const text = await resp.text();
             root.innerHTML = markdownToHtml(text);
         } catch (_e) {
-            root.innerHTML = '<p>本机介绍文件加载失败，请联系管理员检查部署文件。</p>';
+            root.innerHTML = `<p>${escapeHtml(txt('welcome_intro_load_failed', 'Failed to load local introduction. Please contact the administrator.'))}</p>`;
         }
     }
 
     (async () => {
+        await initCopyAndUi();
         await Promise.all([refreshEnterButton(), loadReadme()]);
     })();
 })();

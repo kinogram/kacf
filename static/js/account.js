@@ -52,6 +52,7 @@
 
     async function main() {
         await loadLang();
+        document.title = txt('account_page_title', document.title);
 
         setText('account_back_btn', txt('btn_back', 'Back'));
         setText('account_brand', txt('app_name', 'KACF'));

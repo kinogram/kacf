@@ -32,20 +32,20 @@ function humanizeLogLine(rawLine) {
     const low = line.toLowerCase();
 
     if (line.startsWith('[Model-Thought]') || line.startsWith('[Model-Stream]') || line.startsWith('[Model] 仍在生成中...')) {
-        return 'AI 正在思考并生成结果...';
+        return txt('log_simple_ai_thinking', '');
     }
-    if (low.includes('tool=read')) return '正在读取项目文件...';
-    if (low.includes('tool=write') || low.includes('tool=edit') || low.includes('apply_patch')) return '正在修改代码...';
-    if (low.includes('tool=exec') || low.includes('running command') || low.includes('bash -lc')) return '正在执行命令并验证结果...';
-    if (low.includes('tool=web_search') || low.includes('search')) return '正在查找参考信息...';
-    if (low.includes('need_clarify') || low.includes('clarify')) return '需要你补充一点信息才能继续。';
-    if (low.includes('done') && low.includes('ok')) return '任务阶段完成。';
-    if (low.includes('done') && (low.includes('fail') || low.includes('error'))) return '执行遇到问题，正在尝试修复...';
+    if (low.includes('tool=read')) return txt('log_simple_reading_files', '');
+    if (low.includes('tool=write') || low.includes('tool=edit') || low.includes('apply_patch')) return txt('log_simple_editing_code', '');
+    if (low.includes('tool=exec') || low.includes('running command') || low.includes('bash -lc')) return txt('log_simple_running_command', '');
+    if (low.includes('tool=web_search') || low.includes('search')) return txt('log_simple_searching_info', '');
+    if (low.includes('need_clarify') || low.includes('clarify')) return txt('log_simple_need_clarify', '');
+    if (low.includes('done') && low.includes('ok')) return txt('log_simple_phase_done', '');
+    if (low.includes('done') && (low.includes('fail') || low.includes('error'))) return txt('log_simple_phase_failed', '');
     if (low.includes('realtime') || low.includes('eventsource') || low.includes('ws') || low.includes('lane enqueue') || low.includes('lane dequeue')) {
         return '';
     }
-    if (line.startsWith('[Eval-Digest]')) return '正在做结果评估与质量检查...';
-    if (line.startsWith('{') || line.startsWith('[')) return '系统正在处理中...';
+    if (line.startsWith('[Eval-Digest]')) return txt('log_simple_eval_checking', '');
+    if (line.startsWith('{') || line.startsWith('[')) return txt('log_simple_system_processing', '');
     return line;
 }
 

@@ -22,6 +22,11 @@
         if (el) el.textContent = value;
     }
 
+    function setPlaceholder(id, value) {
+        const el = document.getElementById(id);
+        if (el) el.setAttribute('placeholder', value || '');
+    }
+
     function showHint(id, msg, isErr) {
         const el = document.getElementById(id);
         if (!el) return;
@@ -190,6 +195,7 @@
 
     async function main() {
         await loadLang();
+        document.title = txt('admin_page_title', document.title);
         setText('admin_back_btn', txt('btn_back', 'Back'));
         setText('admin_brand', txt('app_name', 'KACF'));
         setText('admin_logout_btn', txt('btn_logout', 'Logout'));
@@ -215,12 +221,16 @@
         setText('label_admin_smtp_username', txt('label_admin_smtp_username', 'SMTP username'));
         setText('label_admin_smtp_password', txt('label_admin_smtp_password', 'SMTP password'));
         setText('label_admin_smtp_from', txt('label_admin_smtp_from', 'From email'));
+        setPlaceholder('admin_smtp_host', txt('ph_admin_smtp_host', ''));
+        setPlaceholder('admin_smtp_from', txt('ph_admin_smtp_from', ''));
         setText('admin_users_title', txt('admin_users_title', 'Users'));
         setText('label_admin_new_username', txt('label_admin_new_username', 'Username'));
         setText('label_admin_new_email', txt('label_admin_new_email', 'Email'));
         setText('label_admin_new_password', txt('label_admin_new_password', 'Password (plain)'));
         setText('label_admin_new_nickname', txt('label_admin_new_nickname', 'Nickname'));
         setText('label_admin_new_role', txt('label_admin_new_role', 'Role'));
+        setText('admin_role_user_option', txt('admin_role_user', 'User'));
+        setText('admin_role_admin_option', txt('admin_role_admin', 'Admin'));
         setText('admin_create_user_btn', txt('admin_create_user_btn', 'Create user'));
         setText('th_user', txt('th_user', 'User'));
         setText('th_role', txt('th_role', 'Role'));

@@ -120,6 +120,7 @@
         const picked = choosePreferredLanguage(langs);
         await loadCopy(picked || langs[0] || 'en');
 
+        document.title = txt('login_page_title', document.title);
         setText('auth_brand', txt('app_name', 'KACF'));
         setText('auth_welcome_title', txt('auth_welcome_title', 'Welcome'));
         setText('auth_welcome_sub', txt('auth_welcome_sub', ''));

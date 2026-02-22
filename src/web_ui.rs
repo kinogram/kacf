@@ -56,6 +56,10 @@ const WELCOME_JS: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/static/js/welcome.js"
 ));
+const WELCOME_INTRO_MD: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/static/welcome_intro.md"
+));
 const APP_JS: &str = concat!(
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -719,6 +723,13 @@ async fn welcome_js() -> impl Responder {
         .body(WELCOME_JS)
 }
 
+async fn welcome_intro_md() -> impl Responder {
+    HttpResponse::Ok()
+        .insert_header(("Cache-Control", "no-store"))
+        .content_type("text/markdown; charset=utf-8")
+        .body(WELCOME_INTRO_MD)
+}
+
 async fn diff_js() -> impl Responder {
     HttpResponse::Ok()
         .insert_header(("Cache-Control", "no-store"))
@@ -890,6 +901,7 @@ pub async fn run_web_server(
             .route("/assets/app.css", web::get().to(app_css))
             .route("/assets/app.js", web::get().to(app_js))
             .route("/assets/welcome.js", web::get().to(welcome_js))
+            .route("/assets/welcome_intro.md", web::get().to(welcome_intro_md))
             .route("/assets/diff.js", web::get().to(diff_js))
             .route("/assets/auth.js", web::get().to(auth::auth_js))
             .route("/assets/account.js", web::get().to(auth::account_js))

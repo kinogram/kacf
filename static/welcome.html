@@ -3,27 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <title>KACF 欢迎页</title>
+    <title>KACF</title>
     <link rel="stylesheet" href="/assets/app.css">
 </head>
 <body class="welcome-body">
 <main class="welcome-shell">
     <section class="welcome-hero">
-        <p class="welcome-kicker">KINOGRAM</p>
-        <h1 class="welcome-title">KACF</h1>
-        <p class="welcome-subtitle">一句需求，自动生成可直接运行的软件工程。</p>
+        <p class="welcome-kicker" id="welcome_kicker"></p>
+        <h1 class="welcome-title" id="welcome_title"></h1>
+        <p class="welcome-subtitle" id="welcome_subtitle"></p>
         <div class="welcome-buttons">
-            <a class="welcome-btn welcome-btn-primary" id="enter_program_btn" href="/login">进入程序</a>
-            <a class="welcome-btn welcome-btn-ghost" href="https://github.com/kinogram/kacf" target="_blank" rel="noopener">打开 GitHub 仓库</a>
+            <a class="welcome-btn welcome-btn-primary" id="enter_program_btn" href="/login"></a>
+            <a class="welcome-btn welcome-btn-ghost" id="open_github_btn" href="https://github.com/kinogram/kacf" target="_blank" rel="noopener"></a>
         </div>
     </section>
 
     <section class="welcome-card">
         <div class="welcome-card-head">
-            <h2>项目介绍</h2>
+            <h2 id="welcome_intro_title"></h2>
             <a href="https://github.com/kinogram/kacf" target="_blank" rel="noopener">github.com/kinogram/kacf</a>
         </div>
-        <div class="welcome-readme" id="welcome_readme">正在从本机加载介绍...</div>
+        <div class="welcome-readme" id="welcome_readme"></div>
     </section>
 </main>
 
