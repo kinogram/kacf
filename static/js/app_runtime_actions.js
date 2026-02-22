@@ -575,18 +575,8 @@ function setHiddenById(id, hidden) {
 
 function applyNoviceUi(me, isGuest) {
     const isAdmin = !!(me && me.is_admin);
-    setHiddenById('project_sidebar', true);
-    setHiddenById('sidebar_toggle_btn', true);
-    setHiddenById('sidebar_overlay', true);
     setHiddenById('advanced_git_section', true);
     setHiddenById('advanced_unattended_section', true);
-    setHiddenById('revert_btn', true);
-    setHiddenById('push_btn', true);
-    setHiddenById('resume_btn', true);
-    setHiddenById('go_running_project_btn', true);
-    setHiddenById('project_save_btn', true);
-    setHiddenById('project_load_btn', true);
-    setHiddenById('project_delete_btn', true);
     setHiddenById('vm_card', isGuest || !isAdmin);
 }
 
