@@ -451,6 +451,12 @@ function bindAutoSave() {
         goal.addEventListener('change', () => {
             autoFillProjectNameFromGoal(false);
         });
+        goal.addEventListener('keydown', (ev) => {
+            if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') {
+                ev.preventDefault();
+                startSession();
+            }
+        });
     }
 }
 
