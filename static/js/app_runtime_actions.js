@@ -393,12 +393,6 @@ async function submitClarify(e) {
     }
 }
 
-function renderDiff(diffText) {
-    // Diff is shown in a dedicated diff tab; do not persist it into ui_cache.
-    // Persisting diff content makes /ui_cache huge and can freeze the main UI.
-    void diffText;
-}
-
 function hasProjectDraftContext() {
     const selectedId = document.getElementById('project_selector')?.value || '';
     if (selectedId) return true;

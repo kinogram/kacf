@@ -372,7 +372,8 @@ function handleLogEvent(evt) {
 }
 
 function handleDiffEvent(evt) {
-    renderDiff(evt.diff);
+    // Diff rendering moved to dedicated /diff page; ignore in main UI stream.
+    void evt.diff;
 }
 
 function handleNeedClarifyEvent(evt) {
