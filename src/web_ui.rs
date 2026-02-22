@@ -41,8 +41,10 @@ use crate::web_ui_store;
 const INDEX_HTML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/index.html"));
 const DIFF_HTML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/diff.html"));
 const APP_CSS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/app.css"));
-const DIFF_JS: &str =
-    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/js/diff_view.js"));
+const DIFF_JS: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/static/js/diff_view.js"
+));
 const APP_JS: &str = concat!(
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -148,10 +150,7 @@ fn require_managed_workspace(workspace: &str) -> Result<PathBuf, String> {
     web_ui_store::require_managed_workspace(workspace, MANAGED_ROOT_DIR, MANAGED_WORKSPACES_DIR)
 }
 
-fn save_project_config(
-    workspace: &str,
-    unattended_mode: bool,
-) -> std::io::Result<()> {
+fn save_project_config(workspace: &str, unattended_mode: bool) -> std::io::Result<()> {
     let cfg = ProjectConfig {
         unattended_mode,
         updated_at_unix: now_unix(),
@@ -271,10 +270,7 @@ pub(crate) fn start_from_payload(
         git_user_name: payload.git_user_name,
         git_user_email: payload.git_user_email,
     };
-    if let Err(e) = save_project_config(
-        &payload.workspace,
-        payload.unattended_mode,
-    ) {
+    if let Err(e) = save_project_config(&payload.workspace, payload.unattended_mode) {
         eprintln!("save project config failed: {}", e);
     }
     data.tx_req

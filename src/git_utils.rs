@@ -12,7 +12,11 @@ use std::process::{Command, Stdio};
 /// author/committer environment variables to avoid git complaining about
 /// missing identity when committing. If git is not available or any
 /// command fails, an error is returned.
-pub fn init_repo_if_needed(workspace: &Path, git_user_name: &str, git_user_email: &str) -> Result<()> {
+pub fn init_repo_if_needed(
+    workspace: &Path,
+    git_user_name: &str,
+    git_user_email: &str,
+) -> Result<()> {
     // Ensure the workspace directory exists on disk before running git.
     if !workspace.exists() {
         fs::create_dir_all(workspace)
@@ -65,7 +69,12 @@ pub fn init_repo_if_needed(workspace: &Path, git_user_name: &str, git_user_email
 /// are no changes to commit, the commit command may fail; this function
 /// ignores such failures and simply returns Ok(()). Environment variables
 /// are set to provide author and committer identities.
-pub fn commit_all(workspace: &Path, message: &str, git_user_name: &str, git_user_email: &str) -> Result<()> {
+pub fn commit_all(
+    workspace: &Path,
+    message: &str,
+    git_user_name: &str,
+    git_user_email: &str,
+) -> Result<()> {
     // Stage all changes.
     let status = Command::new("git")
         .args(["add", "-A"])

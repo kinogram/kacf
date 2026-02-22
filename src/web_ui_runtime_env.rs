@@ -1,7 +1,4 @@
-pub(crate) fn apply_runtime_config_envs(
-    history_max_messages: &str,
-    history_max_chars: &str,
-) {
+pub(crate) fn apply_runtime_config_envs(history_max_messages: &str, history_max_chars: &str) {
     set_or_clear_env("AUTOCODING_HISTORY_MAX_MESSAGES", history_max_messages);
     set_or_clear_env("AUTOCODING_HISTORY_MAX_CHARS", history_max_chars);
 }

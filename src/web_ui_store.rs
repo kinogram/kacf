@@ -64,8 +64,7 @@ pub(crate) fn save_project_config(
     fs::create_dir_all(&ws)?;
     let json = serde_json::to_string_pretty(cfg)?;
     let path = ws.join(project_config_filename);
-    workspace::atomic_write_text(&path, &json)
-        .map_err(|e| std::io::Error::other(e.to_string()))?;
+    workspace::atomic_write_text(&path, &json).map_err(|e| std::io::Error::other(e.to_string()))?;
     Ok(())
 }
 
@@ -103,8 +102,7 @@ pub(crate) fn write_ui_cache(
         fs::create_dir_all(parent)?;
     }
     let json = serde_json::to_string_pretty(payload)?;
-    workspace::atomic_write_text(&path, &json)
-        .map_err(|e| std::io::Error::other(e.to_string()))?;
+    workspace::atomic_write_text(&path, &json).map_err(|e| std::io::Error::other(e.to_string()))?;
     Ok(())
 }
 

@@ -17,21 +17,13 @@ pub fn atomic_write_text(path: &Path, content: &str) -> Result<()> {
         .with_context(|| format!("create parent dirs for {}", parent.display()))?;
     let tmp = atomic_tmp_path(path);
     fs::write(&tmp, content).with_context(|| format!("write temp {}", tmp.display()))?;
-    fs::rename(&tmp, path).with_context(|| {
-        format!(
-            "rename temp {} -> {}",
-            tmp.display(),
-            path.display()
-        )
-    })?;
+    fs::rename(&tmp, path)
+        .with_context(|| format!("rename temp {} -> {}", tmp.display(), path.display()))?;
     Ok(())
 }
 
 fn atomic_tmp_path(path: &Path) -> PathBuf {
-    let stem = path
-        .file_name()
-        .and_then(|v| v.to_str())
-        .unwrap_or("kacf");
+    let stem = path.file_name().and_then(|v| v.to_str()).unwrap_or("kacf");
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
