@@ -167,6 +167,10 @@
             document.getElementById('admin_email_cooldown_secs').value = String(s.data.email_code_resend_cooldown_secs || 60);
             document.getElementById('admin_email_issue_per_min').value = String(s.data.email_issue_per_min || 3);
             document.getElementById('admin_email_verify_per_min').value = String(s.data.email_verify_per_min || 12);
+            document.getElementById('admin_toggle_email_domain_allowlist_enabled').checked = s.data.email_domain_allowlist_enabled !== false;
+            document.getElementById('admin_email_domain_allowlist').value = Array.isArray(s.data.email_domain_allowlist)
+                ? s.data.email_domain_allowlist.join('\n')
+                : '';
             document.getElementById('admin_toggle_smtp_enabled').checked = !!s.data.smtp_enabled;
             document.getElementById('admin_toggle_smtp_starttls').checked = !!s.data.smtp_starttls;
             document.getElementById('admin_smtp_host').value = String(s.data.smtp_host || '');
@@ -213,6 +217,9 @@
         setText('label_admin_email_cooldown_secs', txt('label_admin_email_cooldown_secs', 'Resend cooldown (secs)'));
         setText('label_admin_email_issue_per_min', txt('label_admin_email_issue_per_min', 'Issue limit per minute'));
         setText('label_admin_email_verify_per_min', txt('label_admin_email_verify_per_min', 'Verify limit per minute'));
+        setText('label_admin_toggle_email_domain_allowlist_enabled', txt('label_admin_toggle_email_domain_allowlist_enabled', 'Enable email domain allowlist'));
+        setText('label_admin_email_domain_allowlist', txt('label_admin_email_domain_allowlist', 'Allowed email domains (one per line)'));
+        setPlaceholder('admin_email_domain_allowlist', txt('ph_admin_email_domain_allowlist', ''));
         setText('admin_smtp_title', txt('admin_smtp_title', 'SMTP'));
         setText('label_admin_toggle_smtp_enabled', txt('label_admin_toggle_smtp_enabled', 'Enable SMTP send'));
         setText('label_admin_toggle_smtp_starttls', txt('label_admin_toggle_smtp_starttls', 'Use STARTTLS'));
@@ -265,6 +272,11 @@
                 email_code_resend_cooldown_secs: parseInt(readVal('admin_email_cooldown_secs'), 10) || 60,
                 email_issue_per_min: parseInt(readVal('admin_email_issue_per_min'), 10) || 3,
                 email_verify_per_min: parseInt(readVal('admin_email_verify_per_min'), 10) || 12,
+                email_domain_allowlist_enabled: !!document.getElementById('admin_toggle_email_domain_allowlist_enabled').checked,
+                email_domain_allowlist: String(document.getElementById('admin_email_domain_allowlist')?.value || '')
+                    .split(/\r?\n/)
+                    .map(x => String(x || '').trim())
+                    .filter(Boolean),
                 smtp_enabled: !!document.getElementById('admin_toggle_smtp_enabled').checked,
                 smtp_starttls: !!document.getElementById('admin_toggle_smtp_starttls').checked,
                 smtp_host: readVal('admin_smtp_host'),

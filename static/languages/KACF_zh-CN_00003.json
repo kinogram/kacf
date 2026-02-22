@@ -650,5 +650,8 @@
   "vm_health_report_summary": "健康扫描 扫描={scanned} 问题={issues} 动作={actions}",
   "vm_health_report_issues_title": "问题：",
   "vm_health_report_actions_title": "动作：",
-  "status_vm_health_scan_done": "健康扫描完成：问题={issues} 动作={actions}"
+  "status_vm_health_scan_done": "健康扫描完成：问题={issues} 动作={actions}",
+  "label_admin_toggle_email_domain_allowlist_enabled": "启用邮箱域名白名单",
+  "label_admin_email_domain_allowlist": "允许注册邮箱域名（每行一个）",
+  "ph_admin_email_domain_allowlist": "gmail.com\noutlook.com\nqq.com"
 }

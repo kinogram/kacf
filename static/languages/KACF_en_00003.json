@@ -650,5 +650,8 @@
   "vm_health_report_summary": "HealthScan scanned={scanned} issues={issues} actions={actions}",
   "vm_health_report_issues_title": "Issues:",
   "vm_health_report_actions_title": "Actions:",
-  "status_vm_health_scan_done": "Health scan done: issues={issues} actions={actions}"
+  "status_vm_health_scan_done": "Health scan done: issues={issues} actions={actions}",
+  "label_admin_toggle_email_domain_allowlist_enabled": "Enable email domain allowlist",
+  "label_admin_email_domain_allowlist": "Allowed email domains (one per line)",
+  "ph_admin_email_domain_allowlist": "gmail.com\noutlook.com\nqq.com"
 }

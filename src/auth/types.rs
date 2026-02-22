@@ -70,6 +70,10 @@ pub(crate) struct AdminSettings {
     pub(crate) email_issue_per_min: u32,
     #[serde(default = "default_email_verify_per_min")]
     pub(crate) email_verify_per_min: u32,
+    #[serde(default = "default_true")]
+    pub(crate) email_domain_allowlist_enabled: bool,
+    #[serde(default = "default_email_domain_allowlist")]
+    pub(crate) email_domain_allowlist: Vec<String>,
     #[serde(default)]
     pub(crate) smtp_enabled: bool,
     #[serde(default)]
@@ -98,6 +102,8 @@ impl Default for AdminSettings {
             email_code_resend_cooldown_secs: default_email_code_resend_cooldown_secs(),
             email_issue_per_min: default_email_issue_per_min(),
             email_verify_per_min: default_email_verify_per_min(),
+            email_domain_allowlist_enabled: true,
+            email_domain_allowlist: default_email_domain_allowlist(),
             smtp_enabled: false,
             smtp_host: String::new(),
             smtp_port: default_smtp_port(),
@@ -127,6 +133,22 @@ fn default_email_issue_per_min() -> u32 {
 
 fn default_email_verify_per_min() -> u32 {
     12
+}
+
+fn default_email_domain_allowlist() -> Vec<String> {
+    vec![
+        "gmail.com".to_string(),
+        "outlook.com".to_string(),
+        "hotmail.com".to_string(),
+        "live.com".to_string(),
+        "yahoo.com".to_string(),
+        "icloud.com".to_string(),
+        "proton.me".to_string(),
+        "qq.com".to_string(),
+        "163.com".to_string(),
+        "126.com".to_string(),
+        "foxmail.com".to_string(),
+    ]
 }
 
 fn default_smtp_port() -> u16 {

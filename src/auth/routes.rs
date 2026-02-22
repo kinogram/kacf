@@ -115,26 +115,23 @@ async fn send_email_code_or_fail(
     .map_err(|e| HttpResponse::InternalServerError().body(e))
 }
 
-fn email_allowed(email: &str) -> bool {
-    // Simple allowlist to prevent mass account creation with random domains.
+fn email_allowed(email: &str, settings: &AdminSettings) -> bool {
     let e = email.trim().to_lowercase();
     let Some((_user, domain)) = e.split_once('@') else {
         return false;
     };
-    let allowed = [
-        "gmail.com",
-        "outlook.com",
-        "hotmail.com",
-        "live.com",
-        "yahoo.com",
-        "icloud.com",
-        "proton.me",
-        "qq.com",
-        "163.com",
-        "126.com",
-        "foxmail.com",
-    ];
-    allowed.contains(&domain)
+    let domain = domain.trim();
+    if domain.is_empty() {
+        return false;
+    }
+    if !settings.email_domain_allowlist_enabled {
+        return true;
+    }
+    settings
+        .email_domain_allowlist
+        .iter()
+        .map(|x| x.trim().to_lowercase())
+        .any(|x| !x.is_empty() && x == domain)
 }
 
 pub(crate) async fn bootstrap_status(req: HttpRequest) -> impl Responder {
@@ -150,11 +147,12 @@ pub(crate) async fn bootstrap_admin(
     body: web::Json<BootstrapAdminPayload>,
 ) -> impl Responder {
     let store = resolve_store(&req);
+    let settings = store.read_admin_settings();
     if store.has_any_user() {
         return HttpResponse::BadRequest().body("bootstrap already completed");
     }
     let payload = body.into_inner();
-    if !email_allowed(&payload.email) {
+    if !email_allowed(&payload.email, &settings) {
         return HttpResponse::BadRequest().body("email not allowed");
     }
     if payload.password.trim().is_empty() {
@@ -185,7 +183,7 @@ pub(crate) async fn register(req: HttpRequest, body: web::Json<RegisterPayload>)
         return HttpResponse::Forbidden().body("registration disabled");
     }
     let payload = body.into_inner();
-    if !email_allowed(&payload.email) {
+    if !email_allowed(&payload.email, &s) {
         return HttpResponse::BadRequest().body("email not allowed");
     }
     if payload.password.trim().is_empty() {
@@ -517,6 +515,14 @@ pub(crate) async fn admin_put_settings(
     next.email_code_resend_cooldown_secs = next.email_code_resend_cooldown_secs.clamp(10, 3600);
     next.email_issue_per_min = next.email_issue_per_min.clamp(1, 240);
     next.email_verify_per_min = next.email_verify_per_min.clamp(1, 240);
+    next.email_domain_allowlist = next
+        .email_domain_allowlist
+        .into_iter()
+        .map(|x| x.trim().to_lowercase())
+        .filter(|x| !x.is_empty())
+        .collect::<Vec<_>>();
+    next.email_domain_allowlist.sort();
+    next.email_domain_allowlist.dedup();
     next.smtp_port = next.smtp_port.clamp(1, 65535);
     next.smtp_host = next.smtp_host.trim().to_string();
     next.smtp_from = next.smtp_from.trim().to_string();
@@ -565,7 +571,8 @@ pub(crate) async fn admin_create_user(
     } else {
         AccountRole::User
     };
-    if !email_allowed(&p.email) {
+    let settings = store.read_admin_settings();
+    if !email_allowed(&p.email, &settings) {
         return HttpResponse::BadRequest().body("email not allowed");
     }
     let pw = if p.password.trim().is_empty() {
@@ -1098,7 +1105,7 @@ pub(crate) async fn account_request_new_email_code(
         return HttpResponse::Forbidden().body("account banned");
     }
     let new_email = body.new_email.trim().to_lowercase();
-    if !email_allowed(&new_email) {
+    if !email_allowed(&new_email, &settings) {
         return HttpResponse::BadRequest().body("email not allowed");
     }
     if let Err(resp) = check_window_limit(
@@ -1183,7 +1190,7 @@ pub(crate) async fn account_confirm_email_change(
         return HttpResponse::Unauthorized().body(e);
     }
     let new_email = p.new_email.trim().to_lowercase();
-    if !email_allowed(&new_email) {
+    if !email_allowed(&new_email, &settings) {
         return HttpResponse::BadRequest().body("email not allowed");
     }
     let key = format!("{}:{}", user.username, new_email);
