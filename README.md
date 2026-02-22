@@ -1,137 +1,149 @@
 # KACF (Kinogram AutoCoding Framework)
 
-> 开发者是初三学生，一人团队，备战中考之余趁过年见缝插针开发此项目，觉得不错的话给个Star支持下呗😆非常感谢🙏🏻
+这是当前工作区对应代码的 README。
+文档只描述当前代码已实现行为，不推测其他分支或历史版本。
 
-> 由于开发者实在太忙了，以下~~部分~~是AI写的
+## 项目定位
 
-> 使用自定义许可证禁止无授权商用是因为看到太多做的很好的开源软件被某些人拿去卖钱，希望至少不要发生在自己的项目身上😔
+KACF 是一个 Web UI 驱动的自动编程框架：
+输入目标后，系统执行「生成补丁 -> 应用补丁 -> 运行评测 -> 根据结果继续迭代」的闭环。
 
-KACF 是一个面向真实开发场景的 AI 自动编程框架：你只需要描述目标，系统就会自动完成“写代码 -> 跑测试 -> 分析失败 -> 修复 -> 再验证”的闭环迭代。
-
-对新手用户，KACF 的目标是：
-
-- 真正零基础可上手：不要求你有编程经验。
-- 无需手写大量代码：通过自然语言目标驱动开发流程。
-- 持续自我迭代：系统在失败后自动修复并继续推进，直到收敛或你主动停止。
-
-当前项目为 **Web UI 模式**。
-
-## 为什么 KACF 强
-
-- 自动编码闭环：模型输出补丁，系统自动应用并推进工程。
-- 自动评测闭环：固定评测脚本驱动迭代，避免“只生成不验证”。
-- 无人值守能力：支持自动迭代、自动恢复、轮次边界安全停止。
-- 项目化工作流：多项目保存/加载/删除，按项目独立管理数据。
-- 可观测性强：SSE 实时日志 + 指标 + 健康检查 + 调试日志接口。
-- 语言包体系完整：前端文案统一语言包管理，启动时严格校验。
-
-## 强大、完备的用户管理器（多用户版）
-
-KACF 多用户版（`multi-user` 分支）提供完整用户管理能力：
-
-- 三类角色：`Admin / User / Guest`
-- 访客模式：无需注册即可进入，但全局只读、后端操作禁用
-- 管理员面板：
-  - 用户创建/删除
-  - 封禁/解封
-  - 强提醒下发
-  - 直接重置用户密码（按需求明文管理）
-  - 审计日志查看
-- 账户中心：
-  - 修改昵称、密码、用户名、邮箱
-  - 登录方式切换（密码、邮箱验证码等）
-- 数据隔离：按用户独立 `ui_cache/projects/workspaces` 存储
-- 认证会话：基于 `kacf_session` Cookie 的会话管理
-
-> 如果你要部署给多人使用，请使用 `multi-user` 分支。
-
-## 分支说明
-
-- `personal`：单用户版，轻量、专注个人使用。
-- `multi-user`：多用户版，包含完整账户体系与管理员能力。
+当前代码特征（以本工作区为准）：
+- 单二进制启动（后端 + Web UI）
+- 项目化工作流（新建/切换/删除）
+- 自动保存与断点恢复
+- 无人值守运行（自动恢复次数、停止时间）
+- SSE 实时事件流 + 轮询回退
+- Diff 独立页面展示（主页面不渲染大 diff）
 
 ## 快速开始
 
-### 1. 环境要求
+### 环境要求
 
-- Rust（建议 stable）
-- Linux/macOS（Windows 可运行，但请自行验证依赖）
-- 可用的模型 API Key
+- Rust stable
+- Linux/macOS（Windows 需自行验证）
+- 可用模型 API Key（默认是 DeepSeek 兼容配置）
 
-### 2. 构建与启动
+### 启动
+
+```bash
+cargo run
+```
+
+默认监听：`0.0.0.0:8080`
+
+指定端口：
+
+```bash
+AUTOCODING_PORT=18080 cargo run
+```
+
+### Release 运行
 
 ```bash
 cargo build --release
-cargo run --release
+./target/release/kacf
 ```
 
-默认访问：`http://localhost:8080`
+## 使用流程（当前 UI）
 
-### 3. 基本使用流程
-
-1. 打开 Web UI，填写目标需求（Goal）
+1. 输入目标需求（Goal）
 2. 点击“运行当前项目”
-3. 观察系统自动进行：编码、评测、失败修复、持续迭代
-4. 需要时可启用无人值守、自动恢复、停止计时
+3. 查看状态与日志
+4. 需要时“从断点恢复”
+5. 在全局配置中调整语言、自动恢复次数、停止时间、日志上限
 
-## 关键能力细节
+说明：
+- 项目配置以自动保存为主。
+- Diff 使用“查看diff ↗”在新标签页打开。
 
-### 自我迭代与无人值守
+## 主要接口
 
-- 首轮可澄清，后续以补丁迭代为主
-- 失败后按全局设置自动恢复并继续推进
-- 到达“运行停止时间”后在轮次边界安全停止
+### 页面与静态资源
 
-### 项目与工作区管理
+- `GET /`
+- `GET /diff`
+- `GET /assets/app.css`
+- `GET /assets/app.js`
+- `GET /assets/diff.js`
+- `GET /assets/languages/list`
+- `GET /assets/languages/{code}.json`
 
-- 交互以“项目”为中心：保存/加载/删除/切换
-- 每项目独立 workspace，避免相互污染
-- 刷新页面后状态与配置可恢复
+### 运行控制
 
-### 可观测性与稳定性
+- `POST /start`
+- `POST /resume`
+- `POST /stop`
+- `POST /clarify`
+- `POST /revert`
+- `POST /push`
 
-- 日志流 + SSE 断线回退轮询
-- 运行态指标（含 readiness/gate）
-- 前端离线锁与只读保护，避免误操作
-- UI 缓冲与裁剪策略，降低长会话卡顿风险
+### 项目与状态
 
-## 目录结构（简）
+- `GET /projects`
+- `POST /projects`
+- `DELETE /projects/{id}`
+- `POST /projects/suggest_slug`
+- `GET /project_config`
+- `GET /ui_state`
+- `GET /ui_cache`
+- `PUT /ui_cache`
+- `GET /diff_data`
+
+### 可观测性
+
+- `GET /health`
+- `GET /metrics`
+- `GET /events`
+- `GET /events/stream`
+- `POST /debug/client_logs`
+- `GET /debug/client_logs`
+
+## 目录结构
 
 ```text
 .
 ├── src/
 ├── static/
 │   ├── index.html
+│   ├── diff.html
 │   ├── app.css
 │   ├── js/
 │   └── languages/
 ├── scripts/
-└── autocoding_data/
+│   ├── release_check.sh
+│   ├── smoke_web.sh
+│   └── metrics_gate.sh
+├── autocoding_data/
+└── LICENSE
 ```
 
-## 常用命令
+## 开发检查
 
 ```bash
-# 运行测试
-bash scripts/run_tests.sh
-
-# 发布检查
-bash scripts/release_check.sh
-
-# 指标门禁
-bash scripts/metrics_gate.sh
+cargo check
+cargo test
+cargo clippy --all-targets -- -D warnings
 ```
+
+发布检查：
+
+```bash
+bash scripts/release_check.sh
+```
+
+## 语言包规则
+
+启动时会严格校验 `static/languages`：
+- 文件名格式：`KACF_<language_code>_<pack_version>.json`
+- 必须包含 `__meta`
+- `language_code`、`pack_version`、`inputer_version` 与程序要求一致
+- 全部语言包 key 集合必须和 `en` 完全一致
+
+任一项不满足，服务会拒绝启动。
 
 ## 许可证
 
-本项目使用仓库中的自定义许可证：
-
-- `LICENSE`（KACF Personal & Non-Commercial License 1.1，中英双语）
-
-简述：
-
-- 允许免费个人/非商业使用与非商业二次开发
-- 允许非商业再分发，但必须保留协议并标注来源
-- 任何商业用途或商业二次开发必须先取得作者书面同意
+使用仓库中的自定义许可证：`LICENSE`（KACF Personal & Non-Commercial License 1.1）。
 
 商业授权联系：`gregsons334@gmail.com`
