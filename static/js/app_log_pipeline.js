@@ -1,3 +1,84 @@
+let logDisplayMode = 'simple';
+
+function isAdminViewer() {
+    try {
+        return !!(window.KACF && window.KACF.auth && window.KACF.auth.me && window.KACF.auth.me.is_admin);
+    } catch (_e) {
+        return false;
+    }
+}
+
+function loadLogDisplayMode() {
+    try {
+        const saved = localStorage.getItem('kacf_log_mode');
+        if (saved === 'raw' || saved === 'simple') {
+            logDisplayMode = saved;
+            return;
+        }
+    } catch (_e) {}
+    logDisplayMode = isAdminViewer() ? 'raw' : 'simple';
+}
+
+function saveLogDisplayMode(mode) {
+    if (mode !== 'raw' && mode !== 'simple') return;
+    logDisplayMode = mode;
+    try {
+        localStorage.setItem('kacf_log_mode', mode);
+    } catch (_e) {}
+}
+
+function getLogDisplayMode() {
+    return logDisplayMode;
+}
+
+function setLogDisplayMode(mode) {
+    saveLogDisplayMode(mode);
+    renderCurrentLogView();
+}
+
+function cycleLogDisplayMode() {
+    setLogDisplayMode(logDisplayMode === 'simple' ? 'raw' : 'simple');
+    return logDisplayMode;
+}
+
+function humanizeLogLine(rawLine) {
+    const line = String(rawLine || '').trim();
+    if (!line) return '';
+    const low = line.toLowerCase();
+
+    if (line.startsWith('[Model-Thought]') || line.startsWith('[Model-Stream]') || line.startsWith('[Model] 仍在生成中...')) {
+        return 'AI 正在思考并生成结果...';
+    }
+    if (low.includes('tool=read')) return '正在读取项目文件...';
+    if (low.includes('tool=write') || low.includes('tool=edit') || low.includes('apply_patch')) return '正在修改代码...';
+    if (low.includes('tool=exec') || low.includes('running command') || low.includes('bash -lc')) return '正在执行命令并验证结果...';
+    if (low.includes('tool=web_search') || low.includes('search')) return '正在查找参考信息...';
+    if (low.includes('need_clarify') || low.includes('clarify')) return '需要你补充一点信息才能继续。';
+    if (low.includes('done') && low.includes('ok')) return '任务阶段完成。';
+    if (low.includes('done') && (low.includes('fail') || low.includes('error'))) return '执行遇到问题，正在尝试修复...';
+    if (low.includes('realtime') || low.includes('eventsource') || low.includes('ws') || low.includes('lane enqueue') || low.includes('lane dequeue')) {
+        return '';
+    }
+    if (line.startsWith('[Eval-Digest]')) return '正在做结果评估与质量检查...';
+    if (line.startsWith('{') || line.startsWith('[')) return '系统正在处理中...';
+    return line;
+}
+
+function renderLogForViewer(raw) {
+    if (logDisplayMode === 'raw') return raw;
+    const lines = String(raw || '').split('\n');
+    const out = [];
+    let last = '';
+    for (const one of lines) {
+        const h = humanizeLogLine(one);
+        if (!h) continue;
+        if (h === last) continue;
+        out.push(h);
+        last = h;
+    }
+    return out.join('\n');
+}
+
 function loadProjectLogs() {
     return cacheProjectLogs || {};
 }
@@ -24,7 +105,8 @@ function writeLogForBucket(bucket, content) {
 
 function renderCurrentLogView() {
     const log = document.getElementById('log');
-    log.textContent = readLogForBucket(viewLogBucket());
+    const raw = readLogForBucket(viewLogBucket());
+    log.textContent = renderLogForViewer(raw);
     log.scrollTop = log.scrollHeight;
 }
 
@@ -136,9 +218,7 @@ function appendLog(text) {
         writeLogForBucket(bucket, readLogForBucket(bucket));
         state.streamLineSinceTrim = 0;
     }
-    const log = document.getElementById('log');
-    log.textContent = readLogForBucket(bucket);
-    log.scrollTop = log.scrollHeight;
+    renderCurrentLogView();
 }
 
 function updateDiagnosticsFromLog(text) {
@@ -207,6 +287,7 @@ function markBackendAlive() {
 }
 
 window.KACF = window.KACF || {};
+loadLogDisplayMode();
 window.KACF.logPipeline = {
     loadProjectLogs,
     saveProjectLogs,
@@ -222,6 +303,9 @@ window.KACF.logPipeline = {
     prettyJsonStreamLine,
     getLogRenderState,
     appendLog,
+    getLogDisplayMode,
+    setLogDisplayMode,
+    cycleLogDisplayMode,
     updateDiagnosticsFromLog,
     setStatus,
     setRunState,
