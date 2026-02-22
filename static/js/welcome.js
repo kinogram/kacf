@@ -1,5 +1,5 @@
 (() => {
-    const README_URL = 'https://raw.githubusercontent.com/kinogram/kacf/main/README.md';
+    const README_URL = '/assets/welcome_intro.md';
 
     function escapeHtml(text) {
         return String(text || '')
@@ -99,7 +99,7 @@
             const text = await resp.text();
             root.innerHTML = markdownToHtml(text);
         } catch (_e) {
-            root.innerHTML = '<p>加载失败，请直接打开 GitHub 仓库查看完整介绍。</p>';
+            root.innerHTML = '<p>本机介绍文件加载失败，请联系管理员检查部署文件。</p>';
         }
     }
 
