@@ -420,22 +420,24 @@ function escapeHtml(text) {
         .replace(/>/g, '&gt;');
 }
 
+function hasProjectDraftContext() {
+    const selectedId = document.getElementById('project_selector')?.value || '';
+    if (selectedId) return true;
+    const goal = (document.getElementById('goal')?.value || '').trim();
+    const name = (document.getElementById('project_name')?.value || '').trim();
+    return !!(goal || name);
+}
+
+function touchProjectDraft() {
+    if (!hasProjectDraftContext()) {
+        markProjectClean();
+        return;
+    }
+    markProjectDirty();
+    scheduleDraftSave();
+}
+
 function bindAutoSave() {
-    const hasProjectDraftContext = () => {
-        const selectedId = document.getElementById('project_selector')?.value || '';
-        if (selectedId) return true;
-        const goal = (document.getElementById('goal')?.value || '').trim();
-        const name = (document.getElementById('project_name')?.value || '').trim();
-        return !!(goal || name);
-    };
-    const touchProjectDraft = () => {
-        if (!hasProjectDraftContext()) {
-            markProjectClean();
-            return;
-        }
-        markProjectDirty();
-        scheduleDraftSave();
-    };
     const ids = ['unattended_mode', 'goal', 'remote', 'remote_url', 'branch', 'git_user_name', 'git_user_email'];
     ids.forEach(id => {
         const el = document.getElementById(id);
@@ -464,7 +466,6 @@ function bindEvents() {
     document.getElementById('start_btn').addEventListener('click', startSession);
     document.getElementById('resume_btn').addEventListener('click', resumeSession);
     document.getElementById('stop_btn').addEventListener('click', stopSession);
-    document.getElementById('go_running_project_btn').addEventListener('click', goToRunningProjectView);
     document.getElementById('revert_btn').addEventListener('click', revertLast);
     document.getElementById('push_btn').addEventListener('click', pushRemote);
     document.getElementById('clarify_submit_btn').addEventListener('click', submitClarify);
@@ -489,8 +490,6 @@ function bindEvents() {
         }
     });
     document.getElementById('project_new_btn').addEventListener('click', createNewProject);
-    document.getElementById('project_save_btn').addEventListener('click', () => { saveCurrentProject(); });
-    document.getElementById('project_load_btn').addEventListener('click', loadSelectedProject);
     document.getElementById('project_delete_btn').addEventListener('click', () => { deleteSelectedProject(); });
     document.getElementById('project_selector').addEventListener('change', syncProjectNameFromSelection);
     document.getElementById('project_search').addEventListener('input', () => {
