@@ -588,7 +588,12 @@ function applyNoviceUi(me, isGuest) {
     setHiddenById('project_save_btn', true);
     setHiddenById('project_load_btn', true);
     setHiddenById('project_delete_btn', true);
-    setHiddenById('open_global_config_btn', false);
+    setHiddenById('open_global_config_btn', true);
+    setHiddenById('resume_btn', true);
+    setHiddenById('go_running_project_btn', true);
+    setHiddenById('revert_btn', true);
+    setHiddenById('push_btn', true);
+    setHiddenById('hint_run_new_round', true);
     setHiddenById('diagnostics', true);
     setHiddenById('metrics_text', true);
     setHiddenById('digest_dist_text', true);
