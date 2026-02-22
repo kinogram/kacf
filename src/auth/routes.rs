@@ -503,14 +503,32 @@ pub(crate) async fn admin_get_settings(req: HttpRequest) -> impl Responder {
 
 pub(crate) async fn admin_put_settings(
     req: HttpRequest,
-    body: web::Json<crate::auth::types::AdminSettings>,
+    body: web::Bytes,
 ) -> impl Responder {
     let store = resolve_store(&req);
     let admin = match require_admin(&req, &store) {
         Ok(v) => v,
         Err(resp) => return resp,
     };
-    let mut next = body.into_inner();
+    let incoming: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return HttpResponse::BadRequest().body(format!("invalid settings json: {}", e)),
+    };
+    let has_domain_allowlist_enabled = incoming
+        .get("email_domain_allowlist_enabled")
+        .is_some();
+    let has_domain_allowlist = incoming.get("email_domain_allowlist").is_some();
+    let mut next: crate::auth::types::AdminSettings = match serde_json::from_value(incoming) {
+        Ok(v) => v,
+        Err(e) => return HttpResponse::BadRequest().body(format!("invalid settings payload: {}", e)),
+    };
+    let current = store.read_admin_settings();
+    if !has_domain_allowlist_enabled {
+        next.email_domain_allowlist_enabled = current.email_domain_allowlist_enabled;
+    }
+    if !has_domain_allowlist {
+        next.email_domain_allowlist = current.email_domain_allowlist;
+    }
     next.email_code_ttl_secs = next.email_code_ttl_secs.clamp(30, 1800);
     next.email_code_resend_cooldown_secs = next.email_code_resend_cooldown_secs.clamp(10, 3600);
     next.email_issue_per_min = next.email_issue_per_min.clamp(1, 240);
