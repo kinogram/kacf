@@ -1,6 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::workspace;
+
 pub(crate) fn normalize_rel_path(path: &Path) -> Option<PathBuf> {
     if path.is_absolute() {
         return None;
@@ -62,9 +64,8 @@ pub(crate) fn save_project_config(
     fs::create_dir_all(&ws)?;
     let json = serde_json::to_string_pretty(cfg)?;
     let path = ws.join(project_config_filename);
-    let tmp = path.with_extension("tmp");
-    fs::write(&tmp, json)?;
-    fs::rename(tmp, path)?;
+    workspace::atomic_write_text(&path, &json)
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
     Ok(())
 }
 
@@ -102,9 +103,8 @@ pub(crate) fn write_ui_cache(
         fs::create_dir_all(parent)?;
     }
     let json = serde_json::to_string_pretty(payload)?;
-    let tmp = path.with_extension("tmp");
-    fs::write(&tmp, json)?;
-    fs::rename(tmp, path)?;
+    workspace::atomic_write_text(&path, &json)
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
     Ok(())
 }
 
