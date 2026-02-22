@@ -589,11 +589,11 @@ function applyNoviceUi(me, isGuest) {
     setHiddenById('project_load_btn', true);
     setHiddenById('project_delete_btn', true);
     setHiddenById('open_global_config_btn', false);
-    setHiddenById('diagnostics', false);
-    setHiddenById('metrics_text', false);
-    setHiddenById('digest_dist_text', false);
-    setHiddenById('root_top_text', false);
-    setHiddenById('vm_card', isGuest);
+    setHiddenById('diagnostics', true);
+    setHiddenById('metrics_text', true);
+    setHiddenById('digest_dist_text', true);
+    setHiddenById('root_top_text', true);
+    setHiddenById('vm_card', true);
 }
 
 function autoOpenLatestProject() {
