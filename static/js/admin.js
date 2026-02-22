@@ -76,20 +76,9 @@
     function bindLeaveGuard() {
         window.addEventListener('beforeunload', (e) => {
             if (!settingsDirty) return;
-            const msg = txt('admin_unsaved_leave_confirm', 'You have unsaved changes. Leave without saving?');
             e.preventDefault();
-            e.returnValue = msg;
+            e.returnValue = '';
         });
-        const backBtn = document.getElementById('admin_back_btn');
-        if (backBtn) {
-            backBtn.addEventListener('click', (e) => {
-                if (!settingsDirty) return;
-                const ok = confirm(txt('admin_unsaved_leave_confirm', 'You have unsaved changes. Leave without saving?'));
-                if (!ok) {
-                    e.preventDefault();
-                }
-            });
-        }
     }
 
     async function getJson(url) {
