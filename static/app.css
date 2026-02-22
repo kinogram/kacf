@@ -206,6 +206,20 @@
             color: var(--text);
             font-size: 15px;
         }
+        input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            padding: 0;
+            margin: 0 8px 0 0;
+            border-radius: 4px;
+            vertical-align: middle;
+            flex: 0 0 auto;
+        }
+        label > input[type="checkbox"] + span,
+        label > input[type="checkbox"] + strong,
+        label > input[type="checkbox"] + em {
+            vertical-align: middle;
+        }
         textarea {
             min-height: 92px;
             resize: vertical;

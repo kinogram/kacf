@@ -421,18 +421,31 @@ function escapeHtml(text) {
 }
 
 function bindAutoSave() {
+    const hasProjectDraftContext = () => {
+        const selectedId = document.getElementById('project_selector')?.value || '';
+        if (selectedId) return true;
+        const goal = (document.getElementById('goal')?.value || '').trim();
+        const name = (document.getElementById('project_name')?.value || '').trim();
+        return !!(goal || name);
+    };
+    const touchProjectDraft = () => {
+        if (!hasProjectDraftContext()) {
+            markProjectClean();
+            return;
+        }
+        markProjectDirty();
+        scheduleDraftSave();
+    };
     const ids = ['unattended_mode', 'goal', 'remote', 'remote_url', 'branch', 'git_user_name', 'git_user_email'];
     ids.forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
         el.addEventListener('input', () => {
-            markProjectDirty();
-            scheduleDraftSave();
+            touchProjectDraft();
             if (id === 'unattended_mode') renderUnattendedState();
         });
         el.addEventListener('change', () => {
-            markProjectDirty();
-            scheduleDraftSave();
+            touchProjectDraft();
             if (id === 'unattended_mode') renderUnattendedState();
         });
     });
@@ -494,7 +507,7 @@ function bindEvents() {
         clarifyForm.addEventListener('change', lockClarifyRender);
     }
     document.getElementById('project_name').addEventListener('input', () => {
-        markProjectDirty();
+        touchProjectDraft();
         const value = document.getElementById('project_name').value.trim();
         if (!value) {
             projectNameManualOverride = false;
