@@ -165,7 +165,9 @@
                     if (verifyBtn) verifyBtn.style.display = '';
                     const hint = document.getElementById('login_code_hint');
                     if (hint) hint.textContent = (data.dev_code ? `${txt('dev_code_hint', 'Dev code')}: ${data.dev_code}` : '');
-                    showHint('login_hint', txt('login_need_code', 'Please enter the email code.'), false);
+                    const retry = Number(data.retry_after_secs || 0);
+                    const extra = retry > 0 ? ` (${retry}s)` : '';
+                    showHint('login_hint', `${txt('login_need_code', 'Please enter the email code.')}${extra}`, false);
                 } else {
                     showHint('login_hint', r.text || `HTTP ${r.status}`, true);
                 }

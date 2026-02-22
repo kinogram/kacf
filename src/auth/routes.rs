@@ -1,12 +1,17 @@
 use std::collections::HashMap;
+use std::num::NonZeroU32;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
+use governor::clock::DefaultClock;
+use governor::state::keyed::DashMapStateStore;
+use governor::{Quota, RateLimiter};
 use serde::Deserialize;
 use serde::Serialize;
 
 use crate::auth::session::{build_clear_session_cookie, build_session_cookie, read_session_cookie};
-use crate::auth::store::AuthStore;
+use crate::auth::store::{AuthStore, EmailCodeConsumeResult, EmailCodeIssueResult};
 use crate::auth::types::{AccountRole, AuthMeResponse, LoginOption};
 
 #[derive(Deserialize)]
@@ -49,6 +54,90 @@ fn resolve_store(_req: &HttpRequest) -> AuthStore {
     let store = AuthStore::new(paths);
     let _ = store.ensure_dirs();
     store
+}
+
+const EMAIL_CODE_TTL_SECS: u64 = 10 * 60;
+const EMAIL_CODE_RESEND_COOLDOWN_SECS: u64 = 60;
+
+type KeyLimiter = RateLimiter<String, DashMapStateStore<String>, DefaultClock>;
+
+fn parse_u32_env(name: &str, default: u32, min: u32, max: u32) -> u32 {
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .unwrap_or(default)
+        .clamp(min, max)
+}
+
+fn issue_limiter() -> &'static KeyLimiter {
+    static LIM: OnceLock<KeyLimiter> = OnceLock::new();
+    LIM.get_or_init(|| {
+        let per_min = parse_u32_env("AUTOCODING_EMAIL_ISSUE_PER_MIN", 3, 1, 60);
+        let quota = Quota::per_minute(
+            NonZeroU32::new(per_min).expect("AUTOCODING_EMAIL_ISSUE_PER_MIN must be > 0"),
+        );
+        RateLimiter::keyed(quota)
+    })
+}
+
+fn verify_limiter() -> &'static KeyLimiter {
+    static LIM: OnceLock<KeyLimiter> = OnceLock::new();
+    LIM.get_or_init(|| {
+        let per_min = parse_u32_env("AUTOCODING_EMAIL_VERIFY_PER_MIN", 12, 1, 240);
+        let quota = Quota::per_minute(
+            NonZeroU32::new(per_min).expect("AUTOCODING_EMAIL_VERIFY_PER_MIN must be > 0"),
+        );
+        RateLimiter::keyed(quota)
+    })
+}
+
+fn check_issue_quota(scope: &str, key: &str) -> Result<(), HttpResponse> {
+    let composed = format!("{scope}:{key}");
+    if issue_limiter().check_key(&composed).is_err() {
+        return Err(HttpResponse::TooManyRequests().body("too many code requests, try later"));
+    }
+    Ok(())
+}
+
+fn check_verify_quota(scope: &str, key: &str) -> Result<(), HttpResponse> {
+    let composed = format!("{scope}:{key}");
+    if verify_limiter().check_key(&composed).is_err() {
+        return Err(HttpResponse::TooManyRequests().body("too many verify attempts, try later"));
+    }
+    Ok(())
+}
+
+fn should_expose_dev_code() -> bool {
+    match std::env::var("AUTOCODING_AUTH_DEV_CODE") {
+        Ok(v) => {
+            let t = v.trim().to_ascii_lowercase();
+            t == "1" || t == "true" || t == "yes" || t == "on"
+        }
+        Err(_) => false,
+    }
+}
+
+fn issue_email_code(
+    store: &AuthStore,
+    purpose: &str,
+    key: &str,
+) -> Result<(String, EmailCodeIssueResult), String> {
+    store.create_email_code_with_policy(
+        purpose,
+        key,
+        EMAIL_CODE_TTL_SECS,
+        EMAIL_CODE_RESEND_COOLDOWN_SECS,
+    )
+}
+
+async fn send_email_code_or_fail(
+    to_email: &str,
+    scenario: &str,
+    code: &str,
+) -> Result<(), HttpResponse> {
+    crate::auth::email::send_verification_code(to_email, scenario, code, EMAIL_CODE_TTL_SECS)
+        .await
+        .map_err(|e| HttpResponse::InternalServerError().body(e))
 }
 
 fn email_allowed(email: &str) -> bool {
@@ -189,16 +278,44 @@ pub(crate) async fn login(req: HttpRequest, body: web::Json<LoginPayload>) -> im
                 .json(serde_json::json!({"ok": true}))
         }
         LoginOption::EmailOnly => {
-            let code = match store.create_email_code("login", &user.username, 10 * 60) {
+            if let Err(resp) = check_issue_quota("login_issue", &user.username) {
+                return resp;
+            }
+            let (code, issue) = match issue_email_code(&store, "login", &user.username) {
                 Ok(v) => v,
                 Err(e) => return HttpResponse::InternalServerError().body(e),
             };
+            if let EmailCodeIssueResult::Issued = issue {
+                if let Err(resp) = send_email_code_or_fail(&user.email, "login", &code).await {
+                    return resp;
+                }
+            }
             let mut fields = HashMap::new();
             fields.insert("username", user.username.clone());
+            fields.insert(
+                "issue",
+                match issue {
+                    EmailCodeIssueResult::Issued => "issued".to_string(),
+                    EmailCodeIssueResult::Throttled { retry_after_secs } =>
+                        format!("throttled:{retry_after_secs}s"),
+                },
+            );
             store.audit("login_email_code_issued", &fields);
-            HttpResponse::Conflict().json(serde_json::json!({
+            let mut payload = serde_json::json!({
                 "need": "email_code",
-                "dev_code": code
+                "message": "email code required",
+            });
+            if let EmailCodeIssueResult::Throttled { retry_after_secs } = issue {
+                payload["retry_after_secs"] = serde_json::json!(retry_after_secs);
+            }
+            if should_expose_dev_code() {
+                payload["dev_code"] = serde_json::json!(code);
+            }
+            HttpResponse::Conflict().json(serde_json::json!({
+                "need": payload["need"],
+                "message": payload["message"],
+                "retry_after_secs": payload["retry_after_secs"],
+                "dev_code": payload["dev_code"],
             }))
         }
         LoginOption::PasswordEmail2fa => {
@@ -207,16 +324,44 @@ pub(crate) async fn login(req: HttpRequest, body: web::Json<LoginPayload>) -> im
             if !ok {
                 return HttpResponse::Unauthorized().body("invalid credentials");
             }
-            let code = match store.create_email_code("login", &user.username, 10 * 60) {
+            if let Err(resp) = check_issue_quota("login_issue", &user.username) {
+                return resp;
+            }
+            let (code, issue) = match issue_email_code(&store, "login", &user.username) {
                 Ok(v) => v,
                 Err(e) => return HttpResponse::InternalServerError().body(e),
             };
+            if let EmailCodeIssueResult::Issued = issue {
+                if let Err(resp) = send_email_code_or_fail(&user.email, "login", &code).await {
+                    return resp;
+                }
+            }
             let mut fields = HashMap::new();
             fields.insert("username", user.username.clone());
+            fields.insert(
+                "issue",
+                match issue {
+                    EmailCodeIssueResult::Issued => "issued".to_string(),
+                    EmailCodeIssueResult::Throttled { retry_after_secs } =>
+                        format!("throttled:{retry_after_secs}s"),
+                },
+            );
             store.audit("login_password_ok_email_code_issued", &fields);
-            HttpResponse::Conflict().json(serde_json::json!({
+            let mut payload = serde_json::json!({
                 "need": "email_code",
-                "dev_code": code
+                "message": "email code required",
+            });
+            if let EmailCodeIssueResult::Throttled { retry_after_secs } = issue {
+                payload["retry_after_secs"] = serde_json::json!(retry_after_secs);
+            }
+            if should_expose_dev_code() {
+                payload["dev_code"] = serde_json::json!(code);
+            }
+            HttpResponse::Conflict().json(serde_json::json!({
+                "need": payload["need"],
+                "message": payload["message"],
+                "retry_after_secs": payload["retry_after_secs"],
+                "dev_code": payload["dev_code"],
             }))
         }
     }
@@ -250,9 +395,24 @@ pub(crate) async fn verify_email_code(
     if user.banned {
         return HttpResponse::Forbidden().body("account banned");
     }
-    let ok = store.consume_email_code("login", &user.username, &payload.code);
-    if !ok {
-        return HttpResponse::Unauthorized().body("invalid code");
+    let code_raw = payload.code.trim();
+    if code_raw.len() != 6 || !code_raw.chars().all(|c| c.is_ascii_digit()) {
+        return HttpResponse::BadRequest().body("code must be 6 digits");
+    }
+    if let Err(resp) = check_verify_quota("login_verify", &user.username) {
+        return resp;
+    }
+    match store.consume_email_code_detailed("login", &user.username, code_raw) {
+        EmailCodeConsumeResult::Consumed => {}
+        EmailCodeConsumeResult::Invalid => {
+            return HttpResponse::Unauthorized().body("invalid code");
+        }
+        EmailCodeConsumeResult::TooManyAttempts => {
+            return HttpResponse::TooManyRequests().body("too many invalid code attempts");
+        }
+        EmailCodeConsumeResult::NotFoundOrExpired => {
+            return HttpResponse::Unauthorized().body("code expired or not found");
+        }
     }
     let session = match store.create_session_for_user(&user) {
         Ok(v) => v,
@@ -768,8 +928,26 @@ fn verify_identity(
     }
     if user.login_option.requires_email_code() {
         let code = current_email_code.unwrap_or("").trim();
-        if !store.consume_email_code("verify_current_email", &user.username, code) {
-            return Err("invalid current email code".to_string());
+        if code.len() != 6 || !code.chars().all(|c| c.is_ascii_digit()) {
+            return Err("current email code must be 6 digits".to_string());
+        }
+        if verify_limiter()
+            .check_key(&format!("verify_current_email:{}", user.username))
+            .is_err()
+        {
+            return Err("too many verify attempts, try later".to_string());
+        }
+        match store.consume_email_code_detailed("verify_current_email", &user.username, code) {
+            EmailCodeConsumeResult::Consumed => {}
+            EmailCodeConsumeResult::Invalid => {
+                return Err("invalid current email code".to_string());
+            }
+            EmailCodeConsumeResult::TooManyAttempts => {
+                return Err("too many invalid current email code attempts".to_string());
+            }
+            EmailCodeConsumeResult::NotFoundOrExpired => {
+                return Err("current email code expired or not found".to_string());
+            }
         }
     }
     Ok(())
@@ -794,14 +972,39 @@ pub(crate) async fn account_request_current_email_code(req: HttpRequest) -> impl
     if user.banned {
         return HttpResponse::Forbidden().body("account banned");
     }
-    let code = match store.create_email_code("verify_current_email", &user.username, 10 * 60) {
+    if let Err(resp) = check_issue_quota("verify_current_email_issue", &user.username) {
+        return resp;
+    }
+    let (code, issue) = match issue_email_code(&store, "verify_current_email", &user.username) {
         Ok(v) => v,
         Err(e) => return HttpResponse::InternalServerError().body(e),
     };
+    if let EmailCodeIssueResult::Issued = issue {
+        if let Err(resp) =
+            send_email_code_or_fail(&user.email, "verify_current_email", &code).await
+        {
+            return resp;
+        }
+    }
     let mut fields = HashMap::new();
     fields.insert("username", user.username);
+    fields.insert(
+        "issue",
+        match issue {
+            EmailCodeIssueResult::Issued => "issued".to_string(),
+            EmailCodeIssueResult::Throttled { retry_after_secs } =>
+                format!("throttled:{retry_after_secs}s"),
+        },
+    );
     store.audit("account_current_email_code_issued", &fields);
-    HttpResponse::Ok().json(serde_json::json!({"dev_code": code}))
+    let mut payload = serde_json::json!({});
+    if let EmailCodeIssueResult::Throttled { retry_after_secs } = issue {
+        payload["retry_after_secs"] = serde_json::json!(retry_after_secs);
+    }
+    if should_expose_dev_code() {
+        payload["dev_code"] = serde_json::json!(code);
+    }
+    HttpResponse::Ok().json(payload)
 }
 
 #[derive(Deserialize)]
@@ -895,15 +1098,38 @@ pub(crate) async fn account_request_new_email_code(
     if !email_allowed(&new_email) {
         return HttpResponse::BadRequest().body("email not allowed");
     }
+    if let Err(resp) = check_issue_quota("verify_new_email_issue", &user.username) {
+        return resp;
+    }
     let key = format!("{}:{}", user.username, new_email);
-    let code = match store.create_email_code("verify_new_email", &key, 10 * 60) {
+    let (code, issue) = match issue_email_code(&store, "verify_new_email", &key) {
         Ok(v) => v,
         Err(e) => return HttpResponse::InternalServerError().body(e),
     };
+    if let EmailCodeIssueResult::Issued = issue {
+        if let Err(resp) = send_email_code_or_fail(&new_email, "verify_new_email", &code).await {
+            return resp;
+        }
+    }
     let mut fields = HashMap::new();
     fields.insert("username", user.username);
+    fields.insert(
+        "issue",
+        match issue {
+            EmailCodeIssueResult::Issued => "issued".to_string(),
+            EmailCodeIssueResult::Throttled { retry_after_secs } =>
+                format!("throttled:{retry_after_secs}s"),
+        },
+    );
     store.audit("account_new_email_code_issued", &fields);
-    HttpResponse::Ok().json(serde_json::json!({"dev_code": code}))
+    let mut payload = serde_json::json!({});
+    if let EmailCodeIssueResult::Throttled { retry_after_secs } = issue {
+        payload["retry_after_secs"] = serde_json::json!(retry_after_secs);
+    }
+    if should_expose_dev_code() {
+        payload["dev_code"] = serde_json::json!(code);
+    }
+    HttpResponse::Ok().json(payload)
 }
 
 #[derive(Deserialize)]
@@ -950,8 +1176,25 @@ pub(crate) async fn account_confirm_email_change(
         return HttpResponse::BadRequest().body("email not allowed");
     }
     let key = format!("{}:{}", user.username, new_email);
-    if !store.consume_email_code("verify_new_email", &key, &p.new_email_code) {
-        return HttpResponse::Unauthorized().body("invalid new email code");
+    let new_code = p.new_email_code.trim();
+    if new_code.len() != 6 || !new_code.chars().all(|c| c.is_ascii_digit()) {
+        return HttpResponse::BadRequest().body("new email code must be 6 digits");
+    }
+    if let Err(resp) = check_verify_quota("verify_new_email", &user.username) {
+        return resp;
+    }
+    match store.consume_email_code_detailed("verify_new_email", &key, new_code) {
+        EmailCodeConsumeResult::Consumed => {}
+        EmailCodeConsumeResult::Invalid => {
+            return HttpResponse::Unauthorized().body("invalid new email code");
+        }
+        EmailCodeConsumeResult::TooManyAttempts => {
+            return HttpResponse::TooManyRequests()
+                .body("too many invalid new email code attempts");
+        }
+        EmailCodeConsumeResult::NotFoundOrExpired => {
+            return HttpResponse::Unauthorized().body("new email code expired or not found");
+        }
     }
     // Prevent duplicate email.
     if let Some(existing) = store.find_user_by_email(&new_email) {

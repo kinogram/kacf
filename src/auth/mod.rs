@@ -4,6 +4,7 @@
 //! view other users' passwords, so passwords are stored in plaintext in the local
 //! user database. Do not expose this server to untrusted networks.
 
+mod email;
 mod pages;
 mod routes;
 pub(crate) mod session;

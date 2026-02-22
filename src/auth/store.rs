@@ -81,6 +81,10 @@ struct ChallengeEntry {
     code: String,
     expires_at_unix: u64,
     created_at_unix: u64,
+    #[serde(default)]
+    attempts: u32,
+    #[serde(default = "default_challenge_max_attempts")]
+    max_attempts: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,6 +96,24 @@ impl Default for ChallengesDb {
     fn default() -> Self {
         Self { items: vec![] }
     }
+}
+
+fn default_challenge_max_attempts() -> u32 {
+    8
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EmailCodeIssueResult {
+    Issued,
+    Throttled { retry_after_secs: u64 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EmailCodeConsumeResult {
+    Consumed,
+    Invalid,
+    TooManyAttempts,
+    NotFoundOrExpired,
 }
 
 #[derive(Clone)]
@@ -125,32 +147,51 @@ impl AuthStore {
         Ok(())
     }
 
-    pub(crate) fn create_email_code(
+    pub(crate) fn create_email_code_with_policy(
         &self,
         purpose: &str,
         key: &str,
         ttl_secs: u64,
-    ) -> Result<String, String> {
+        min_interval_secs: u64,
+    ) -> Result<(String, EmailCodeIssueResult), String> {
         let p = purpose.trim();
         let k = key.trim();
         if p.is_empty() || k.is_empty() {
             return Err("invalid challenge key".to_string());
         }
-        let code = format!("{:06}", rand::thread_rng().gen_range(0..1_000_000u32));
         let now = now_unix();
+        let _g = self.lock.lock().unwrap();
+        let mut db: ChallengesDb =
+            read_json_or_default(&self.paths.challenges_db).unwrap_or_default();
+        let min_gap = min_interval_secs.min(3600);
+        if min_gap > 0 {
+            if let Some(existing) = db.items.iter().find(|x| {
+                x.purpose == p && x.key == k && x.expires_at_unix > now && x.created_at_unix <= now
+            }) {
+                let elapsed = now.saturating_sub(existing.created_at_unix);
+                if elapsed < min_gap {
+                    let retry_after = min_gap.saturating_sub(elapsed);
+                    return Ok((
+                        existing.code.clone(),
+                        EmailCodeIssueResult::Throttled {
+                            retry_after_secs: retry_after,
+                        },
+                    ));
+                }
+            }
+        }
+        let code = format!("{:06}", rand::thread_rng().gen_range(0..1_000_000u32));
         let entry = ChallengeEntry {
             purpose: p.to_string(),
             key: k.to_string(),
             code: code.clone(),
             expires_at_unix: now.saturating_add(ttl_secs.max(30).min(1800)),
             created_at_unix: now,
+            attempts: 0,
+            max_attempts: default_challenge_max_attempts(),
         };
-        let _g = self.lock.lock().unwrap();
-        let mut db: ChallengesDb =
-            read_json_or_default(&self.paths.challenges_db).unwrap_or_default();
         // Replace any previous active challenge with same purpose+key.
-        db.items
-            .retain(|x| !(x.purpose == entry.purpose && x.key == entry.key));
+        db.items.retain(|x| !(x.purpose == p && x.key == k));
         db.items.push(entry);
         // prune expired and cap
         db.items.retain(|x| x.expires_at_unix > now);
@@ -160,35 +201,58 @@ impl AuthStore {
         }
         let json = serde_json::to_string_pretty(&db).map_err(|e| e.to_string())?;
         atomic_write(&self.paths.challenges_db, json).map_err(|e| e.to_string())?;
-        Ok(code)
+        Ok((code, EmailCodeIssueResult::Issued))
     }
 
-    pub(crate) fn consume_email_code(&self, purpose: &str, key: &str, code: &str) -> bool {
+    pub(crate) fn consume_email_code_detailed(
+        &self,
+        purpose: &str,
+        key: &str,
+        code: &str,
+    ) -> EmailCodeConsumeResult {
         let p = purpose.trim();
         let k = key.trim();
         let c = code.trim();
         if p.is_empty() || k.is_empty() || c.is_empty() {
-            return false;
+            return EmailCodeConsumeResult::Invalid;
         }
         let now = now_unix();
         let _g = self.lock.lock().unwrap();
         let mut db: ChallengesDb =
             read_json_or_default(&self.paths.challenges_db).unwrap_or_default();
-        let mut ok = false;
+        let mut result = EmailCodeConsumeResult::NotFoundOrExpired;
+        for item in db.items.iter_mut() {
+            if item.purpose != p || item.key != k {
+                continue;
+            }
+            if item.expires_at_unix <= now {
+                result = EmailCodeConsumeResult::NotFoundOrExpired;
+                continue;
+            }
+            if item.attempts >= item.max_attempts.max(1) {
+                result = EmailCodeConsumeResult::TooManyAttempts;
+                continue;
+            }
+            if item.code == c {
+                item.expires_at_unix = 0; // consumed, will be pruned below
+                result = EmailCodeConsumeResult::Consumed;
+            } else {
+                item.attempts = item.attempts.saturating_add(1);
+                result = if item.attempts >= item.max_attempts.max(1) {
+                    EmailCodeConsumeResult::TooManyAttempts
+                } else {
+                    EmailCodeConsumeResult::Invalid
+                };
+            }
+            break;
+        }
         db.items.retain(|x| {
-            if x.expires_at_unix <= now {
-                return false;
-            }
-            if x.purpose == p && x.key == k && x.code == c {
-                ok = true;
-                return false; // consume
-            }
-            true
+            x.expires_at_unix > now && x.expires_at_unix > 0 && x.attempts < x.max_attempts.max(1)
         });
         if let Ok(json) = serde_json::to_string_pretty(&db) {
             let _ = atomic_write(&self.paths.challenges_db, json);
         }
-        ok
+        result
     }
 
     pub(crate) fn read_admin_settings(&self) -> AdminSettings {
