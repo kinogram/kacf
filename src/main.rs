@@ -1,4 +1,3 @@
-mod auth;
 mod deepseek_api;
 mod git_utils;
 mod lock_utils;
@@ -14,11 +13,8 @@ mod protocol_stream;
 mod protocol_system_prompt;
 mod protocol_wait;
 mod runner;
-mod self_debug;
-mod starter_bootstrap;
 mod web_ui;
 mod web_ui_analytics;
-mod web_ui_authz;
 mod web_ui_cache_logic;
 mod web_ui_debug;
 mod web_ui_events;
@@ -28,9 +24,10 @@ mod web_ui_projects;
 mod web_ui_runtime_env;
 mod web_ui_runtime_metrics;
 mod web_ui_session;
+mod web_ui_authz;
 mod web_ui_slug;
 mod web_ui_store;
-mod web_ui_vm;
+mod auth;
 mod workspace;
 
 use crossbeam_channel::unbounded;
