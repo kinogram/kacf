@@ -107,6 +107,27 @@ pub(crate) struct SlugSuggestResponse {
     pub(crate) source: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct StarterPreviewPayload {
+    #[serde(default)]
+    pub(crate) goal: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct StarterRepoPreview {
+    pub(crate) name: String,
+    pub(crate) url: String,
+    pub(crate) quickstart: String,
+    pub(crate) notes: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct StarterPreviewResponse {
+    pub(crate) scene: String,
+    pub(crate) reason: String,
+    pub(crate) repos: Vec<StarterRepoPreview>,
+}
+
 #[derive(Debug, Clone, Serialize, Default)]
 pub(crate) struct RuntimeStatus {
     pub(crate) running: bool,
