@@ -1603,7 +1603,7 @@ async function provisionVm() {
             ssh_user: (el('vm_ssh_user')?.value || '').trim(),
             cpu: asPositiveInt(el('vm_cpu')?.value, 2),
             memory_mb: asPositiveInt(el('vm_memory_mb')?.value, 4096),
-            disk_gb: asPositiveInt(el('vm_disk_gb')?.value, 40),
+            disk_gb: asPositiveInt(el('vm_disk_gb')?.value, 1),
         };
         const res = await vmApi('/vm/provision', 'POST', body);
         setStatus(txt('status_vm_provision_ok', 'VM provisioned'), 'status-warn');

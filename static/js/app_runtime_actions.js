@@ -9,7 +9,6 @@ function assertRuntimeActionDependencies() {
             'goToRunningProjectView',
             'currentLogBucket',
             'viewLogBucket',
-            'sanitizeDiffText',
             'setRunActionButtons',
             'setRunningProjectIndicator',
             'setProjectControlsDisabled',
@@ -33,7 +32,6 @@ function assertRuntimeActionDependencies() {
             'writeBucketUiState',
             'renderClarifyQuestions',
             'renderUiForViewBucket',
-            'renderDiffPanel',
             'resetBucketRuntimeUiState',
             'bindGlobalOptionInput',
             'applyGlobalOptionsToInputs',
@@ -86,6 +84,9 @@ function assertRuntimeActionDependencies() {
             'startEventStream',
             'closeEventStream',
         ],
+        vm: [
+            'init',
+        ],
     };
     Object.entries(required).forEach(([scope, methods]) => {
         const api = root[scope];
@@ -109,7 +110,6 @@ const {
     goToRunningProjectView,
     currentLogBucket,
     viewLogBucket,
-    sanitizeDiffText,
     setRunActionButtons,
     setRunningProjectIndicator,
     setProjectControlsDisabled,
@@ -133,7 +133,6 @@ const {
     writeBucketUiState,
     renderClarifyQuestions,
     renderUiForViewBucket,
-    renderDiffPanel,
     resetBucketRuntimeUiState,
     bindGlobalOptionInput,
     applyGlobalOptionsToInputs,
@@ -158,6 +157,7 @@ const {
 	    closeGlobalConfigModal,
     getFormData,
 } = window.KACF.runtimeState;
+const { init: initVmPanel } = window.KACF.vm;
 const {
     ensureWorkspaceForCurrentProject,
     saveCurrentProject,
@@ -202,10 +202,6 @@ async function startSession() {
     }
     if (!body.api_key) {
         setStatus(txt('status_start_api_key_empty', ''), 'status-danger');
-        return;
-    }
-    if (!body.git_user_name || !body.git_user_email) {
-        setStatus(txt('status_start_git_identity_empty', ''), 'status-danger');
         return;
     }
     if (stopAfterMinutesSetting() === 0) {
@@ -412,11 +408,7 @@ async function submitClarify(e) {
 }
 
 function renderDiff(diffText) {
-    const bucket = currentLogBucket();
-    const safe = sanitizeDiffText(diffText || '');
-    writeBucketUiState(bucket, { diff_text: safe });
-    if (viewLogBucket() !== bucket) return;
-    renderDiffPanel(safe);
+    void diffText;
 }
 
 function escapeHtml(text) {
@@ -427,18 +419,31 @@ function escapeHtml(text) {
 }
 
 function bindAutoSave() {
+    const hasProjectDraftContext = () => {
+        const selectedId = document.getElementById('project_selector')?.value || '';
+        if (selectedId) return true;
+        const goal = (document.getElementById('goal')?.value || '').trim();
+        const name = (document.getElementById('project_name')?.value || '').trim();
+        return !!(goal || name);
+    };
+    const touchProjectDraft = () => {
+        if (!hasProjectDraftContext()) {
+            markProjectClean();
+            return;
+        }
+        markProjectDirty();
+        scheduleDraftSave();
+    };
     const ids = ['unattended_mode', 'goal', 'remote', 'remote_url', 'branch', 'git_user_name', 'git_user_email'];
     ids.forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
         el.addEventListener('input', () => {
-            markProjectDirty();
-            scheduleDraftSave();
+            touchProjectDraft();
             if (id === 'unattended_mode') renderUnattendedState();
         });
         el.addEventListener('change', () => {
-            markProjectDirty();
-            scheduleDraftSave();
+            touchProjectDraft();
             if (id === 'unattended_mode') renderUnattendedState();
         });
     });
@@ -472,6 +477,14 @@ function bindEvents() {
     document.getElementById('export_log_btn').addEventListener('click', exportLogs);
     document.getElementById('export_snapshot_btn').addEventListener('click', exportSnapshot);
     document.getElementById('export_report_btn').addEventListener('click', exportReleaseReport);
+    document.getElementById('view_diff_btn').addEventListener('click', () => {
+        const bucket = currentLogBucket();
+        const url = `/diff?bucket=${encodeURIComponent(bucket)}`;
+        const w = window.open(url, '_blank', 'noopener');
+        if (!w) {
+            setStatus(txt('status_open_diff_failed', ''), 'status-danger');
+        }
+    });
     document.getElementById('project_new_btn').addEventListener('click', createNewProject);
     document.getElementById('project_save_btn').addEventListener('click', () => { saveCurrentProject(); });
     document.getElementById('project_load_btn').addEventListener('click', loadSelectedProject);
@@ -491,7 +504,7 @@ function bindEvents() {
         clarifyForm.addEventListener('change', lockClarifyRender);
     }
     document.getElementById('project_name').addEventListener('input', () => {
-        markProjectDirty();
+        touchProjectDraft();
         const value = document.getElementById('project_name').value.trim();
         if (!value) {
             projectNameManualOverride = false;
@@ -514,10 +527,6 @@ function bindEvents() {
     bindGlobalOptionInput('global_log_max_chars', () => {
         maybeWarnLargeCharLimit(txt('label_global_log_max_chars', ''));
         renderCurrentLogView();
-    });
-    bindGlobalOptionInput('global_diff_max_chars', () => {
-        maybeWarnLargeCharLimit(txt('label_global_diff_max_chars', ''));
-        renderUiForViewBucket();
     });
     document.getElementById('language_select').addEventListener('change', async () => {
         const next = normalizeLanguageCode(document.getElementById('language_select').value);
@@ -547,22 +556,38 @@ function bindEvents() {
         }
         applySidebarLayout();
         // Recompute topbar marquee thresholds when layout changes.
-        const ids = ['runbar_text', 'running_project_text', 'unattended_state_text'];
-        ids.forEach(id => {
-            const el = document.getElementById(id);
+        if (typeof refreshTopbarCombined === 'function') {
+            refreshTopbarCombined();
+        } else {
+            const el = document.getElementById('topbar_line_text');
             if (el && typeof setTopbarHintText === 'function') {
-                const inner = el.querySelector(':scope > span.marquee-inner');
-                if (inner) {
-                    const curW = Math.max(0, el.clientWidth);
-                    const prevW = Number(el.dataset.marqueeClientWidth || '0');
-                    if (Math.abs(curW - prevW) >= 1) {
-                        el.dataset.marqueeClientWidth = String(curW);
-                        setTopbarHintText(el, inner.textContent || '', { force: true });
-                    }
-                }
+                setTopbarHintText(el, el.textContent || '', { force: true, allowResetWhenSameText: true });
             }
-        });
+        }
     });
+}
+
+function setHiddenById(id, hidden) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.display = hidden ? 'none' : '';
+}
+
+function applyNoviceUi(me, isGuest) {
+    const isAdmin = !!(me && me.is_admin);
+    setHiddenById('project_sidebar', true);
+    setHiddenById('sidebar_toggle_btn', true);
+    setHiddenById('sidebar_overlay', true);
+    setHiddenById('advanced_git_section', true);
+    setHiddenById('advanced_unattended_section', true);
+    setHiddenById('revert_btn', true);
+    setHiddenById('push_btn', true);
+    setHiddenById('resume_btn', true);
+    setHiddenById('go_running_project_btn', true);
+    setHiddenById('project_save_btn', true);
+    setHiddenById('project_load_btn', true);
+    setHiddenById('project_delete_btn', true);
+    setHiddenById('vm_card', isGuest || !isAdmin);
 }
 
 function autoOpenLatestProject() {
@@ -690,6 +715,8 @@ async function init() {
     }
     sidebarMobileOpen = false;
     applyStaticCopyToDom();
+    applyNoviceUi(me, isGuest);
+    await initVmPanel({ guestMode: isGuest });
     try { window.KACF.auth && window.KACF.auth.renderAccountMenu && window.KACF.auth.renderAccountMenu(); } catch (_e) {}
     if (me && me.forced_notice) {
         await showForcedNoticeModal(String(me.forced_notice || ''), Number(me.forced_notice_min_seconds || 0));

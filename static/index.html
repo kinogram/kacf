@@ -51,7 +51,7 @@
                 <div class="sidebar-brand" id="sidebar_brand"></div>
             </div>
             <div class="sidebar-content">
-                <div>
+                <div id="advanced_unattended_section" style="display:none;">
                     <label for="unattended_mode" id="label_unattended_mode"></label>
                     <input id="unattended_mode" type="checkbox">
                 </div>
@@ -97,33 +97,34 @@
 	                <textarea id="goal" placeholder=""></textarea>
 	            </div>
 	
-	            <hr style="border:none;border-top:1px solid var(--line);margin:14px 0;">
-
-            <h3 class="title" style="font-size:16px;" id="section_git_title"></h3>
-            <div class="row three">
-                <div>
-                    <label for="remote" id="label_remote"></label>
-                    <input id="remote" type="text" value="origin">
+                <div id="advanced_git_section" style="display:none;">
+                    <hr style="border:none;border-top:1px solid var(--line);margin:14px 0;">
+                    <h3 class="title" style="font-size:16px;" id="section_git_title"></h3>
+                    <div class="row three">
+                        <div>
+                            <label for="remote" id="label_remote"></label>
+                            <input id="remote" type="text" value="origin">
+                        </div>
+                        <div>
+                            <label for="remote_url" id="label_remote_url"></label>
+                            <input id="remote_url" type="text" placeholder="https://token@github.com/user/repo.git">
+                        </div>
+                        <div>
+                            <label for="branch" id="label_branch"></label>
+                            <input id="branch" type="text" value="main">
+                        </div>
+                    </div>
+                    <div class="row two">
+                        <div>
+                            <label for="git_user_name" id="label_git_user_name"></label>
+                            <input id="git_user_name" type="text" placeholder="">
+                        </div>
+                        <div>
+                            <label for="git_user_email" id="label_git_user_email"></label>
+                            <input id="git_user_email" type="text" placeholder="">
+                        </div>
+                    </div>
                 </div>
-                <div>
-                    <label for="remote_url" id="label_remote_url"></label>
-                    <input id="remote_url" type="text" placeholder="https://token@github.com/user/repo.git">
-                </div>
-                <div>
-                    <label for="branch" id="label_branch"></label>
-                    <input id="branch" type="text" value="main">
-                </div>
-            </div>
-            <div class="row two">
-                <div>
-                    <label for="git_user_name" id="label_git_user_name"></label>
-                    <input id="git_user_name" type="text" placeholder="">
-                </div>
-                <div>
-                    <label for="git_user_email" id="label_git_user_email"></label>
-                    <input id="git_user_email" type="text" placeholder="">
-                </div>
-            </div>
 
             <div class="buttons">
                 <button id="start_btn"></button>
@@ -191,7 +192,7 @@
                     </div>
                     <div>
                         <label for="vm_disk_gb" id="label_vm_disk_gb"></label>
-                        <input id="vm_disk_gb" type="text" value="40">
+                        <input id="vm_disk_gb" type="text" value="1">
                     </div>
                 </div>
                 <div class="buttons">

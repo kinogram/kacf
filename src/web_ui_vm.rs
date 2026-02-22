@@ -2,8 +2,8 @@ use actix_web::{web, HttpRequest, HttpResponse, Responder};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::ErrorKind;
-use std::path::{Path, PathBuf};
 use std::net::TcpListener;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -15,30 +15,28 @@ use crate::lock_utils::lock_recover;
 use crate::web_ui::AppState;
 use crate::web_ui_authz;
 use crate::web_ui_models::{
-    VmActionPayload, VmActionResponse, VmBootstrapPayload, VmCapability, VmClonePayload,
-    VmDeletePayload, VmExecBatchTaskPayload, VmExecCancelPayload, VmExecCancelResponse,
-    VmExecCustomProfileDeletePayload, VmExecCustomProfileSavePayload, VmExecEnqueueBatchPayload,
-    VmExecDispatchResponse, VmExecDispatchTraceCandidate, VmExecDispatchTraceEntry,
-    VmExecDispatchTraceQuery, VmExecDispatchTraceResponse, VmExecEnqueuePayload,
-    VmExecEnqueueProfilePayload, VmExecPayload, VmExecProfileDetailQuery,
-    VmExecProfileDetailResponse, VmExecProfilePreviewQuery, VmExecProfilePreviewResponse,
-    VmExecProfilesResponse, VmExecQueueItem, VmExecResponse, VmInstance, VmLogQuery,
-    VmAuditEvent, VmAuditQuery, VmAuditResponse,
-    VmLogsResponse, VmHealthAction, VmHealthIssue, VmHealthScanPayload, VmHealthScanResponse,
-    VmOpsCategoryCount, VmOpsFaultInjectPayload, VmOpsFaultInjectResponse, VmOpsSummaryResponse,
-    VmPolicyConfig, VmPolicyRoleLimits, VmPolicyScheduler,
-    VmProvisionPayload, VmQueueCancelPayload, VmQueueQuery, VmQueueResponse,
-    VmQueueStatsResponse, VmReadyQuery, VmReadyResponse, VmSelfDebugPlanPayload,
-    VmSelfDebugPlanResponse, VmSelfDebugRunDetailQuery, VmSelfDebugRunDetailResponse,
-    VmSelfDebugContextResponse, VmSelfDebugHistoryArchivePayload,
-    VmSelfDebugHistoryArchiveResponse, VmSelfDebugHistoryClearPayload,
-    VmSelfDebugHistoryClearResponse, VmSelfDebugHistoryDetailResponse, VmSelfDebugHistoryEntry,
-    VmSelfDebugHistoryResponse,
-    VmSelfDebugRunSummary, VmSelfDebugRunTaskDetail,
+    VmActionPayload, VmActionResponse, VmAuditEvent, VmAuditQuery, VmAuditResponse,
+    VmBootstrapPayload, VmCapability, VmClonePayload, VmDeletePayload, VmExecBatchTaskPayload,
+    VmExecCancelPayload, VmExecCancelResponse, VmExecCustomProfileDeletePayload,
+    VmExecCustomProfileSavePayload, VmExecDispatchResponse, VmExecDispatchTraceCandidate,
+    VmExecDispatchTraceEntry, VmExecDispatchTraceQuery, VmExecDispatchTraceResponse,
+    VmExecEnqueueBatchPayload, VmExecEnqueuePayload, VmExecEnqueueProfilePayload, VmExecPayload,
+    VmExecProfileDetailQuery, VmExecProfileDetailResponse, VmExecProfilePreviewQuery,
+    VmExecProfilePreviewResponse, VmExecProfilesResponse, VmExecQueueItem, VmExecResponse,
+    VmHealthAction, VmHealthIssue, VmHealthScanPayload, VmHealthScanResponse, VmInstance,
+    VmLogQuery, VmLogsResponse, VmOpsCategoryCount, VmOpsFaultInjectPayload,
+    VmOpsFaultInjectResponse, VmOpsSummaryResponse, VmPolicyConfig, VmPolicyRoleLimits,
+    VmPolicyScheduler, VmProvisionPayload, VmQueueCancelPayload, VmQueueQuery, VmQueueResponse,
+    VmQueueStatsResponse, VmReadyQuery, VmReadyResponse, VmSelfDebugContextResponse,
+    VmSelfDebugHistoryArchivePayload, VmSelfDebugHistoryArchiveResponse,
+    VmSelfDebugHistoryClearPayload, VmSelfDebugHistoryClearResponse,
+    VmSelfDebugHistoryDetailResponse, VmSelfDebugHistoryEntry, VmSelfDebugHistoryResponse,
+    VmSelfDebugPlanPayload, VmSelfDebugPlanResponse, VmSelfDebugRunDetailQuery,
+    VmSelfDebugRunDetailResponse, VmSelfDebugRunSummary, VmSelfDebugRunTaskDetail,
     VmSelfDebugRunsQuery, VmSelfDebugRunsResponse, VmSelfDebugStopPayload,
     VmSelfDebugStrategyRulesResponse, VmSelfDebugStrategyRulesSavePayload, VmSelfDebugStrategyStat,
-    VmSelfDebugStrategyStatsResponse, VmSnapshotEntry,
-    VmSnapshotListQuery, VmSnapshotListResponse, VmSnapshotPayload, VmStateStore, VmStatusResponse,
+    VmSelfDebugStrategyStatsResponse, VmSnapshotEntry, VmSnapshotListQuery, VmSnapshotListResponse,
+    VmSnapshotPayload, VmStateStore, VmStatusResponse,
 };
 
 const VM_DIR: &str = "vm";
@@ -55,14 +53,16 @@ const VM_DISPATCH_TRACE_FILE: &str = "vm_exec_dispatch.trace.json";
 const VM_DISPATCH_TRACE_MAX_ENTRIES: usize = 120;
 const VM_AUDIT_FILE: &str = "vm_audit.events.json";
 const VM_AUDIT_MAX_ENTRIES: usize = 500;
-const VM_MAX_INSTANCES_USER: usize = 4;
-const VM_MAX_INSTANCES_ADMIN: usize = 16;
-const VM_QUEUE_MAX_ITEMS_USER: usize = 400;
-const VM_QUEUE_MAX_ITEMS_ADMIN: usize = 2000;
-const VM_RUNNING_MAX_USER: usize = 2;
-const VM_RUNNING_MAX_ADMIN: usize = 8;
-const VM_EXEC_RUNNING_MAX_USER: usize = 4;
-const VM_EXEC_RUNNING_MAX_ADMIN: usize = 16;
+const VM_MAX_INSTANCES_USER: usize = 2;
+const VM_MAX_INSTANCES_ADMIN: usize = 8;
+const VM_QUEUE_MAX_ITEMS_USER: usize = 200;
+const VM_QUEUE_MAX_ITEMS_ADMIN: usize = 1000;
+const VM_RUNNING_MAX_USER: usize = 1;
+const VM_RUNNING_MAX_ADMIN: usize = 4;
+const VM_EXEC_RUNNING_MAX_USER: usize = 2;
+const VM_EXEC_RUNNING_MAX_ADMIN: usize = 8;
+const VM_DISK_TOTAL_GB_MAX_USER: u32 = 12;
+const VM_DISK_TOTAL_GB_MAX_ADMIN: u32 = 64;
 const VM_EXEC_HARD_TIMEOUT_GRACE_SEC: u64 = 15;
 const VM_PRIORITY_AGING_STEP_SEC: u64 = 60;
 const VM_PRIORITY_AGING_MAX_BOOST: i32 = 20;
@@ -169,15 +169,15 @@ fn default_vm_policy_config() -> VmPolicyConfig {
 }
 
 fn sanitize_vm_policy_config(mut cfg: VmPolicyConfig) -> VmPolicyConfig {
-    cfg.user.vm_instance_max = cfg.user.vm_instance_max.clamp(1, 64);
-    cfg.user.vm_queue_max_items = cfg.user.vm_queue_max_items.clamp(1, 20_000);
-    cfg.user.vm_running_max = cfg.user.vm_running_max.clamp(1, 32);
-    cfg.user.vm_exec_running_max = cfg.user.vm_exec_running_max.clamp(1, 64);
+    cfg.user.vm_instance_max = cfg.user.vm_instance_max.clamp(1, 8);
+    cfg.user.vm_queue_max_items = cfg.user.vm_queue_max_items.clamp(1, 5_000);
+    cfg.user.vm_running_max = cfg.user.vm_running_max.clamp(1, 4);
+    cfg.user.vm_exec_running_max = cfg.user.vm_exec_running_max.clamp(1, 8);
 
-    cfg.admin.vm_instance_max = cfg.admin.vm_instance_max.clamp(1, 256);
-    cfg.admin.vm_queue_max_items = cfg.admin.vm_queue_max_items.clamp(1, 100_000);
-    cfg.admin.vm_running_max = cfg.admin.vm_running_max.clamp(1, 128);
-    cfg.admin.vm_exec_running_max = cfg.admin.vm_exec_running_max.clamp(1, 256);
+    cfg.admin.vm_instance_max = cfg.admin.vm_instance_max.clamp(1, 32);
+    cfg.admin.vm_queue_max_items = cfg.admin.vm_queue_max_items.clamp(1, 20_000);
+    cfg.admin.vm_running_max = cfg.admin.vm_running_max.clamp(1, 16);
+    cfg.admin.vm_exec_running_max = cfg.admin.vm_exec_running_max.clamp(1, 32);
 
     if cfg.admin.vm_instance_max < cfg.user.vm_instance_max {
         cfg.admin.vm_instance_max = cfg.user.vm_instance_max;
@@ -205,7 +205,8 @@ fn load_vm_policy_config(managed_root_dir: &str) -> VmPolicyConfig {
         Ok(v) => v,
         Err(_) => return default_vm_policy_config(),
     };
-    let parsed = serde_json::from_str::<VmPolicyConfig>(&raw).unwrap_or_else(|_| default_vm_policy_config());
+    let parsed =
+        serde_json::from_str::<VmPolicyConfig>(&raw).unwrap_or_else(|_| default_vm_policy_config());
     sanitize_vm_policy_config(parsed)
 }
 
@@ -242,6 +243,13 @@ fn vm_running_limit_by_role(managed_root_dir: &str, role: &AccountRole) -> usize
 
 fn vm_exec_running_limit_by_role(managed_root_dir: &str, role: &AccountRole) -> usize {
     vm_role_limits(&load_vm_policy_config(managed_root_dir), role).vm_exec_running_max
+}
+
+fn vm_disk_total_limit_by_role(role: &AccountRole) -> u32 {
+    match role {
+        AccountRole::Admin => VM_DISK_TOTAL_GB_MAX_ADMIN,
+        AccountRole::User | AccountRole::Guest => VM_DISK_TOTAL_GB_MAX_USER,
+    }
 }
 
 fn ensure_queue_capacity(existing: usize, adding: usize, limit: usize) -> Result<(), String> {
@@ -464,7 +472,11 @@ fn queue_watchdog_recovery_stats(items: &[VmExecQueueItem]) -> (usize, u64) {
     (total, last)
 }
 
-fn build_vm_ops_summary(managed_root_dir: &str, state: &VmStateStore, now: u64) -> VmOpsSummaryResponse {
+fn build_vm_ops_summary(
+    managed_root_dir: &str,
+    state: &VmStateStore,
+    now: u64,
+) -> VmOpsSummaryResponse {
     let mut queue_total = 0usize;
     let mut pending = 0usize;
     let mut running = 0usize;
@@ -773,7 +785,11 @@ fn classify_failure(
         return (String::new(), String::new(), Vec::new());
     }
     if exit_code == -2 {
-        return ("canceled".to_string(), "execution canceled".to_string(), Vec::new());
+        return (
+            "canceled".to_string(),
+            "execution canceled".to_string(),
+            Vec::new(),
+        );
     }
     let full = format!(
         "{}\n{}\n{}",
@@ -785,13 +801,20 @@ fn classify_failure(
         "timeout"
     } else if full.contains("permission denied") {
         "permission"
-    } else if full.contains("not found") || full.contains("no such file") || full.contains("command not found") {
+    } else if full.contains("not found")
+        || full.contains("no such file")
+        || full.contains("command not found")
+    {
         "missing_dependency"
-    } else if full.contains("assert") || full.contains("test failed") || full.contains("failures:") {
+    } else if full.contains("assert") || full.contains("test failed") || full.contains("failures:")
+    {
         "test_failure"
     } else if full.contains("panic") || full.contains("exception") || full.contains("traceback") {
         "runtime_exception"
-    } else if full.contains("compile") || full.contains("syntax error") || full.contains("cannot find") {
+    } else if full.contains("compile")
+        || full.contains("syntax error")
+        || full.contains("cannot find")
+    {
         "build_error"
     } else {
         "unknown_failure"
@@ -883,7 +906,8 @@ fn strategy_command_for_failure_category(managed_root_dir: &str, category: &str)
 }
 
 fn strategy_injected_count(items: &[VmExecQueueItem], run_id: &str, signature: &str) -> usize {
-    items.iter()
+    items
+        .iter()
         .filter(|x| {
             x.run_id == run_id
                 && x.run_kind == "self_debug_strategy"
@@ -903,17 +927,19 @@ fn collect_self_debug_runs(items: &[VmExecQueueItem]) -> Vec<VmSelfDebugRunSumma
         {
             continue;
         }
-        let entry = map.entry(run_id.to_string()).or_insert(VmSelfDebugRunSummary {
-            run_id: run_id.to_string(),
-            total: 0,
-            pending: 0,
-            paused: 0,
-            running: 0,
-            done: 0,
-            failed: 0,
-            canceled: 0,
-            updated_at_unix: 0,
-        });
+        let entry = map
+            .entry(run_id.to_string())
+            .or_insert(VmSelfDebugRunSummary {
+                run_id: run_id.to_string(),
+                total: 0,
+                pending: 0,
+                paused: 0,
+                running: 0,
+                done: 0,
+                failed: 0,
+                canceled: 0,
+                updated_at_unix: 0,
+            });
         entry.total += 1;
         match item.status.as_str() {
             "pending" => entry.pending += 1,
@@ -933,7 +959,11 @@ fn collect_self_debug_runs(items: &[VmExecQueueItem]) -> Vec<VmSelfDebugRunSumma
         }
     }
     let mut out: Vec<VmSelfDebugRunSummary> = map.into_values().collect();
-    out.sort_by(|a, b| b.updated_at_unix.cmp(&a.updated_at_unix).then_with(|| b.run_id.cmp(&a.run_id)));
+    out.sort_by(|a, b| {
+        b.updated_at_unix
+            .cmp(&a.updated_at_unix)
+            .then_with(|| b.run_id.cmp(&a.run_id))
+    });
     out
 }
 
@@ -986,7 +1016,10 @@ struct SelfDebugContextData {
     context_text: String,
 }
 
-fn build_self_debug_context_data(items: &[VmExecQueueItem], run_id: &str) -> Option<SelfDebugContextData> {
+fn build_self_debug_context_data(
+    items: &[VmExecQueueItem],
+    run_id: &str,
+) -> Option<SelfDebugContextData> {
     if run_id.trim().is_empty() {
         return None;
     }
@@ -1119,7 +1152,9 @@ fn archive_completed_self_debug_runs(
     let runs = collect_self_debug_runs(items);
     let completed_run_ids: BTreeSet<String> = runs
         .iter()
-        .filter(|r| r.pending == 0 && r.paused == 0 && r.running == 0 && !r.run_id.trim().is_empty())
+        .filter(|r| {
+            r.pending == 0 && r.paused == 0 && r.running == 0 && !r.run_id.trim().is_empty()
+        })
         .map(|r| r.run_id.clone())
         .collect();
     if completed_run_ids.is_empty() {
@@ -1187,7 +1222,11 @@ fn collect_self_debug_strategy_stats(items: &[VmExecQueueItem]) -> Vec<VmSelfDeb
             }
         })
         .collect();
-    out.sort_by(|a, b| b.attempts.cmp(&a.attempts).then_with(|| a.category.cmp(&b.category)));
+    out.sort_by(|a, b| {
+        b.attempts
+            .cmp(&a.attempts)
+            .then_with(|| a.category.cmp(&b.category))
+    });
     out
 }
 
@@ -1212,7 +1251,9 @@ fn strategy_priority_boost_by_stats(items: &[VmExecQueueItem], category: &str) -
 }
 
 fn is_self_debug_kind(kind: &str) -> bool {
-    kind == "self_debug" || kind == "self_debug_strategy" || kind == "self_debug_verify_after_strategy"
+    kind == "self_debug"
+        || kind == "self_debug_strategy"
+        || kind == "self_debug_verify_after_strategy"
 }
 
 fn enforce_self_debug_run_timeout(
@@ -1365,7 +1406,12 @@ fn effective_priority_with_aging(
     max_boost: i32,
 ) -> i32 {
     item.priority
-        .saturating_add(priority_aging_boost(item.created_at_unix, now, step_sec, max_boost))
+        .saturating_add(priority_aging_boost(
+            item.created_at_unix,
+            now,
+            step_sec,
+            max_boost,
+        ))
         .clamp(-100, 100)
 }
 
@@ -1395,7 +1441,10 @@ fn normalize_custom_commands(raw: &[String]) -> Vec<String> {
 }
 
 fn list_all_profiles(managed_root_dir: &str) -> Vec<String> {
-    let mut all: Vec<String> = vm_exec_profiles().iter().map(|x| (*x).to_string()).collect();
+    let mut all: Vec<String> = vm_exec_profiles()
+        .iter()
+        .map(|x| (*x).to_string())
+        .collect();
     let store = load_custom_profiles(managed_root_dir);
     all.extend(store.profiles.keys().cloned());
     all.sort();
@@ -1711,7 +1760,10 @@ fn try_acquire_worker_lock(managed_root_dir: &str, vm_name: &str) -> bool {
         .open(&lock_path)
     {
         Ok(mut f) => {
-            let _ = std::io::Write::write_all(&mut f, format!("pid={}\n", std::process::id()).as_bytes());
+            let _ = std::io::Write::write_all(
+                &mut f,
+                format!("pid={}\n", std::process::id()).as_bytes(),
+            );
             true
         }
         Err(e) if e.kind() == ErrorKind::AlreadyExists => false,
@@ -1729,7 +1781,16 @@ fn run_next_vm_exec_core(
     projects_lock: &Arc<Mutex<()>>,
     running_limit: usize,
 ) -> Result<Option<VmExecResponse>, String> {
-    let (task_id, cmd, cmd_risk_level, cmd_risk_tags, timeout_sec, wait_ready_sec, ssh_user, ssh_port) = {
+    let (
+        task_id,
+        cmd,
+        cmd_risk_level,
+        cmd_risk_tags,
+        timeout_sec,
+        wait_ready_sec,
+        ssh_user,
+        ssh_port,
+    ) = {
         let _guard = lock_recover(projects_lock, "projects_lock");
         let mut state = load_vm_state(managed_root_dir);
         if !state.vms.contains_key(name) {
@@ -1783,8 +1844,8 @@ fn run_next_vm_exec_core(
                     scheduler.priority_aging_step_sec,
                     scheduler.priority_aging_max_boost,
                 ))
-                    .then_with(|| b.created_at_unix.cmp(&a.created_at_unix))
-                    .then_with(|| ib.cmp(ia))
+                .then_with(|| b.created_at_unix.cmp(&a.created_at_unix))
+                .then_with(|| ib.cmp(ia))
             })
             .map(|(idx, _)| idx);
         let Some(idx) = pending_idx else {
@@ -1975,28 +2036,32 @@ fn run_next_vm_exec_core(
         append_vm_log(
             managed_root_dir,
             name,
-            &format!("self-debug early-stop gate triggered run_id={}", finished_run_id),
+            &format!(
+                "self-debug early-stop gate triggered run_id={}",
+                finished_run_id
+            ),
         );
     }
-    let run_timed_out = if !finished_run_id.trim().is_empty() && is_self_debug_kind(&finished_run_kind) {
-        let now = now_unix();
-        let hit = enforce_self_debug_run_timeout(&mut items, &finished_run_id, now);
-        if let Some(max_runtime) = hit {
-            append_vm_log(
-                managed_root_dir,
-                name,
-                &format!(
-                    "self-debug run timeout reached run_id={} max_runtime_sec={}",
-                    finished_run_id, max_runtime
-                ),
-            );
-            true
+    let run_timed_out =
+        if !finished_run_id.trim().is_empty() && is_self_debug_kind(&finished_run_kind) {
+            let now = now_unix();
+            let hit = enforce_self_debug_run_timeout(&mut items, &finished_run_id, now);
+            if let Some(max_runtime) = hit {
+                append_vm_log(
+                    managed_root_dir,
+                    name,
+                    &format!(
+                        "self-debug run timeout reached run_id={} max_runtime_sec={}",
+                        finished_run_id, max_runtime
+                    ),
+                );
+                true
+            } else {
+                false
+            }
         } else {
             false
-        }
-    } else {
-        false
-    };
+        };
     let inject_strategy = strategy_candidate.as_ref().and_then(|c| {
         if run_timed_out {
             return None;
@@ -2009,7 +2074,9 @@ fn run_next_vm_exec_core(
             None
         }
     });
-    if let Some((run_id, category, priority, signature, trigger_task_id, failed_command)) = inject_strategy {
+    if let Some((run_id, category, priority, signature, trigger_task_id, failed_command)) =
+        inject_strategy
+    {
         let inherited_run_max_runtime = items
             .iter()
             .find(|x| x.id == trigger_task_id)
@@ -2046,13 +2113,8 @@ fn run_next_vm_exec_core(
         } else {
             failed_command
         };
-        let mut verify_after_item = queue_item_from_values(
-            &verify_after_cmd,
-            180,
-            0,
-            strategy_priority,
-            0,
-        );
+        let mut verify_after_item =
+            queue_item_from_values(&verify_after_cmd, 180, 0, strategy_priority, 0);
         verify_after_item.run_id = run_id.clone();
         verify_after_item.run_kind = "self_debug_verify_after_strategy".to_string();
         verify_after_item.run_max_runtime_sec = inherited_run_max_runtime;
@@ -2096,7 +2158,10 @@ fn run_next_vm_exec_core(
     append_vm_log(
         managed_root_dir,
         name,
-        &format!("queue run finished task_id={} exit={}", task_id, exec_resp.exit_code),
+        &format!(
+            "queue run finished task_id={} exit={}",
+            task_id, exec_resp.exit_code
+        ),
     );
     Ok(Some(exec_resp))
 }
@@ -2116,12 +2181,17 @@ fn spawn_vm_exec_worker(
             Ok(Some(_)) => ran_one = true,
             Ok(None) => {}
             Err(e) => {
-                append_vm_log(&managed_root_dir, &name, &format!("queue worker stopped: {e}"));
+                append_vm_log(
+                    &managed_root_dir,
+                    &name,
+                    &format!("queue worker stopped: {e}"),
+                );
             }
         }
         release_worker_lock(&managed_root_dir, &name);
         if ran_one {
-            let _ = dispatch_vm_exec_workers(&managed_root_dir, projects_lock.clone(), running_limit);
+            let _ =
+                dispatch_vm_exec_workers(&managed_root_dir, projects_lock.clone(), running_limit);
         }
     });
 }
@@ -2400,8 +2470,7 @@ fn normalize_ssh_user(raw: &str) -> String {
     if v.is_empty() {
         return "root".to_string();
     }
-    if v
-        .chars()
+    if v.chars()
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
     {
         return v.to_string();
@@ -2413,7 +2482,11 @@ fn allocate_local_port() -> Option<u16> {
     let listener = TcpListener::bind(("127.0.0.1", 0)).ok()?;
     let port = listener.local_addr().ok()?.port();
     drop(listener);
-    if port == 0 { None } else { Some(port) }
+    if port == 0 {
+        None
+    } else {
+        Some(port)
+    }
 }
 
 fn normalize_backend(raw: &str) -> &'static str {
@@ -2442,15 +2515,59 @@ fn default_memory_mb(v: u32) -> u32 {
 
 fn default_disk_gb(v: u32) -> u32 {
     if v == 0 {
-        40
+        1
     } else {
-        v.clamp(10, 2048)
+        v.clamp(1, 64)
     }
 }
 
-fn create_disk_image(path: &Path, disk_gb: u32) -> std::io::Result<String> {
+fn resolve_vm_base_image(managed_root_dir: &str) -> Option<PathBuf> {
+    let from_env = std::env::var("KACF_VM_BASE_IMAGE")
+        .ok()
+        .map(PathBuf::from)
+        .filter(|p| p.exists());
+    if from_env.is_some() {
+        return from_env;
+    }
+    let local = vm_root_path(managed_root_dir)
+        .join("base")
+        .join("default.qcow2");
+    if local.exists() {
+        return Some(local);
+    }
+    None
+}
+
+fn create_disk_image(path: &Path, disk_gb: u32, managed_root_dir: &str) -> std::io::Result<String> {
     if command_available("qemu-img") {
         let size = format!("{disk_gb}G");
+        if let Some(base_image) = resolve_vm_base_image(managed_root_dir) {
+            let out = Command::new("qemu-img")
+                .args(["create", "-f", "qcow2", "-F", "qcow2", "-b"])
+                .arg(&base_image)
+                .arg(path)
+                .arg(&size)
+                .output();
+            match out {
+                Ok(o) if o.status.success() => {
+                    return Ok(format!(
+                        "disk image created as qcow2 overlay (backing={})",
+                        base_image.display()
+                    ));
+                }
+                Ok(o) => {
+                    let stderr = String::from_utf8_lossy(&o.stderr).into_owned();
+                    return Err(std::io::Error::other(format!(
+                        "qemu-img overlay create failed: {stderr}"
+                    )));
+                }
+                Err(e) => {
+                    return Err(std::io::Error::other(format!(
+                        "qemu-img overlay spawn failed: {e}"
+                    )));
+                }
+            }
+        }
         let out = Command::new("qemu-img")
             .args(["create", "-f", "qcow2"])
             .arg(path)
@@ -2462,7 +2579,9 @@ fn create_disk_image(path: &Path, disk_gb: u32) -> std::io::Result<String> {
             }
             Ok(o) => {
                 let stderr = String::from_utf8_lossy(&o.stderr).into_owned();
-                return Err(std::io::Error::other(format!("qemu-img create failed: {stderr}")));
+                return Err(std::io::Error::other(format!(
+                    "qemu-img create failed: {stderr}"
+                )));
             }
             Err(e) => {
                 return Err(std::io::Error::other(format!("qemu-img spawn failed: {e}")));
@@ -2575,7 +2694,14 @@ fn start_qemu_process(
         .map_err(|e| format!("qemu launch failed: {e}"))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(format!("qemu failed: {}", if stderr.is_empty() { "unknown" } else { &stderr }));
+        return Err(format!(
+            "qemu failed: {}",
+            if stderr.is_empty() {
+                "unknown"
+            } else {
+                &stderr
+            }
+        ));
     }
 
     let pid = read_pid_file(&pid_path).ok_or_else(|| "qemu pidfile not generated".to_string())?;
@@ -2604,7 +2730,11 @@ fn qemu_snapshot_create(vm: &VmInstance, snapshot: &str) -> Result<String, Strin
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     Err(format!(
         "qemu-img snapshot create error: {}",
-        if stderr.is_empty() { "unknown" } else { &stderr }
+        if stderr.is_empty() {
+            "unknown"
+        } else {
+            &stderr
+        }
     ))
 }
 
@@ -2624,7 +2754,11 @@ fn qemu_snapshot_apply(vm: &VmInstance, snapshot: &str) -> Result<String, String
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     Err(format!(
         "qemu-img snapshot apply error: {}",
-        if stderr.is_empty() { "unknown" } else { &stderr }
+        if stderr.is_empty() {
+            "unknown"
+        } else {
+            &stderr
+        }
     ))
 }
 
@@ -2644,7 +2778,11 @@ fn qemu_snapshot_delete(vm: &VmInstance, snapshot: &str) -> Result<String, Strin
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     Err(format!(
         "qemu-img snapshot delete error: {}",
-        if stderr.is_empty() { "unknown" } else { &stderr }
+        if stderr.is_empty() {
+            "unknown"
+        } else {
+            &stderr
+        }
     ))
 }
 
@@ -2662,7 +2800,11 @@ fn qemu_snapshot_list(vm: &VmInstance) -> Result<Vec<VmSnapshotEntry>, String> {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(format!(
             "qemu-img snapshot list error: {}",
-            if stderr.is_empty() { "unknown" } else { &stderr }
+            if stderr.is_empty() {
+                "unknown"
+            } else {
+                &stderr
+            }
         ));
     }
     let text = String::from_utf8_lossy(&output.stdout);
@@ -2741,7 +2883,11 @@ fn qemu_clone_disk_from_snapshot(
         let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
         Err(format!(
             "qemu-img convert error: {}",
-            if stderr.is_empty() { "unknown" } else { &stderr }
+            if stderr.is_empty() {
+                "unknown"
+            } else {
+                &stderr
+            }
         ))
     }
 }
@@ -3063,9 +3209,14 @@ pub(crate) async fn create_vm_snapshot(
         Ok(v) => v,
         Err(e) => {
             vm.last_message = e.clone();
-            append_vm_log(&ctx.managed_root_dir, &vm.name, &format!("snapshot create failed: {e}"));
+            append_vm_log(
+                &ctx.managed_root_dir,
+                &vm.name,
+                &format!("snapshot create failed: {e}"),
+            );
             if let Err(se) = save_vm_state(&ctx.managed_root_dir, &state) {
-                return HttpResponse::InternalServerError().body(format!("save vm state failed: {se}"));
+                return HttpResponse::InternalServerError()
+                    .body(format!("save vm state failed: {se}"));
             }
             return HttpResponse::InternalServerError().body(e);
         }
@@ -3073,7 +3224,11 @@ pub(crate) async fn create_vm_snapshot(
 
     vm.updated_at_unix = now_unix();
     vm.last_message = msg.clone();
-    append_vm_log(&ctx.managed_root_dir, &vm.name, &format!("snapshot create: {snapshot_name}"));
+    append_vm_log(
+        &ctx.managed_root_dir,
+        &vm.name,
+        &format!("snapshot create: {snapshot_name}"),
+    );
     let snapshot = vm.clone();
     if let Err(e) = save_vm_state(&ctx.managed_root_dir, &state) {
         return HttpResponse::InternalServerError().body(format!("save vm state failed: {e}"));
@@ -3125,9 +3280,14 @@ pub(crate) async fn apply_vm_snapshot(
         Ok(v) => v,
         Err(e) => {
             vm.last_message = e.clone();
-            append_vm_log(&ctx.managed_root_dir, &vm.name, &format!("snapshot apply failed: {e}"));
+            append_vm_log(
+                &ctx.managed_root_dir,
+                &vm.name,
+                &format!("snapshot apply failed: {e}"),
+            );
             if let Err(se) = save_vm_state(&ctx.managed_root_dir, &state) {
-                return HttpResponse::InternalServerError().body(format!("save vm state failed: {se}"));
+                return HttpResponse::InternalServerError()
+                    .body(format!("save vm state failed: {se}"));
             }
             return HttpResponse::InternalServerError().body(e);
         }
@@ -3135,7 +3295,11 @@ pub(crate) async fn apply_vm_snapshot(
 
     vm.updated_at_unix = now_unix();
     vm.last_message = msg.clone();
-    append_vm_log(&ctx.managed_root_dir, &vm.name, &format!("snapshot apply: {snapshot_name}"));
+    append_vm_log(
+        &ctx.managed_root_dir,
+        &vm.name,
+        &format!("snapshot apply: {snapshot_name}"),
+    );
     let snapshot = vm.clone();
     if let Err(e) = save_vm_state(&ctx.managed_root_dir, &state) {
         return HttpResponse::InternalServerError().body(format!("save vm state failed: {e}"));
@@ -3193,7 +3357,8 @@ pub(crate) async fn delete_vm_snapshot(
                 &format!("snapshot delete failed: {e}"),
             );
             if let Err(se) = save_vm_state(&ctx.managed_root_dir, &state) {
-                return HttpResponse::InternalServerError().body(format!("save vm state failed: {se}"));
+                return HttpResponse::InternalServerError()
+                    .body(format!("save vm state failed: {se}"));
             }
             return HttpResponse::InternalServerError().body(e);
         }
@@ -3201,7 +3366,11 @@ pub(crate) async fn delete_vm_snapshot(
 
     vm.updated_at_unix = now_unix();
     vm.last_message = msg.clone();
-    append_vm_log(&ctx.managed_root_dir, &vm.name, &format!("snapshot delete: {snapshot_name}"));
+    append_vm_log(
+        &ctx.managed_root_dir,
+        &vm.name,
+        &format!("snapshot delete: {snapshot_name}"),
+    );
     let snapshot = vm.clone();
     if let Err(e) = save_vm_state(&ctx.managed_root_dir, &state) {
         return HttpResponse::InternalServerError().body(format!("save vm state failed: {e}"));
@@ -3284,14 +3453,11 @@ pub(crate) async fn clone_vm_from_snapshot(
         return HttpResponse::Conflict().body("new vm disk file already exists");
     }
 
-    let clone_msg = match qemu_clone_disk_from_snapshot(
-        &source_vm,
-        snapshot_name.as_deref(),
-        &new_disk_path,
-    ) {
-        Ok(v) => v,
-        Err(e) => return HttpResponse::InternalServerError().body(e),
-    };
+    let clone_msg =
+        match qemu_clone_disk_from_snapshot(&source_vm, snapshot_name.as_deref(), &new_disk_path) {
+            Ok(v) => v,
+            Err(e) => return HttpResponse::InternalServerError().body(e),
+        };
 
     let now = now_unix();
     let instance = VmInstance {
@@ -3401,7 +3567,11 @@ pub(crate) async fn exec_in_vm(
         if let Some(vm) = state.vms.get_mut(&name) {
             vm.last_message = e.clone();
             vm.updated_at_unix = now_unix();
-            append_vm_log(&ctx.managed_root_dir, &vm.name, &format!("exec blocked: {e}"));
+            append_vm_log(
+                &ctx.managed_root_dir,
+                &vm.name,
+                &format!("exec blocked: {e}"),
+            );
             let _ = save_vm_state(&ctx.managed_root_dir, &state);
         }
         return HttpResponse::Ok().json(VmExecResponse {
@@ -3428,7 +3598,11 @@ pub(crate) async fn exec_in_vm(
             let _guard = lock_recover(&data.projects_lock, "projects_lock");
             let mut state = load_vm_state(&ctx.managed_root_dir);
             if let Some(vm) = state.vms.get_mut(&name) {
-                append_vm_log(&ctx.managed_root_dir, &vm.name, &format!("exec failed: {e}"));
+                append_vm_log(
+                    &ctx.managed_root_dir,
+                    &vm.name,
+                    &format!("exec failed: {e}"),
+                );
                 vm.last_message = e.clone();
                 vm.updated_at_unix = now_unix();
                 let _ = save_vm_state(&ctx.managed_root_dir, &state);
@@ -3544,7 +3718,11 @@ echo "BOOTSTRAP_OK"
     let resp = match run_ssh_command(&ssh_user, ssh_port, script, 1800) {
         Ok(v) => v,
         Err(e) => {
-            append_vm_log(&ctx.managed_root_dir, &name, &format!("bootstrap failed: {e}"));
+            append_vm_log(
+                &ctx.managed_root_dir,
+                &name,
+                &format!("bootstrap failed: {e}"),
+            );
             return HttpResponse::InternalServerError().body(e);
         }
     };
@@ -3711,7 +3889,11 @@ pub(crate) async fn enqueue_vm_exec(
     drop(_guard);
     append_vm_log(&ctx.managed_root_dir, &name, "exec task enqueued");
     let running_limit = vm_exec_running_limit_by_role(&ctx.managed_root_dir, &ctx.role);
-    let _ = dispatch_vm_exec_workers(&ctx.managed_root_dir, data.projects_lock.clone(), running_limit);
+    let _ = dispatch_vm_exec_workers(
+        &ctx.managed_root_dir,
+        data.projects_lock.clone(),
+        running_limit,
+    );
     HttpResponse::Ok().json(VmQueueResponse { name, items })
 }
 
@@ -3791,7 +3973,11 @@ pub(crate) async fn enqueue_vm_exec_batch(
         &format!("exec batch enqueued tasks={added}"),
     );
     let running_limit = vm_exec_running_limit_by_role(&ctx.managed_root_dir, &ctx.role);
-    let _ = dispatch_vm_exec_workers(&ctx.managed_root_dir, data.projects_lock.clone(), running_limit);
+    let _ = dispatch_vm_exec_workers(
+        &ctx.managed_root_dir,
+        data.projects_lock.clone(),
+        running_limit,
+    );
     HttpResponse::Ok().json(VmQueueResponse { name, items })
 }
 
@@ -3821,7 +4007,9 @@ pub(crate) async fn get_vm_exec_profile_detail(
     if profile.is_empty() {
         return HttpResponse::BadRequest().body("profile is empty");
     }
-    if let Some(builtin) = build_builtin_profile_batch_tasks(profile, &ProfileRuntimeOptions::default()) {
+    if let Some(builtin) =
+        build_builtin_profile_batch_tasks(profile, &ProfileRuntimeOptions::default())
+    {
         return HttpResponse::Ok().json(VmExecProfileDetailResponse {
             profile: profile.to_string(),
             commands: builtin.into_iter().map(|x| x.command).collect(),
@@ -3861,7 +4049,8 @@ pub(crate) async fn save_vm_exec_custom_profile(
     let mut store = load_custom_profiles(&ctx.managed_root_dir);
     store.profiles.insert(name.clone(), commands);
     if let Err(e) = save_custom_profiles(&ctx.managed_root_dir, &store) {
-        return HttpResponse::InternalServerError().body(format!("save custom profiles failed: {e}"));
+        return HttpResponse::InternalServerError()
+            .body(format!("save custom profiles failed: {e}"));
     }
     HttpResponse::Ok().json(VmExecProfilesResponse {
         profiles: list_all_profiles(&ctx.managed_root_dir),
@@ -3890,7 +4079,8 @@ pub(crate) async fn delete_vm_exec_custom_profile(
         return HttpResponse::NotFound().body("custom profile not found");
     }
     if let Err(e) = save_custom_profiles(&ctx.managed_root_dir, &store) {
-        return HttpResponse::InternalServerError().body(format!("save custom profiles failed: {e}"));
+        return HttpResponse::InternalServerError()
+            .body(format!("save custom profiles failed: {e}"));
     }
     HttpResponse::Ok().json(VmExecProfilesResponse {
         profiles: list_all_profiles(&ctx.managed_root_dir),
@@ -4007,7 +4197,11 @@ pub(crate) async fn enqueue_vm_exec_profile(
         &format!("exec profile enqueued profile={profile} tasks={added}"),
     );
     let running_limit = vm_exec_running_limit_by_role(&ctx.managed_root_dir, &ctx.role);
-    let _ = dispatch_vm_exec_workers(&ctx.managed_root_dir, data.projects_lock.clone(), running_limit);
+    let _ = dispatch_vm_exec_workers(
+        &ctx.managed_root_dir,
+        data.projects_lock.clone(),
+        running_limit,
+    );
     HttpResponse::Ok().json(VmQueueResponse { name, items })
 }
 
@@ -4132,7 +4326,11 @@ pub(crate) async fn start_vm_self_debug_plan(
         ),
     );
     let running_limit = vm_exec_running_limit_by_role(&ctx.managed_root_dir, &ctx.role);
-    let _ = dispatch_vm_exec_workers(&ctx.managed_root_dir, data.projects_lock.clone(), running_limit);
+    let _ = dispatch_vm_exec_workers(
+        &ctx.managed_root_dir,
+        data.projects_lock.clone(),
+        running_limit,
+    );
     HttpResponse::Ok().json(VmSelfDebugPlanResponse {
         name,
         total_tasks: tasks.len(),
@@ -4229,7 +4427,8 @@ pub(crate) async fn archive_vm_self_debug_history(
     let mut items = load_exec_queue(&ctx.managed_root_dir, &name);
     let mut history = load_self_debug_history(&ctx.managed_root_dir, &name);
     let now = now_unix();
-    let (archived_runs, removed_tasks) = archive_completed_self_debug_runs(&mut items, &mut history, now);
+    let (archived_runs, removed_tasks) =
+        archive_completed_self_debug_runs(&mut items, &mut history, now);
     sort_history_entries(&mut history);
     trim_history_entries(&mut history, VM_HISTORY_MAX_ENTRIES);
     if let Err(e) = save_exec_queue(&ctx.managed_root_dir, &name, &items) {
@@ -4504,7 +4703,10 @@ pub(crate) async fn stop_vm_self_debug_run(
     append_vm_log(
         &ctx.managed_root_dir,
         &name,
-        &format!("self-debug run stop requested run_id={} matched={} running={}", run_id, matched, running),
+        &format!(
+            "self-debug run stop requested run_id={} matched={} running={}",
+            run_id, matched, running
+        ),
     );
     let runs = collect_self_debug_runs(&items);
     HttpResponse::Ok().json(VmSelfDebugRunsResponse { name, runs })
@@ -4555,7 +4757,10 @@ pub(crate) async fn pause_vm_self_debug_run(
     append_vm_log(
         &ctx.managed_root_dir,
         &name,
-        &format!("self-debug run pause requested run_id={} paused={}", run_id, matched),
+        &format!(
+            "self-debug run pause requested run_id={} paused={}",
+            run_id, matched
+        ),
     );
     let runs = collect_self_debug_runs(&items);
     HttpResponse::Ok().json(VmSelfDebugRunsResponse { name, runs })
@@ -4606,12 +4811,19 @@ pub(crate) async fn resume_vm_self_debug_run(
     drop(_guard);
     if matched > 0 {
         let running_limit = vm_exec_running_limit_by_role(&ctx.managed_root_dir, &ctx.role);
-        let _ = dispatch_vm_exec_workers(&ctx.managed_root_dir, data.projects_lock.clone(), running_limit);
+        let _ = dispatch_vm_exec_workers(
+            &ctx.managed_root_dir,
+            data.projects_lock.clone(),
+            running_limit,
+        );
     }
     append_vm_log(
         &ctx.managed_root_dir,
         &name,
-        &format!("self-debug run resume requested run_id={} resumed={}", run_id, matched),
+        &format!(
+            "self-debug run resume requested run_id={} resumed={}",
+            run_id, matched
+        ),
     );
     let runs = collect_self_debug_runs(&items);
     HttpResponse::Ok().json(VmSelfDebugRunsResponse { name, runs })
@@ -4696,8 +4908,11 @@ pub(crate) async fn run_next_vm_exec(
         running_limit,
     ) {
         Ok(Some(resp)) => {
-            let _ =
-                dispatch_vm_exec_workers(&ctx.managed_root_dir, data.projects_lock.clone(), running_limit);
+            let _ = dispatch_vm_exec_workers(
+                &ctx.managed_root_dir,
+                data.projects_lock.clone(),
+                running_limit,
+            );
             HttpResponse::Ok().json(resp)
         }
         Ok(None) => HttpResponse::BadRequest().body("no runnable queued task"),
@@ -4717,8 +4932,11 @@ pub(crate) async fn dispatch_vm_exec(
         return HttpResponse::Forbidden().body("read-only session");
     }
     let running_limit = vm_exec_running_limit_by_role(&ctx.managed_root_dir, &ctx.role);
-    let started_workers =
-        dispatch_vm_exec_workers(&ctx.managed_root_dir, data.projects_lock.clone(), running_limit);
+    let started_workers = dispatch_vm_exec_workers(
+        &ctx.managed_root_dir,
+        data.projects_lock.clone(),
+        running_limit,
+    );
     let running_total_all_vms = {
         let _guard = lock_recover(&data.projects_lock, "projects_lock");
         let state = load_vm_state(&ctx.managed_root_dir);
@@ -4805,10 +5023,7 @@ pub(crate) async fn scan_vm_health(
     })
 }
 
-pub(crate) async fn get_vm_policy(
-    req: HttpRequest,
-    data: web::Data<AppState>,
-) -> impl Responder {
+pub(crate) async fn get_vm_policy(req: HttpRequest, data: web::Data<AppState>) -> impl Responder {
     let ctx = match web_ui_authz::user_ctx_for_request(&req, &data) {
         Ok(v) => v,
         Err(resp) => return resp,
@@ -4878,13 +5093,8 @@ pub(crate) async fn inject_vm_ops_fault(
     let scheduler = load_vm_policy_config(&ctx.managed_root_dir).scheduler;
     let now = now_unix();
     for i in 0..count {
-        let mut item = queue_item_from_values(
-            &format!("echo KACF_FAULT_INJECT_{mode}_{i}"),
-            30,
-            0,
-            0,
-            0,
-        );
+        let mut item =
+            queue_item_from_values(&format!("echo KACF_FAULT_INJECT_{mode}_{i}"), 30, 0, 0, 0);
         match mode.as_str() {
             "stale_running_task" => {
                 item.status = "running".to_string();
@@ -4900,7 +5110,10 @@ pub(crate) async fn inject_vm_ops_fault(
                 item.priority = -20;
                 item.message = "fault-inject pending pressure".to_string();
             }
-            _ => return HttpResponse::BadRequest().body("mode must be stale_running_task|pending_pressure"),
+            _ => {
+                return HttpResponse::BadRequest()
+                    .body("mode must be stale_running_task|pending_pressure")
+            }
         }
         items.push(item);
     }
@@ -4910,7 +5123,10 @@ pub(crate) async fn inject_vm_ops_fault(
     append_vm_log(
         &ctx.managed_root_dir,
         &name,
-        &format!("fault injected mode={} count={} age_sec={}", mode, count, age_sec),
+        &format!(
+            "fault injected mode={} count={} age_sec={}",
+            mode, count, age_sec
+        ),
     );
     append_vm_audit_event(
         &ctx.managed_root_dir,
@@ -5075,15 +5291,29 @@ pub(crate) async fn provision_vm(
     let memory_mb = default_memory_mb(body.memory_mb);
     let disk_gb = default_disk_gb(body.disk_gb);
     let backend = normalize_backend(&body.backend).to_string();
+    let used_disk_total_gb = state
+        .vms
+        .values()
+        .fold(0u32, |acc, vm| acc.saturating_add(vm.disk_gb));
+    let disk_limit_gb = vm_disk_total_limit_by_role(&ctx.role);
+    let requested_total_gb = used_disk_total_gb.saturating_add(disk_gb);
+    if requested_total_gb > disk_limit_gb {
+        return HttpResponse::TooManyRequests().body(format!(
+            "vm disk quota exceeded: used={}GB request={}GB limit={}GB",
+            used_disk_total_gb, disk_gb, disk_limit_gb
+        ));
+    }
 
     let disk_dir = vm_disk_dir(&ctx.managed_root_dir);
     if let Err(e) = fs::create_dir_all(&disk_dir) {
         return HttpResponse::InternalServerError().body(format!("create vm disk dir failed: {e}"));
     }
     let disk_path = disk_dir.join(format!("{name}.qcow2"));
-    let disk_create_message = match create_disk_image(&disk_path, disk_gb) {
+    let disk_create_message = match create_disk_image(&disk_path, disk_gb, &ctx.managed_root_dir) {
         Ok(v) => v,
-        Err(e) => return HttpResponse::InternalServerError().body(format!("create disk failed: {e}")),
+        Err(e) => {
+            return HttpResponse::InternalServerError().body(format!("create disk failed: {e}"))
+        }
     };
 
     let now = now_unix();
@@ -5185,22 +5415,27 @@ pub(crate) async fn start_vm(
         "qemu" => {
             let ssh_port = vm.ssh_port.or_else(allocate_local_port).unwrap_or(2222);
             match start_qemu_process(&ctx.managed_root_dir, vm, ssh_port) {
-            Ok((pid, m)) => {
-                vm.process_id = Some(pid);
-                vm.power_state = "running".to_string();
-                vm.ssh_port = Some(ssh_port);
-                (true, m)
-            }
-            Err(e) => {
-                vm.process_id = None;
-                vm.power_state = "stopped".to_string();
-                vm.last_message = e.clone();
-                append_vm_log(&ctx.managed_root_dir, &vm.name, &format!("start failed: {e}"));
-                if let Err(se) = save_vm_state(&ctx.managed_root_dir, &state) {
-                    return HttpResponse::InternalServerError().body(format!("save vm state failed: {se}"));
+                Ok((pid, m)) => {
+                    vm.process_id = Some(pid);
+                    vm.power_state = "running".to_string();
+                    vm.ssh_port = Some(ssh_port);
+                    (true, m)
                 }
-                return HttpResponse::InternalServerError().body(e);
-            }
+                Err(e) => {
+                    vm.process_id = None;
+                    vm.power_state = "stopped".to_string();
+                    vm.last_message = e.clone();
+                    append_vm_log(
+                        &ctx.managed_root_dir,
+                        &vm.name,
+                        &format!("start failed: {e}"),
+                    );
+                    if let Err(se) = save_vm_state(&ctx.managed_root_dir, &state) {
+                        return HttpResponse::InternalServerError()
+                            .body(format!("save vm state failed: {se}"));
+                    }
+                    return HttpResponse::InternalServerError().body(e);
+                }
             }
         }
         "libvirt" => (
@@ -5209,13 +5444,18 @@ pub(crate) async fn start_vm(
         ),
         _ => (
             false,
-            "metadata-only start completed; hypervisor execution not enabled for this backend".to_string(),
+            "metadata-only start completed; hypervisor execution not enabled for this backend"
+                .to_string(),
         ),
     };
 
     vm.updated_at_unix = now_unix();
     vm.last_message = msg.clone();
-    append_vm_log(&ctx.managed_root_dir, &vm.name, &format!("start result: {msg}"));
+    append_vm_log(
+        &ctx.managed_root_dir,
+        &vm.name,
+        &format!("start result: {msg}"),
+    );
     let snapshot = vm.clone();
     if let Err(e) = save_vm_state(&ctx.managed_root_dir, &state) {
         return HttpResponse::InternalServerError().body(format!("save vm state failed: {e}"));
@@ -5223,7 +5463,11 @@ pub(crate) async fn start_vm(
     drop(_guard);
     if effective {
         let running_limit = vm_exec_running_limit_by_role(&ctx.managed_root_dir, &ctx.role);
-        let _ = dispatch_vm_exec_workers(&ctx.managed_root_dir, data.projects_lock.clone(), running_limit);
+        let _ = dispatch_vm_exec_workers(
+            &ctx.managed_root_dir,
+            data.projects_lock.clone(),
+            running_limit,
+        );
     }
     HttpResponse::Ok().json(VmActionResponse {
         ok: true,
@@ -5265,9 +5509,14 @@ pub(crate) async fn stop_vm(
             }
             Err(e) => {
                 vm.last_message = e.clone();
-                append_vm_log(&ctx.managed_root_dir, &vm.name, &format!("stop failed: {e}"));
+                append_vm_log(
+                    &ctx.managed_root_dir,
+                    &vm.name,
+                    &format!("stop failed: {e}"),
+                );
                 if let Err(se) = save_vm_state(&ctx.managed_root_dir, &state) {
-                    return HttpResponse::InternalServerError().body(format!("save vm state failed: {se}"));
+                    return HttpResponse::InternalServerError()
+                        .body(format!("save vm state failed: {se}"));
                 }
                 return HttpResponse::InternalServerError().body(e);
             }
@@ -5278,13 +5527,18 @@ pub(crate) async fn stop_vm(
         ),
         _ => (
             false,
-            "metadata-only stop completed; hypervisor execution not enabled for this backend".to_string(),
+            "metadata-only stop completed; hypervisor execution not enabled for this backend"
+                .to_string(),
         ),
     };
 
     vm.updated_at_unix = now_unix();
     vm.last_message = msg.clone();
-    append_vm_log(&ctx.managed_root_dir, &vm.name, &format!("stop result: {msg}"));
+    append_vm_log(
+        &ctx.managed_root_dir,
+        &vm.name,
+        &format!("stop result: {msg}"),
+    );
     let snapshot = vm.clone();
     if let Err(e) = save_vm_state(&ctx.managed_root_dir, &state) {
         return HttpResponse::InternalServerError().body(format!("save vm state failed: {e}"));
@@ -5349,8 +5603,8 @@ pub(crate) async fn delete_vm(
 
 #[cfg(test)]
 mod tests {
-    use actix_web::{http::header, web, App};
     use actix_web::test as awtest;
+    use actix_web::{http::header, web, App};
     use crossbeam_channel::unbounded;
     use serde_json::json;
     use std::collections::VecDeque;
@@ -5360,19 +5614,19 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
-        archive_completed_self_debug_runs, collect_self_debug_runs, default_cpu, default_disk_gb,
-        default_memory_mb, enforce_self_debug_run_timeout, ensure_queue_capacity, is_queue_active_status,
-        is_running_task_hard_timed_out, load_exec_queue, normalize_backend, now_unix,
-        priority_aging_boost, queue_has_active_duplicate, queue_item_from_values,
+        append_dispatch_trace_entry, append_vm_audit_event, archive_completed_self_debug_runs,
+        build_vm_ops_summary, collect_self_debug_runs, default_cpu, default_disk_gb,
+        default_memory_mb, enforce_self_debug_run_timeout, ensure_queue_capacity,
+        is_queue_active_status, is_running_task_hard_timed_out, load_dispatch_trace,
+        load_exec_queue, load_vm_audit_events, load_vm_policy_config, load_vm_state,
+        normalize_backend, now_unix, priority_aging_boost, queue_has_active_duplicate,
+        queue_item_from_values, queue_watchdog_recovery_stats,
         recover_stale_running_tasks_in_queue, sanitize_self_debug_run_id, sanitize_vm_name,
-        save_exec_queue, save_vm_state, load_vm_state, select_dispatch_vm_candidates_with_score, load_dispatch_trace,
-        append_dispatch_trace_entry, scan_vm_health_locked, VM_DISPATCH_TRACE_MAX_ENTRIES,
-        load_vm_policy_config, save_vm_policy_config,
-        strategy_priority_boost_by_stats, queue_watchdog_recovery_stats, build_vm_ops_summary,
-        append_vm_audit_event, load_vm_audit_events, VM_AUDIT_MAX_ENTRIES,
-        trim_history_entries, vm_instance_limit_by_role, vm_queue_limit_by_role,
-        vm_running_limit_by_role, vm_exec_running_limit_by_role,
-        VmSelfDebugHistoryEntry,
+        save_exec_queue, save_vm_policy_config, save_vm_state, scan_vm_health_locked,
+        select_dispatch_vm_candidates_with_score, strategy_priority_boost_by_stats,
+        trim_history_entries, vm_exec_running_limit_by_role, vm_instance_limit_by_role,
+        vm_queue_limit_by_role, vm_running_limit_by_role, VmSelfDebugHistoryEntry,
+        VM_AUDIT_MAX_ENTRIES, VM_DISPATCH_TRACE_MAX_ENTRIES,
     };
 
     #[test]
@@ -5394,10 +5648,11 @@ mod tests {
     fn vm_resource_defaults_are_bounded() {
         assert_eq!(default_cpu(0), 2);
         assert_eq!(default_memory_mb(0), 4096);
-        assert_eq!(default_disk_gb(0), 40);
+        assert_eq!(default_disk_gb(0), 1);
         assert_eq!(default_cpu(100), 32);
         assert_eq!(default_memory_mb(999_999), 262_144);
-        assert_eq!(default_disk_gb(9), 10);
+        assert_eq!(default_disk_gb(1), 1);
+        assert_eq!(default_disk_gb(99), 64);
     }
 
     #[test]
@@ -5448,8 +5703,7 @@ mod tests {
             trigger.status = "failed".to_string();
             items.push(trigger);
 
-            let mut verify =
-                queue_item_from_values("bash scripts/run_tests.sh", 30, 0, 0, 0);
+            let mut verify = queue_item_from_values("bash scripts/run_tests.sh", 30, 0, 0, 0);
             verify.run_kind = "self_debug_verify_after_strategy".to_string();
             verify.trigger_task_id = format!("t-{i}");
             verify.status = if i == 4 {
@@ -5470,8 +5724,7 @@ mod tests {
             trigger.status = "failed".to_string();
             small.push(trigger);
 
-            let mut verify =
-                queue_item_from_values("bash scripts/run_tests.sh", 30, 0, 0, 0);
+            let mut verify = queue_item_from_values("bash scripts/run_tests.sh", 30, 0, 0, 0);
             verify.run_kind = "self_debug_verify_after_strategy".to_string();
             verify.trigger_task_id = format!("s-{i}");
             verify.status = "done".to_string();
@@ -5519,7 +5772,8 @@ mod tests {
 
         let mut items = vec![done, pending];
         let mut history = Vec::new();
-        let (runs, removed_tasks) = archive_completed_self_debug_runs(&mut items, &mut history, 200);
+        let (runs, removed_tasks) =
+            archive_completed_self_debug_runs(&mut items, &mut history, 200);
         assert_eq!(runs, 1);
         assert_eq!(removed_tasks, 1);
         assert_eq!(history.len(), 1);
@@ -5605,7 +5859,8 @@ mod tests {
 
         let mut items = vec![failed];
         let mut history = Vec::new();
-        let (runs, removed_tasks) = archive_completed_self_debug_runs(&mut items, &mut history, 300);
+        let (runs, removed_tasks) =
+            archive_completed_self_debug_runs(&mut items, &mut history, 300);
         assert_eq!(runs, 1);
         assert_eq!(removed_tasks, 1);
         assert_eq!(history.len(), 1);
@@ -5737,11 +5992,12 @@ mod tests {
         c.created_at_unix = now.saturating_sub(1);
         save_exec_queue(&managed_root, "vm-c", &[c]).expect("save queue c");
 
-        let top2: Vec<String> = select_dispatch_vm_candidates_with_score(&managed_root, &state_store, now)
-            .into_iter()
-            .take(2)
-            .map(|x| x.vm_name)
-            .collect();
+        let top2: Vec<String> =
+            select_dispatch_vm_candidates_with_score(&managed_root, &state_store, now)
+                .into_iter()
+                .take(2)
+                .map(|x| x.vm_name)
+                .collect();
         assert_eq!(top2, vec!["vm-c".to_string(), "vm-b".to_string()]);
     }
 
@@ -5795,11 +6051,12 @@ mod tests {
         low.created_at_unix = now.saturating_sub(16 * 60);
         save_exec_queue(&managed_root, "vm-old-low", &[low]).expect("save queue low");
 
-        let top: Vec<String> = select_dispatch_vm_candidates_with_score(&managed_root, &state_store, now)
-            .into_iter()
-            .take(1)
-            .map(|x| x.vm_name)
-            .collect();
+        let top: Vec<String> =
+            select_dispatch_vm_candidates_with_score(&managed_root, &state_store, now)
+                .into_iter()
+                .take(1)
+                .map(|x| x.vm_name)
+                .collect();
         assert_eq!(top, vec!["vm-old-low".to_string()]);
     }
 
@@ -6094,9 +6351,7 @@ mod tests {
                 crate::auth::types::LoginOption::PasswordOnly,
             )
             .expect("create user");
-        let session = auth
-            .create_session_for_user(&user)
-            .expect("create session");
+        let session = auth.create_session_for_user(&user).expect("create session");
 
         let mut state_store = crate::web_ui_models::VmStateStore::default();
         let now = now_unix();
@@ -6136,9 +6391,18 @@ mod tests {
         let app = awtest::init_service(
             App::new()
                 .app_data(web::Data::new(app_state))
-                .route("/vm/self_debug/start", web::post().to(super::start_vm_self_debug_plan))
-                .route("/vm/self_debug/context", web::get().to(super::get_vm_self_debug_context))
-                .route("/vm/self_debug/history", web::get().to(super::list_vm_self_debug_history))
+                .route(
+                    "/vm/self_debug/start",
+                    web::post().to(super::start_vm_self_debug_plan),
+                )
+                .route(
+                    "/vm/self_debug/context",
+                    web::get().to(super::get_vm_self_debug_context),
+                )
+                .route(
+                    "/vm/self_debug/history",
+                    web::get().to(super::list_vm_self_debug_history),
+                )
                 .route(
                     "/vm/self_debug/history/detail",
                     web::get().to(super::get_vm_self_debug_history_detail),
