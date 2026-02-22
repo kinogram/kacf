@@ -2,6 +2,8 @@
     'use strict';
 
     let COPY = {};
+    let settingsDirty = false;
+    let suppressDirtyTracking = false;
     function txt(k, fb) {
         const v = COPY && typeof COPY === 'object' ? COPY[k] : null;
         return typeof v === 'string' ? v : (fb || '');
@@ -32,6 +34,62 @@
         if (!el) return;
         el.textContent = msg || '';
         el.style.color = isErr ? '#8a1f17' : '';
+    }
+
+    function setSettingsDirty(v) {
+        settingsDirty = !!v;
+    }
+
+    function bindDirtyTracking() {
+        const ids = [
+            'admin_toggle_login',
+            'admin_toggle_registration',
+            'admin_toggle_guest',
+            'admin_toggle_non_admin_login',
+            'admin_toggle_email_dev_mode',
+            'admin_email_ttl_secs',
+            'admin_email_cooldown_secs',
+            'admin_email_issue_per_min',
+            'admin_email_verify_per_min',
+            'admin_toggle_email_domain_allowlist_enabled',
+            'admin_email_domain_allowlist',
+            'admin_toggle_smtp_enabled',
+            'admin_toggle_smtp_starttls',
+            'admin_smtp_host',
+            'admin_smtp_port',
+            'admin_smtp_username',
+            'admin_smtp_password',
+            'admin_smtp_from',
+        ];
+        ids.forEach((id) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            const onMutate = () => {
+                if (suppressDirtyTracking) return;
+                setSettingsDirty(true);
+            };
+            el.addEventListener('input', onMutate);
+            el.addEventListener('change', onMutate);
+        });
+    }
+
+    function bindLeaveGuard() {
+        window.addEventListener('beforeunload', (e) => {
+            if (!settingsDirty) return;
+            const msg = txt('admin_unsaved_leave_confirm', 'You have unsaved changes. Leave without saving?');
+            e.preventDefault();
+            e.returnValue = msg;
+        });
+        const backBtn = document.getElementById('admin_back_btn');
+        if (backBtn) {
+            backBtn.addEventListener('click', (e) => {
+                if (!settingsDirty) return;
+                const ok = confirm(txt('admin_unsaved_leave_confirm', 'You have unsaved changes. Leave without saving?'));
+                if (!ok) {
+                    e.preventDefault();
+                }
+            });
+        }
     }
 
     async function getJson(url) {
@@ -157,6 +215,7 @@
 
     async function refreshAll() {
         const s = await getJson('/admin/api/settings');
+        suppressDirtyTracking = true;
         if (s.ok && s.data) {
             document.getElementById('admin_toggle_login').checked = !!s.data.login_enabled;
             document.getElementById('admin_toggle_registration').checked = !!s.data.registration_enabled;
@@ -179,6 +238,8 @@
             document.getElementById('admin_smtp_password').value = String(s.data.smtp_password || '');
             document.getElementById('admin_smtp_from').value = String(s.data.smtp_from || 'noreply@localhost');
         }
+        suppressDirtyTracking = false;
+        setSettingsDirty(false);
         const u = await getJson('/admin/api/users');
         if (u.ok && Array.isArray(u.data)) {
             renderUsers(u.data);
@@ -254,6 +315,8 @@
             location.href = '/';
             return;
         }
+        bindDirtyTracking();
+        bindLeaveGuard();
 
         document.getElementById('admin_logout_btn').addEventListener('click', async () => {
             await postJson('/auth/logout', {});
@@ -290,6 +353,7 @@
                 showHint('admin_settings_hint', r.text || `HTTP ${r.status}`, true);
             } else {
                 showHint('admin_settings_hint', txt('status_saved', 'Saved.'), false);
+                setSettingsDirty(false);
             }
         });
 

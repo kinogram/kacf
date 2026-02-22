@@ -653,5 +653,6 @@
   "status_vm_health_scan_done": "健康扫描完成：问题={issues} 动作={actions}",
   "label_admin_toggle_email_domain_allowlist_enabled": "启用邮箱域名白名单",
   "label_admin_email_domain_allowlist": "允许注册邮箱域名（每行一个）",
-  "ph_admin_email_domain_allowlist": "gmail.com\noutlook.com\nqq.com"
+  "ph_admin_email_domain_allowlist": "gmail.com\noutlook.com\nqq.com",
+  "admin_unsaved_leave_confirm": "你有未保存的修改，确认不保存就离开吗？"
 }
