@@ -19,3 +19,6 @@ actix-web = { version = "4", features = ["macros"] }
 clap = { version = "4.3", features = ["derive"] }
 async-stream = "0.3"
 rand = "0.8"
+
+[dev-dependencies]
+tempfile = "3"

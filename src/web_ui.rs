@@ -44,8 +44,10 @@ use crate::web_ui_vm;
 const INDEX_HTML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/index.html"));
 const DIFF_HTML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/diff.html"));
 const APP_CSS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/app.css"));
-const DIFF_JS: &str =
-    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/js/diff_view.js"));
+const DIFF_JS: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/static/js/diff_view.js"
+));
 const APP_JS: &str = concat!(
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -82,10 +84,7 @@ const APP_JS: &str = concat!(
         "/static/js/app_runtime_sync.js"
     )),
     "\n",
-    include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/static/js/app_vm.js"
-    )),
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/js/app_vm.js")),
     "\n",
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -280,6 +279,15 @@ pub(crate) fn start_from_payload(
         }
     }
     let workspace_full = require_managed_workspace_for_root(&payload.workspace, managed_root_dir)?;
+    let effective_goal = if resume_from_checkpoint {
+        payload.goal.clone()
+    } else {
+        match crate::starter_bootstrap::bootstrap_workspace_for_goal(&workspace_full, &payload.goal)
+        {
+            Some(extra) => format!("{}\n{}", payload.goal, extra),
+            None => payload.goal.clone(),
+        }
+    };
     web_ui_runtime_env::apply_runtime_config_envs(
         global_history_max_messages,
         global_history_max_chars,
@@ -292,7 +300,7 @@ pub(crate) fn start_from_payload(
         unattended_mode: payload.unattended_mode,
         resume_from_checkpoint,
         workspace: workspace_full.clone(),
-        goal: payload.goal.clone(),
+        goal: effective_goal,
         git_user_name: payload.git_user_name,
         git_user_email: payload.git_user_email,
     };
@@ -917,17 +925,41 @@ pub async fn run_web_server(
             .route("/diff_data", web::get().to(diff_data))
             .route("/vm/status", web::get().to(web_ui_vm::get_vm_status))
             .route("/vm/logs", web::get().to(web_ui_vm::get_vm_logs))
-            .route("/vm/snapshot/list", web::get().to(web_ui_vm::list_vm_snapshots))
-            .route("/vm/snapshot/create", web::post().to(web_ui_vm::create_vm_snapshot))
-            .route("/vm/snapshot/apply", web::post().to(web_ui_vm::apply_vm_snapshot))
-            .route("/vm/snapshot/delete", web::post().to(web_ui_vm::delete_vm_snapshot))
-            .route("/vm/clone", web::post().to(web_ui_vm::clone_vm_from_snapshot))
+            .route(
+                "/vm/snapshot/list",
+                web::get().to(web_ui_vm::list_vm_snapshots),
+            )
+            .route(
+                "/vm/snapshot/create",
+                web::post().to(web_ui_vm::create_vm_snapshot),
+            )
+            .route(
+                "/vm/snapshot/apply",
+                web::post().to(web_ui_vm::apply_vm_snapshot),
+            )
+            .route(
+                "/vm/snapshot/delete",
+                web::post().to(web_ui_vm::delete_vm_snapshot),
+            )
+            .route(
+                "/vm/clone",
+                web::post().to(web_ui_vm::clone_vm_from_snapshot),
+            )
             .route("/vm/exec", web::post().to(web_ui_vm::exec_in_vm))
             .route("/vm/exec/cancel", web::post().to(web_ui_vm::cancel_vm_exec))
             .route("/vm/bootstrap", web::post().to(web_ui_vm::bootstrap_vm))
-            .route("/vm/exec/queue", web::get().to(web_ui_vm::list_vm_exec_queue))
-            .route("/vm/exec/queue/stats", web::get().to(web_ui_vm::vm_exec_queue_stats))
-            .route("/vm/exec/profiles", web::get().to(web_ui_vm::list_vm_exec_profiles))
+            .route(
+                "/vm/exec/queue",
+                web::get().to(web_ui_vm::list_vm_exec_queue),
+            )
+            .route(
+                "/vm/exec/queue/stats",
+                web::get().to(web_ui_vm::vm_exec_queue_stats),
+            )
+            .route(
+                "/vm/exec/profiles",
+                web::get().to(web_ui_vm::list_vm_exec_profiles),
+            )
             .route(
                 "/vm/exec/profile/detail",
                 web::get().to(web_ui_vm::get_vm_exec_profile_detail),
@@ -944,7 +976,10 @@ pub async fn run_web_server(
                 "/vm/exec/profiles/delete",
                 web::post().to(web_ui_vm::delete_vm_exec_custom_profile),
             )
-            .route("/vm/exec/enqueue", web::post().to(web_ui_vm::enqueue_vm_exec))
+            .route(
+                "/vm/exec/enqueue",
+                web::post().to(web_ui_vm::enqueue_vm_exec),
+            )
             .route(
                 "/vm/exec/enqueue_batch",
                 web::post().to(web_ui_vm::enqueue_vm_exec_batch),
@@ -1013,16 +1048,37 @@ pub async fn run_web_server(
                 "/vm/self_debug/resume",
                 web::post().to(web_ui_vm::resume_vm_self_debug_run),
             )
-            .route("/vm/exec/queue/cancel", web::post().to(web_ui_vm::cancel_vm_exec_task))
-            .route("/vm/exec/queue/run_next", web::post().to(web_ui_vm::run_next_vm_exec))
-            .route("/vm/exec/dispatch", web::post().to(web_ui_vm::dispatch_vm_exec))
-            .route("/vm/exec/dispatch/trace", web::get().to(web_ui_vm::get_vm_exec_dispatch_trace))
+            .route(
+                "/vm/exec/queue/cancel",
+                web::post().to(web_ui_vm::cancel_vm_exec_task),
+            )
+            .route(
+                "/vm/exec/queue/run_next",
+                web::post().to(web_ui_vm::run_next_vm_exec),
+            )
+            .route(
+                "/vm/exec/dispatch",
+                web::post().to(web_ui_vm::dispatch_vm_exec),
+            )
+            .route(
+                "/vm/exec/dispatch/trace",
+                web::get().to(web_ui_vm::get_vm_exec_dispatch_trace),
+            )
             .route("/vm/health/scan", web::post().to(web_ui_vm::scan_vm_health))
             .route("/vm/policy", web::get().to(web_ui_vm::get_vm_policy))
             .route("/vm/policy", web::post().to(web_ui_vm::save_vm_policy))
-            .route("/vm/ops/summary", web::get().to(web_ui_vm::get_vm_ops_summary))
-            .route("/vm/ops/fault_inject", web::post().to(web_ui_vm::inject_vm_ops_fault))
-            .route("/vm/audit/events", web::get().to(web_ui_vm::get_vm_audit_events))
+            .route(
+                "/vm/ops/summary",
+                web::get().to(web_ui_vm::get_vm_ops_summary),
+            )
+            .route(
+                "/vm/ops/fault_inject",
+                web::post().to(web_ui_vm::inject_vm_ops_fault),
+            )
+            .route(
+                "/vm/audit/events",
+                web::get().to(web_ui_vm::get_vm_audit_events),
+            )
             .route("/vm/ready", web::get().to(web_ui_vm::check_vm_ready))
             .route("/vm/provision", web::post().to(web_ui_vm::provision_vm))
             .route("/vm/start", web::post().to(web_ui_vm::start_vm))
