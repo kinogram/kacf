@@ -147,7 +147,6 @@ function renderAccountMenu() {
             menu.addEventListener('click', (e) => e.stopPropagation());
         }
     }
-    if (topAdminBtn) topAdminBtn.onclick = null;
 }
 
 async function ensureAuthForApp() {
