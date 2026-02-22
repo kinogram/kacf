@@ -263,6 +263,14 @@ pub(crate) fn start_from_payload(
     global_history_max_chars: &str,
     resume_from_checkpoint: bool,
 ) -> Result<(), String> {
+    fn default_base_url() -> String {
+        "https://api.deepseek.com".to_string()
+    }
+
+    fn default_model() -> String {
+        "deepseek-reasoner".to_string()
+    }
+
     fn sanitize_identity_name(raw: &str) -> String {
         let v = raw.trim();
         if v.is_empty() {
@@ -282,7 +290,17 @@ pub(crate) fn start_from_payload(
     // Clear any previous stop request so the new run can proceed.
     data.stop_now
         .store(false, std::sync::atomic::Ordering::Relaxed);
-    if payload.api_key.trim().is_empty() {
+    let api_key = if payload.api_key.trim().is_empty() {
+        std::env::var("DEEPSEEK_API_KEY")
+            .ok()
+            .or_else(|| std::env::var("OPENAI_API_KEY").ok())
+            .unwrap_or_default()
+            .trim()
+            .to_string()
+    } else {
+        payload.api_key.trim().to_string()
+    };
+    if api_key.is_empty() {
         return Err("api_key is empty".to_string());
     }
     {
@@ -303,14 +321,24 @@ pub(crate) fn start_from_payload(
         payload.git_user_email.trim().to_string()
     };
     let workspace_full = require_managed_workspace_for_root(&payload.workspace, managed_root_dir)?;
+    let base_url = if payload.base_url.trim().is_empty() {
+        default_base_url()
+    } else {
+        payload.base_url.trim().to_string()
+    };
+    let model = if payload.model.trim().is_empty() {
+        default_model()
+    } else {
+        payload.model.trim().to_string()
+    };
     web_ui_runtime_env::apply_runtime_config_envs(
         global_history_max_messages,
         global_history_max_chars,
     );
     let req = AgentRequest::Start {
-        api_key: payload.api_key,
-        base_url: payload.base_url,
-        model: payload.model,
+        api_key,
+        base_url,
+        model,
         language: payload.language,
         unattended_mode: payload.unattended_mode,
         resume_from_checkpoint,

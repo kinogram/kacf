@@ -200,10 +200,6 @@ async function startSession() {
     if (!body) {
         return;
     }
-    if (!body.api_key) {
-        setStatus(txt('status_start_api_key_empty', ''), 'status-danger');
-        return;
-    }
     if (stopAfterMinutesSetting() === 0) {
         const proceed = window.confirm(txt('warn_stop_timer_disabled', ''));
         if (!proceed) return;
