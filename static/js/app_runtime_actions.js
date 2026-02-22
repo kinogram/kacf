@@ -6,14 +6,12 @@ function assertRuntimeActionDependencies() {
             'txt',
             'fmt',
             'isReadOnlyView',
-            'goToRunningProjectView',
             'currentLogBucket',
             'viewLogBucket',
             'setRunActionButtons',
             'setRunningProjectIndicator',
             'setProjectControlsDisabled',
             'applyReadOnlyMode',
-            'updateGoRunningProjectButton',
             'autoFillProjectNameFromGoal',
             'applySharedConfigToInputs',
             'initLanguagePack',
@@ -58,7 +56,6 @@ function assertRuntimeActionDependencies() {
 	        ],
         projects: [
             'ensureWorkspaceForCurrentProject',
-            'saveCurrentProject',
             'refreshProjectsFromServer',
             'renderProjectSelector',
             'loadSelectedProject',
@@ -107,14 +104,12 @@ const {
     txt,
     fmt,
     isReadOnlyView,
-    goToRunningProjectView,
     currentLogBucket,
     viewLogBucket,
     setRunActionButtons,
     setRunningProjectIndicator,
     setProjectControlsDisabled,
     applyReadOnlyMode,
-    updateGoRunningProjectButton,
     autoFillProjectNameFromGoal,
     applySharedConfigToInputs,
     initLanguagePack,
@@ -469,7 +464,6 @@ function bindEvents() {
     document.getElementById('start_btn').addEventListener('click', startSession);
     document.getElementById('resume_btn').addEventListener('click', resumeSession);
     document.getElementById('stop_btn').addEventListener('click', stopSession);
-    document.getElementById('go_running_project_btn').addEventListener('click', goToRunningProjectView);
     document.getElementById('revert_btn').addEventListener('click', revertLast);
     document.getElementById('push_btn').addEventListener('click', pushRemote);
     document.getElementById('clarify_submit_btn').addEventListener('click', submitClarify);
@@ -493,8 +487,6 @@ function bindEvents() {
         }
     });
     document.getElementById('project_new_btn').addEventListener('click', createNewProject);
-    document.getElementById('project_save_btn').addEventListener('click', () => { saveCurrentProject(); });
-    document.getElementById('project_load_btn').addEventListener('click', loadSelectedProject);
     document.getElementById('project_delete_btn').addEventListener('click', () => { deleteSelectedProject(); });
     document.getElementById('project_selector').addEventListener('change', syncProjectNameFromSelection);
     document.getElementById('project_search').addEventListener('input', () => {
@@ -585,12 +577,9 @@ function applyNoviceUi(me, isGuest) {
     setHiddenById('advanced_unattended_section', false);
     setHiddenById('label_project_name', true);
     setHiddenById('project_name', true);
-    setHiddenById('project_save_btn', true);
-    setHiddenById('project_load_btn', true);
     setHiddenById('project_delete_btn', true);
     setHiddenById('open_global_config_btn', true);
     setHiddenById('resume_btn', true);
-    setHiddenById('go_running_project_btn', true);
     setHiddenById('revert_btn', true);
     setHiddenById('push_btn', true);
     setHiddenById('hint_run_new_round', true);
@@ -752,7 +741,6 @@ async function init() {
     setRunningProjectIndicator(txt('running_project_none', ''));
     setProjectControlsDisabled(false);
     applyReadOnlyMode();
-    updateGoRunningProjectButton();
     setRunActionButtons(false);
     document.getElementById('revert_btn').disabled = true;
     setRunState('idle', txt('run_idle', ''));
