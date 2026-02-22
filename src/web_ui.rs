@@ -29,8 +29,8 @@ use crate::web_ui_models;
 pub(crate) use crate::web_ui_models::{
     GlobalOptions, HealthResponse, LanguageListResponse, MetricsResponse, ProjectConfig,
     ProjectConfigQuery, PushPayload, ResumeInfo, ResumeMeta, ResumePayload, RuntimeStatus,
-    SharedConfig, SlugSuggestPayload, SlugSuggestResponse, StartPayload, StarterPreviewPayload,
-    StarterPreviewResponse, UiCachePatch, UiCachePayload, UiStateResponse, WebProject,
+    SharedConfig, SlugSuggestPayload, SlugSuggestResponse, StartPayload, UiCachePatch,
+    UiCachePayload, UiStateResponse, WebProject,
 };
 use crate::web_ui_projects;
 use crate::web_ui_runtime_env;
@@ -539,12 +539,6 @@ async fn suggest_project_slug(body: web::Json<SlugSuggestPayload>) -> impl Respo
     })
 }
 
-async fn preview_starter(body: web::Json<StarterPreviewPayload>) -> impl Responder {
-    let payload = body.into_inner();
-    let resp: StarterPreviewResponse = crate::starter_bootstrap::preview_for_goal(&payload.goal);
-    HttpResponse::Ok().json(resp)
-}
-
 async fn health() -> impl Responder {
     HttpResponse::Ok().json(HealthResponse {
         ok: true,
@@ -925,7 +919,6 @@ pub async fn run_web_server(
                 "/projects/suggest_slug",
                 web::post().to(suggest_project_slug),
             )
-            .route("/projects/starter/preview", web::post().to(preview_starter))
             .route("/ui_cache", web::get().to(get_ui_cache))
             .route("/ui_cache", web::put().to(put_ui_cache))
             .route("/ui_state", web::get().to(web_ui_session::get_ui_state))

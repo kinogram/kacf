@@ -148,25 +148,6 @@ fn select_blueprint(goal: &str) -> StarterBlueprint {
     }
 }
 
-pub(crate) fn preview_for_goal(goal: &str) -> crate::web_ui_models::StarterPreviewResponse {
-    let picked = select_blueprint(goal);
-    let repos = picked
-        .repos
-        .iter()
-        .map(|r| crate::web_ui_models::StarterRepoPreview {
-            name: r.name.to_string(),
-            url: r.url.to_string(),
-            quickstart: r.quickstart.join(" && "),
-            notes: r.notes.to_string(),
-        })
-        .collect::<Vec<_>>();
-    crate::web_ui_models::StarterPreviewResponse {
-        scene: picked.scene.to_string(),
-        reason: picked.reason.to_string(),
-        repos,
-    }
-}
-
 fn has_any(text: &str, keys: &[&str]) -> bool {
     keys.iter().any(|k| text.contains(k))
 }
@@ -281,7 +262,7 @@ pub(crate) fn bootstrap_workspace_for_goal(workspace: &Path, goal: &str) -> Opti
 
 #[cfg(test)]
 mod tests {
-    use super::{bootstrap_workspace_for_goal, preview_for_goal, select_blueprint};
+    use super::{bootstrap_workspace_for_goal, select_blueprint};
 
     #[test]
     fn blueprint_selects_ecommerce() {
@@ -298,13 +279,5 @@ mod tests {
         assert!(inject.is_some());
         let text = inject.unwrap_or_default();
         assert!(text.contains("[SMART_STARTER]"));
-    }
-
-    #[test]
-    fn preview_contains_repos() {
-        let resp = preview_for_goal("做一个客服聊天系统");
-        assert_eq!(resp.scene, "沟通/社区类产品");
-        assert!(!resp.repos.is_empty());
-        assert!(resp.repos[0].url.starts_with("https://github.com/"));
     }
 }
