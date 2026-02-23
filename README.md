@@ -1,101 +1,92 @@
 # KACF (Kinogram AutoCoding Framework)
 
-> 开发者是初三学生，一人团队，备战中考之余趁过年见缝插针开发此项目，觉得不错的话给个Star支持下呗😆非常感谢🙏🏻
+Language: **English (Default)** | [简体中文-母语](README.zh-CN.md)
 
-> 由于开发者实在太忙了，以下~~部分~~是AI写的
+## English
 
-> 使用自定义许可证禁止无授权商用是因为看到太多做的很好的开源软件被某些人拿去卖钱，希望至少不要发生在自己的项目身上😔
+KACF is an AI autonomous coding framework for real-world development.
+You describe the goal, and the system runs a closed loop:
 
-KACF 是一个面向真实开发场景的 AI 自动编程框架：你只需要描述目标，系统就会自动完成“写代码 -> 跑测试 -> 分析失败 -> 修复 -> 再验证”的闭环迭代。
+`write code -> run tests/evals -> analyze failures -> fix -> verify`
 
-对新手用户，KACF 的目标是：
+Current project mode: **Web UI**.
 
-- 真正零基础可上手：不要求你有编程经验。
-- 无需手写大量代码：通过自然语言目标驱动开发流程。
-- 持续自我迭代：系统在失败后自动修复并继续推进，直到收敛或你主动停止。
+### Why KACF
 
-当前项目为 **Web UI 模式**。
+- Autonomous coding loop: model outputs patch, system applies and advances
+- Autonomous evaluation loop: scripted checks prevent “generate-only” workflows
+- Unattended execution: auto-iteration, auto-recovery, boundary-safe stop
+- Project workflow: per-project save/load/delete with isolated data
+- Strong observability: SSE logs + metrics + health + debug logs
+- Language pack system with strict startup validation
 
-## 为什么 KACF 强
+### Multi-user capabilities (`multi-user` branch)
 
-- 自动编码闭环：模型输出补丁，系统自动应用并推进工程。
-- 自动评测闭环：固定评测脚本驱动迭代，避免“只生成不验证”。
-- 无人值守能力：支持自动迭代、自动恢复、轮次边界安全停止。
-- 项目化工作流：多项目保存/加载/删除，按项目独立管理数据。
-- 可观测性强：SSE 实时日志 + 指标 + 健康检查 + 调试日志接口。
-- 语言包体系完整：前端文案统一语言包管理，启动时严格校验。
+- Roles: `Admin / User / Guest`
+- Guest mode: no registration; globally read-only, backend operations blocked
+- Admin panel:
+  - create/delete users
+  - ban/unban users
+  - force notices
+  - reset user password (cleartext management by design requirement)
+  - view audit logs
+- Account center:
+  - update nickname/password/username/email
+  - switch login methods (password, email verification, etc.)
+- Data isolation: per-user `ui_cache/projects/workspaces`
+- Session auth: `kacf_session` cookie-based sessions
 
-## 强大、完备的用户管理器（多用户版）
+If you deploy for multiple people, use `multi-user`.
 
-KACF 多用户版（`multi-user` 分支）提供完整用户管理能力：
+### Branches
 
-- 三类角色：`Admin / User / Guest`
-- 访客模式：无需注册即可进入，但全局只读、后端操作禁用
-- 管理员面板：
-  - 用户创建/删除
-  - 封禁/解封
-  - 强提醒下发
-  - 直接重置用户密码（按需求明文管理）
-  - 审计日志查看
-- 账户中心：
-  - 修改昵称、密码、用户名、邮箱
-  - 登录方式切换（密码、邮箱验证码等）
-- 数据隔离：按用户独立 `ui_cache/projects/workspaces` 存储
-- 认证会话：基于 `kacf_session` Cookie 的会话管理
+- `personal`: single-user, lightweight
+- `multi-user`: complete account + admin system
 
-> 如果你要部署给多人使用，请使用 `multi-user` 分支。
+### Quick start
 
-## 分支说明
+Requirements:
+- Rust (stable recommended)
+- Linux/macOS (Windows is possible, validate dependencies yourself)
+- Available model API key
 
-- `personal`：单用户版，轻量、专注个人使用。
-- `multi-user`：多用户版，包含完整账户体系与管理员能力。
-
-## 快速开始
-
-### 1. 环境要求
-
-- Rust（建议 stable）
-- Linux/macOS（Windows 可运行，但请自行验证依赖）
-- 可用的模型 API Key
-
-### 2. 构建与启动
+Build and run:
 
 ```bash
 cargo build --release
 cargo run --release
 ```
 
-默认访问：`http://localhost:8080`
+Default URL: `http://localhost:8080`
 
-### 3. 基本使用流程
+Basic flow:
+1. Open Web UI and enter goal
+2. Click "Run Current Project"
+3. System iterates automatically (code/eval/fix/retry)
+4. Optionally enable unattended, auto-recovery, stop timer
 
-1. 打开 Web UI，填写目标需求（Goal）
-2. 点击“运行当前项目”
-3. 观察系统自动进行：编码、评测、失败修复、持续迭代
-4. 需要时可启用无人值守、自动恢复、停止计时
+### Key capabilities in detail
 
-## 关键能力细节
+#### Self-iteration and unattended mode
 
-### 自我迭代与无人值守
+- First round can ask for clarification; later rounds iterate by patching
+- On failure, auto-recovery can resume according to global policy
+- When stop-time is reached, execution stops safely at a round boundary
 
-- 首轮可澄清，后续以补丁迭代为主
-- 失败后按全局设置自动恢复并继续推进
-- 到达“运行停止时间”后在轮次边界安全停止
+#### Project and workspace management
 
-### 项目与工作区管理
+- UI is project-centric: create/save/load/delete/switch
+- Each project has an isolated workspace to avoid cross-project pollution
+- State and config can be restored after browser refresh
 
-- 交互以“项目”为中心：保存/加载/删除/切换
-- 每项目独立 workspace，避免相互污染
-- 刷新页面后状态与配置可恢复
+#### Observability and runtime stability
 
-### 可观测性与稳定性
+- Live logs via SSE with polling fallback
+- Runtime metrics (including readiness/gate)
+- Frontend offline lock + read-only protections against accidental ops
+- UI buffering/truncation strategy to reduce long-session lag
 
-- 日志流 + SSE 断线回退轮询
-- 运行态指标（含 readiness/gate）
-- 前端离线锁与只读保护，避免误操作
-- UI 缓冲与裁剪策略，降低长会话卡顿风险
-
-## 目录结构（简）
+### Directory layout (short)
 
 ```text
 .
@@ -109,34 +100,34 @@ cargo run --release
 └── autocoding_data/
 ```
 
-## 常用命令
+### Common commands
 
 ```bash
-# 运行测试
+# tests
 bash scripts/run_tests.sh
 
-# 发布检查
+# release checks
 bash scripts/release_check.sh
 
-# 指标门禁
+# metrics gate
 bash scripts/metrics_gate.sh
 
-# VM 压测与故障注入（需要先获取 kacf_session）
+# VM stress/fault-injection (requires kacf_session)
 KACF_BASE_URL=http://127.0.0.1:8080 \
 KACF_SESSION=<your_session_cookie_value> \
 bash scripts/vm_ops_stress.sh --vm <vm_name> --rounds 10 --inject 50 --age 180
 ```
 
-## 许可证
+### License
 
-本项目使用仓库中的自定义许可证：
+Custom license in repo:
+- `LICENSE` (KACF Personal & Non-Commercial License 1.1, bilingual)
 
-- `LICENSE`（KACF Personal & Non-Commercial License 1.1，中英双语）
+Summary:
+- Free for personal/non-commercial use and non-commercial derivative work
+- Non-commercial redistribution allowed with license + attribution
+- Any commercial use or commercial derivative work requires written permission
 
-简述：
+Commercial license contact: `gregsons334@gmail.com`
 
-- 允许免费个人/非商业使用与非商业二次开发
-- 允许非商业再分发，但必须保留协议并标注来源
-- 任何商业用途或商业二次开发必须先取得作者书面同意
 
-商业授权联系：`gregsons334@gmail.com`
