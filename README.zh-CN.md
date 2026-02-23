@@ -2,6 +2,20 @@
 
 语言： [English (Default)](README.md) | **简体中文-母语**
 
+## 停止维护公告（PERSONAL）
+
+> [!WARNING]
+> `personal` 分支已进入停止维护状态。
+> 后续不再在此分支持续更新新功能。
+> 新部署、问题修复、日常使用请统一迁移到 `multi-user` 分支。
+>
+> 立即切换：
+> ```bash
+> git fetch origin
+> git checkout multi-user
+> ```
+> GitHub 用户请直接把分支切换为 `multi-user`。
+
 
 这是当前工作区对应代码的 README。
 文档只描述当前代码已实现行为，不推测其他分支或历史版本。

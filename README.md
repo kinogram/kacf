@@ -2,6 +2,20 @@
 
 Language: **English (Default)** | [简体中文-母语](README.zh-CN.md)
 
+## STOP MAINTENANCE NOTICE (PERSONAL)
+
+> [!WARNING]
+> The `personal` branch is in maintenance-stop state.
+> No active feature updates are planned here.
+> Use `multi-user` for all new setups, fixes, and ongoing usage.
+>
+> Migrate now:
+> ```bash
+> git fetch origin
+> git checkout multi-user
+> ```
+> GitHub users: switch branch selector to `multi-user`.
+
 ## English
 
 This README documents the behavior of the **current code in this workspace only**.
@@ -146,5 +160,3 @@ If any rule fails, service startup is rejected.
 Custom license in repo: `LICENSE` (KACF Personal & Non-Commercial License 1.1).
 
 Commercial license contact: `gregsons334@gmail.com`
-
-
