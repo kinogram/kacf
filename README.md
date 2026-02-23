@@ -2,123 +2,91 @@
 
 Language: **English (Default)** | [简体中文-母语](README.zh-CN.md)
 
-## English
+KACF is an AI coding app for real-world projects.
+You describe what you want in plain language, and KACF runs an automatic loop:
 
-KACF is an AI autonomous coding framework for real-world development.
-You describe the goal, and the system runs a closed loop:
+`plan -> write code -> test -> fix -> repeat`
 
-`write code -> run tests/evals -> analyze failures -> fix -> verify`
+Current mode: **Web UI**.
 
-Current project mode: **Web UI**.
-
-### Why KACF
-
-- Autonomous coding loop: model outputs patch, system applies and advances
-- Autonomous evaluation loop: scripted checks prevent “generate-only” workflows
-- Unattended execution: auto-iteration, auto-recovery, boundary-safe stop
-- Project workflow: per-project save/load/delete with isolated data
-- Strong observability: SSE logs + metrics + health + debug logs
-- Language pack system with strict startup validation
-
-### Multi-user capabilities (`multi-user` branch)
-
-- Roles: `Admin / User / Guest`
-- Guest mode: no registration; globally read-only, backend operations blocked
-- Admin panel:
-  - create/delete users
-  - ban/unban users
-  - force notices
-  - reset user password (cleartext management by design requirement)
-  - view audit logs
-- Account center:
-  - update nickname/password/username/email
-  - switch login methods (password, email verification, etc.)
-- Data isolation: per-user `ui_cache/projects/workspaces`
-- Session auth: `kacf_session` cookie-based sessions
-
-If you deploy for multiple people, use `multi-user`.
-
-### Branches
+## Choose your branch
 
 - `personal`: single-user, lightweight
-- `multi-user`: complete account + admin system
+- `multi-user`: account system + admin panel (recommended when multiple people use one deployment)
 
-### Quick start
+## Quick start (Beginner-friendly)
 
-Requirements:
-- Rust (stable recommended)
-- Linux/macOS (Windows is possible, validate dependencies yourself)
-- Available model API key
+### 1) Download and run
 
-Build and run:
+Run KACF in a terminal (do not double-click the file).
+
+Example:
 
 ```bash
-cargo build --release
+cd Downloads
+./kacf-multi-user-v1.1.0-linux-amd64
+# or
+./kacf-multi-user-v1.1.0-linux-arm64
+# or
+./kacf-multi-user-v1.1.0-windows-amd64.exe
+```
+
+You can also run from source code:
+
+```bash
 cargo run --release
 ```
 
-Default URL: `http://localhost:8080`
+### 2) Open the page
 
-Basic flow:
-1. Open Web UI and enter goal
-2. Click "Run Current Project"
-3. System iterates automatically (code/eval/fix/retry)
-4. Optionally enable unattended, auto-recovery, stop timer
+Open this URL in your browser:
 
-### Key capabilities in detail
+`http://localhost:8080`
 
-#### Self-iteration and unattended mode
+### 3) First-time setup
 
-- First round can ask for clarification; later rounds iterate by patching
-- On failure, auto-recovery can resume according to global policy
-- When stop-time is reached, execution stops safely at a round boundary
+- Create the admin account first
+- Then users can register/login
+- By default, registration only accepts mainstream email providers
 
-#### Project and workspace management
+### 4) Start building
 
-- UI is project-centric: create/save/load/delete/switch
-- Each project has an isolated workspace to avoid cross-project pollution
-- State and config can be restored after browser refresh
+- Create a project in the UI
+- Describe your goal in normal language
+- Click run, then let KACF iterate automatically
 
-#### Observability and runtime stability
+## Important before running
 
-- Live logs via SSE with polling fallback
-- Runtime metrics (including readiness/gate)
-- Frontend offline lock + read-only protections against accidental ops
-- UI buffering/truncation strategy to reduce long-session lag
+- Always run KACF in a terminal, not by double-clicking the binary.
+- If you already double-clicked it, kill the old process first, or you may get a port conflict.
+- At startup, terminal output may appear a bit later; the service can already be listening.
+- If the terminal does not exit with an error, open `http://localhost:8080` directly.
+- To stop KACF, press `Ctrl-C` in the same terminal.
 
-### Directory layout (short)
+## What you get in `multi-user`
 
-```text
-.
-├── src/
-├── static/
-│   ├── index.html
-│   ├── app.css
-│   ├── js/
-│   └── languages/
-├── scripts/
-└── autocoding_data/
-```
+- Roles: `Admin / User / Guest`
+- Guest mode: read-only browsing without registration
+- Admin panel: manage users, bans, notices, password reset, audit logs
+- Account center: update nickname/password/username/email, switch login method
+- Data isolation: per-user `ui_cache/projects/workspaces`
 
-### Common commands
+## Troubleshooting (simple)
 
-```bash
-# tests
-bash scripts/run_tests.sh
+- Cannot open the page:
+  - Confirm the process is still running in terminal
+  - Confirm you are visiting `http://localhost:8080`
+- "Port already in use":
+  - Another process is already using `8080`; stop it, then start KACF again
+- Opened by double-click and now broken:
+  - Kill old process, then start from terminal again
 
-# release checks
-bash scripts/release_check.sh
+## For advanced users
 
-# metrics gate
-bash scripts/metrics_gate.sh
+Useful scripts still exist in `scripts/` (tests, release checks, metrics gate, VM stress).
+If you are new, you can ignore them safely.
 
-# VM stress/fault-injection (requires kacf_session)
-KACF_BASE_URL=http://127.0.0.1:8080 \
-KACF_SESSION=<your_session_cookie_value> \
-bash scripts/vm_ops_stress.sh --vm <vm_name> --rounds 10 --inject 50 --age 180
-```
-
-### License
+## License
 
 Custom license in repo:
 - `LICENSE` (KACF Personal & Non-Commercial License 1.1, bilingual)
@@ -129,5 +97,3 @@ Summary:
 - Any commercial use or commercial derivative work requires written permission
 
 Commercial license contact: `gregsons334@gmail.com`
-
-
