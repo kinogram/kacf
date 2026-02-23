@@ -1,66 +1,68 @@
 # KACF (Kinogram AutoCoding Framework)
 
-这是当前工作区对应代码的 README。
-文档只描述当前代码已实现行为，不推测其他分支或历史版本。
+Language: **English (Default)** | [简体中文-母语](README.zh-CN.md)
 
-## 项目定位
+## English
 
-KACF 是一个 Web UI 驱动的自动编程框架：
-输入目标后，系统执行「生成补丁 -> 应用补丁 -> 运行评测 -> 根据结果继续迭代」的闭环。
+This README documents the behavior of the **current code in this workspace only**.
 
-当前代码特征（以本工作区为准）：
-- 单二进制启动（后端 + Web UI）
-- 项目化工作流（新建/切换/删除）
-- 自动保存与断点恢复
-- 无人值守运行（自动恢复次数、停止时间）
-- SSE 实时事件流 + 轮询回退
-- Diff 独立页面展示（主页面不渲染大 diff）
+### What KACF is
 
-## 快速开始
+KACF is a Web-UI-driven autonomous coding framework. You provide a goal, and it runs an iterative loop:
 
-### 环境要求
+`generate patch -> apply patch -> run evaluation -> continue iteration`
 
+Current workspace traits:
+- Single binary startup (backend + Web UI)
+- Project workflow (create/switch/delete)
+- Autosave + resume from checkpoint
+- Unattended mode (auto-recovery count, stop time)
+- SSE real-time events with polling fallback
+- Diff in a dedicated page (not rendered inline in main page)
+
+### Quick start
+
+Requirements:
 - Rust stable
-- Linux/macOS（Windows 需自行验证）
-- 可用模型 API Key（默认是 DeepSeek 兼容配置）
+- Linux/macOS (Windows requires your own validation)
+- Model API key (DeepSeek-compatible by default)
 
-### 启动
+Run:
 
 ```bash
 cargo run
 ```
 
-默认监听：`0.0.0.0:8080`
+Default bind: `0.0.0.0:8080`
 
-指定端口：
+Custom port:
 
 ```bash
 AUTOCODING_PORT=18080 cargo run
 ```
 
-### Release 运行
+Release run:
 
 ```bash
 cargo build --release
 ./target/release/kacf
 ```
 
-## 使用流程（当前 UI）
+### Current UI flow
 
-1. 输入目标需求（Goal）
-2. 点击“运行当前项目”
-3. 查看状态与日志
-4. 需要时“从断点恢复”
-5. 在全局配置中调整语言、自动恢复次数、停止时间、日志上限
+1. Enter your goal
+2. Click "Run Current Project"
+3. Check status and logs
+4. Resume from checkpoint when needed
+5. Tune language / auto-recovery / stop time / log limit in global settings
 
-说明：
-- 项目配置以自动保存为主。
-- Diff 使用“查看diff ↗”在新标签页打开。
+Notes:
+- Project config is primarily autosaved
+- Diff opens in a new tab via "View Diff ↗"
 
-## 主要接口
+### Main endpoints
 
-### 页面与静态资源
-
+Pages and static:
 - `GET /`
 - `GET /diff`
 - `GET /assets/app.css`
@@ -69,8 +71,7 @@ cargo build --release
 - `GET /assets/languages/list`
 - `GET /assets/languages/{code}.json`
 
-### 运行控制
-
+Run control:
 - `POST /start`
 - `POST /resume`
 - `POST /stop`
@@ -78,8 +79,7 @@ cargo build --release
 - `POST /revert`
 - `POST /push`
 
-### 项目与状态
-
+Project and state:
 - `GET /projects`
 - `POST /projects`
 - `DELETE /projects/{id}`
@@ -90,8 +90,7 @@ cargo build --release
 - `PUT /ui_cache`
 - `GET /diff_data`
 
-### 可观测性
-
+Observability:
 - `GET /health`
 - `GET /metrics`
 - `GET /events`
@@ -99,7 +98,7 @@ cargo build --release
 - `POST /debug/client_logs`
 - `GET /debug/client_logs`
 
-## 目录结构
+### Directory layout
 
 ```text
 .
@@ -118,7 +117,7 @@ cargo build --release
 └── LICENSE
 ```
 
-## 开发检查
+### Dev checks
 
 ```bash
 cargo check
@@ -126,24 +125,26 @@ cargo test
 cargo clippy --all-targets -- -D warnings
 ```
 
-发布检查：
+Release check:
 
 ```bash
 bash scripts/release_check.sh
 ```
 
-## 语言包规则
+### Language-pack rules
 
-启动时会严格校验 `static/languages`：
-- 文件名格式：`KACF_<language_code>_<pack_version>.json`
-- 必须包含 `__meta`
-- `language_code`、`pack_version`、`inputer_version` 与程序要求一致
-- 全部语言包 key 集合必须和 `en` 完全一致
+At startup, `static/languages` is strictly validated:
+- Filename format: `KACF_<language_code>_<pack_version>.json`
+- Must include `__meta`
+- `language_code`, `pack_version`, `inputer_version` must match program requirements
+- Key sets across all packs must exactly match `en`
 
-任一项不满足，服务会拒绝启动。
+If any rule fails, service startup is rejected.
 
-## 许可证
+### License
 
-使用仓库中的自定义许可证：`LICENSE`（KACF Personal & Non-Commercial License 1.1）。
+Custom license in repo: `LICENSE` (KACF Personal & Non-Commercial License 1.1).
 
-商业授权联系：`gregsons334@gmail.com`
+Commercial license contact: `gregsons334@gmail.com`
+
+
